@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+
+# Environment variables & secrets (TRD §13.7)
+.env
+.env.local
+
+# Node / Frontend
+web/node_modules/
+web/dist/
+
+# Artifacts & Local Volumes (TRD §5.1)
+artifacts/
+downloads/
+inbound/
+logs/
+
+# Ground Truth Data (Wajib disembunyikan dari pipeline - TRD §11.3)
+generator/ground_truth/
+
+# IDE
+.vscode/
+.idea/
+*.swp
