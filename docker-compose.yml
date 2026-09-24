@@ -1,0 +1,54 @@
+﻿version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: vteki_db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_password_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-vteki_intelligence}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: vteki_api
+    depends_on:
+      - db
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./artifacts:/artifacts
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: vteki_worker
+    depends_on:
+      - db
+    env_file:
+      - .env
+    volumes:
+      - ./artifacts:/artifacts
+      - ./inbound:/inbound
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: vteki_web
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
