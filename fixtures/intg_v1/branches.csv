@@ -1,0 +1,21 @@
+branch_code,branch_name,city,region,active_flag
+BR-01,VTEKI Yogyakarta 1,Yogyakarta,DI Yogyakarta,True
+BR-02,VTEKI Sleman 2,Sleman,DI Yogyakarta,True
+BR-03,VTEKI Bantul 3,Bantul,DI Yogyakarta,True
+BR-04,VTEKI Kulon Progo 4,Kulon Progo,DI Yogyakarta,True
+BR-05,VTEKI Gunungkidul 5,Gunungkidul,DI Yogyakarta,True
+BR-06,VTEKI Magelang 1,Magelang,Jawa Tengah,True
+BR-07,VTEKI Klaten 2,Klaten,Jawa Tengah,True
+BR-08,VTEKI Solo 3,Solo,Jawa Tengah,True
+BR-09,VTEKI Semarang 4,Semarang,Jawa Tengah,True
+BR-10,VTEKI Purworejo 5,Purworejo,Jawa Tengah,True
+BR-11,VTEKI Surabaya 1,Surabaya,Jawa Timur,True
+BR-12,VTEKI Malang 2,Malang,Jawa Timur,True
+BR-13,VTEKI Kediri 3,Kediri,Jawa Timur,True
+BR-14,VTEKI Madiun 4,Madiun,Jawa Timur,True
+BR-15,VTEKI Jember 5,Jember,Jawa Timur,True
+BR-16,VTEKI Bandung 1,Bandung,Jawa Barat,True
+BR-17,VTEKI Bogor 2,Bogor,Jawa Barat,True
+BR-18,VTEKI Depok 3,Depok,Jawa Barat,True
+BR-19,VTEKI Bekasi 4,Bekasi,Jawa Barat,True
+BR-20,VTEKI Cirebon 5,Cirebon,Jawa Barat,True

@@ -5,25 +5,41 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+*.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
 
 # Environment variables & secrets (TRD §13.7)
 .env
 .env.local
+.env.*.local
+*.pem
+*.key
 
 # Node / Frontend
 web/node_modules/
 web/dist/
+.npm/
 
 # Artifacts & Local Volumes (TRD §5.1)
 artifacts/
 downloads/
 inbound/
 logs/
+*.log
 
 # Ground Truth Data (Wajib disembunyikan dari pipeline - TRD §11.3)
 generator/ground_truth/
 
-# IDE
+# Local Database & Temporary Files
+*.sqlite3
+*.db
+tmp/
+
+# OS & IDE
 .vscode/
 .idea/
 *.swp
+.DS_Store
+Thumbs.db

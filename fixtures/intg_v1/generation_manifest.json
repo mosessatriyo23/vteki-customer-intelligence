@@ -1,0 +1,46 @@
+{
+  "checksums_sha256": {
+    "app_events.csv": "7c93bd118f46a48bd515e15b64b583feb3c07b65704cb22ea214c36c7fdea889",
+    "branches.csv": "bc428413113712da95e771d6b365a2198bed5895370b5fea7eaa81a4f1eba1f4",
+    "catalogue_items.csv": "1516034f1f2d237948adec79fa276cb3d900aca56c06af75dadca63adf606207",
+    "consent_events.csv": "6b488011ef5826d67b3ee908baa76665cf3b6c2b787eb5fe38b0d1d004f0d235",
+    "crm_customers.csv": "3cfb6c58906e5d50c673f99ecc8fba880acc11d1545cd8a6ea93e3bbf71f5c19",
+    "service_cases.csv": "85041f6fb43b1f75985835d591093bd261fce0297b1b7157c93be3fb89a2407d",
+    "transaction_items.csv": "132b7992c2f347dc2aea64281be7b4437009bfbf38b0daae9d852f6a0a3aac4b",
+    "transactions.csv": "8d2a06499c9f7b8cf24219fa6b67db430617b0fccd6215b6da49f09e04c6f0b8"
+  },
+  "duplicate_source_records": 440,
+  "generated_at": "2026-09-29T12:12:07+00:00",
+  "generator": "vteki-synthetic-data",
+  "golden_customers": 2000,
+  "ground_truth_checksums_sha256": {
+    "customer_latent_trajectories.csv": "5d298e3cebaa75327427f53cba56515f2c9d930dd59a56b915be7907bfea1ffd",
+    "identity_mapping.csv": "ad7be6f6e262fe07e3d22d4d9077c1be9669b41bb5be71b47ccd9559bec103b0",
+    "injected_campaign_effects.json": "a18968c0bc75a851dbbdb1244a06639fc060dc37bf7e115a90bf4c75d2db3fe1"
+  },
+  "ground_truth_dir": "/mnt/d/projects/vteki-customer-intelligence/generator/ground_truth/fixtures",
+  "output_dir": "/mnt/d/projects/vteki-customer-intelligence/fixtures/intg_v1",
+  "seed": 20260906,
+  "trajectory_distribution": {
+    "DECLINING": 350,
+    "DORMANT": 281,
+    "LOYAL_STABLE": 484,
+    "NEW": 271,
+    "ONE_TIME": 346,
+    "SEASONAL": 268
+  },
+  "transaction_period": {
+    "from": "2025-03-30",
+    "to": "2026-09-29"
+  },
+  "volumes": {
+    "app_events": 2979,
+    "branches": 20,
+    "catalogue_items": 160,
+    "consent_events": 9760,
+    "crm_customers": 2440,
+    "service_cases": 75,
+    "transaction_items": 85603,
+    "transactions": 34201
+  }
+}
