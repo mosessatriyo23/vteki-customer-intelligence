@@ -9,6 +9,7 @@ venv/
 .coverage
 htmlcov/
 .mypy_cache/
+.schemathesis/
 
 # Environment variables & secrets (TRD §13.7)
 .env

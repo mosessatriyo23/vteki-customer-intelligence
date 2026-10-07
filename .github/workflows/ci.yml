@@ -1,0 +1,106 @@
+name: CI/CD Pipeline & Governance Enforcement
+
+on:
+  push:
+    branches: [ main, master, dev ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  quality-security-contract:
+    name: Code Quality, T-SEC-03 Allowlist & Schemathesis Contract Testing
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vteki_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vteki_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
+      JWT_SECRET: ci-pipeline-test-jwt-secret-key-32bytes-minimum
+      BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: ci-pipeline-admin-password-26
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run Ruff Linter
+        run: |
+          ruff check .
+
+      - name: Run Type Checking (mypy)
+        run: mypy services api worker --ignore-missing-imports
+
+      - name: Verify Python Formatting
+        run: black --check api worker migrations tests/security/test_auth.py tests/worker
+
+      - name: Enforce T-SEC-03 Security Allowlist
+        run: |
+          pytest tests/security/test_allowlist.py -v
+
+      - name: Run Unit & Integration Test Suite
+        env:
+          JWT_SECRET: "ci-pipeline-test-jwt-secret-key-32bytes-minimum"
+          DATABASE_URL: "sqlite://"
+        run: |
+          pytest -v
+
+      - name: Apply PostgreSQL Migrations
+        run: alembic upgrade head
+
+      - name: Bootstrap CI Administrator
+        run: python -m api.bootstrap
+
+      - name: Run Schemathesis API Contract Testing
+        env:
+          JWT_SECRET: "ci-pipeline-test-jwt-secret-key-32bytes-minimum"
+          DATABASE_URL: "postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci"
+        run: |
+          uvicorn api.main:app --host 127.0.0.1 --port 8000 > /tmp/vteki-api.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail http://127.0.0.1:8000/health; then break; fi
+            sleep 1
+          done
+          token=$(python -c "import jwt, time; print(jwt.encode({'sub':'1','roles':['admin'],'iat':int(time.time()),'exp':int(time.time())+600}, '${JWT_SECRET}', algorithm='HS256'))")
+          st run http://127.0.0.1:8000/openapi.json --checks all --max-examples 10 --max-time 30 -H "Authorization: Bearer $token"
+
+  frontend-production-build:
+    name: React / Vite Production Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build

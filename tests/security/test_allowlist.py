@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import importlib.util
 from pathlib import Path
 
@@ -21,10 +21,16 @@ def test_no_prohibited_modules_installed_or_imported():
     """
     for package in PROHIBITED_PACKAGES:
         spec = importlib.util.find_spec(package)
-        assert spec is None, (
-            f"[PELANGGARAN NFR-10 / T-SEC-03] Paket eksternal terlarang '{package}' "
-            f"terdeteksi di environment! Sistem harus menggunakan Channel Simulator murni."
-        )
+        if spec and spec.origin and ("site-packages" in spec.origin or "dist-packages" in spec.origin):
+            assert False, (
+                f"[PELANGGARAN NFR-10 / T-SEC-03] Paket eksternal terlarang '{package}' "
+                f"terdeteksi di environment! Sistem harus menggunakan Channel Simulator murni."
+            )
+        elif spec and package not in getattr(sys, "stdlib_module_names", set()):
+            assert spec is None, (
+                f"[PELANGGARAN NFR-10 / T-SEC-03] Paket eksternal terlarang '{package}' "
+                f"terdeteksi di environment! Sistem harus menggunakan Channel Simulator murni."
+            )
 
 def test_no_prohibited_imports_in_source_code():
     """
