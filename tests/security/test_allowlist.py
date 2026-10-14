@@ -16,12 +16,24 @@ except ModuleNotFoundError:  # Python < 3.11
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE_DIRS = ("services", "api", "worker", "generator", "migrations")
 PROHIBITED_DISTRIBUTIONS = {
-    "smtplib", "twilio", "sendgrid", "mailgun", "boto3", "telebot",
-    "python-telegram-bot", "slack-sdk",
+    "smtplib",
+    "twilio",
+    "sendgrid",
+    "mailgun",
+    "boto3",
+    "telebot",
+    "python-telegram-bot",
+    "slack-sdk",
 }
 PROHIBITED_MODULES = {
-    "smtplib", "twilio", "sendgrid", "mailgun", "boto3", "telebot",
-    "telegram", "slack_sdk",
+    "smtplib",
+    "twilio",
+    "sendgrid",
+    "mailgun",
+    "boto3",
+    "telebot",
+    "telegram",
+    "slack_sdk",
 }
 
 
@@ -31,13 +43,18 @@ def distribution_name(requirement):
 
 
 def prohibited_requirements(requirements, location):
-    return [f"{location}: {requirement}" for requirement in requirements
-            if distribution_name(requirement) in PROHIBITED_DISTRIBUTIONS]
+    return [
+        f"{location}: {requirement}"
+        for requirement in requirements
+        if distribution_name(requirement) in PROHIBITED_DISTRIBUTIONS
+    ]
 
 
 def _project_files(pattern):
     for path in ROOT.rglob(pattern):
-        if not any(part in {".git", ".venv", "venv", "node_modules"} for part in path.parts):
+        if not any(
+            part in {".git", ".venv", "venv", "node_modules"} for part in path.parts
+        ):
             yield path
 
 
@@ -46,18 +63,30 @@ def test_no_prohibited_dependencies_declared():
     violations = []
     for path in _project_files("requirements*.txt"):
         lines = path.read_text(encoding="utf-8").splitlines()
-        violations.extend(prohibited_requirements(
-            (line for line in lines if line.strip() and not line.lstrip().startswith(("#", "-"))),
-            path.relative_to(ROOT),
-        ))
+        violations.extend(
+            prohibited_requirements(
+                (
+                    line
+                    for line in lines
+                    if line.strip() and not line.lstrip().startswith(("#", "-"))
+                ),
+                path.relative_to(ROOT),
+            )
+        )
     for path in _project_files("pyproject.toml"):
         if tomllib is None:
-            violations.append(f"{path.relative_to(ROOT)}: requires tomllib/tomli for review")
+            violations.append(
+                f"{path.relative_to(ROOT)}: requires tomllib/tomli for review"
+            )
             continue
         data = tomllib.loads(path.read_text(encoding="utf-8"))
         project = data.get("project", {})
         requirements = list(project.get("dependencies", []))
-        requirements += [item for group in project.get("optional-dependencies", {}).values() for item in group]
+        requirements += [
+            item
+            for group in project.get("optional-dependencies", {}).values()
+            for item in group
+        ]
         requirements += data.get("build-system", {}).get("requires", [])
         for group in data.get("dependency-groups", {}).values():
             requirements += [item for item in group if isinstance(item, str)]
@@ -65,19 +94,37 @@ def test_no_prohibited_dependencies_declared():
         for tool in ("poetry", "pdm"):
             section = data.get("tool", {}).get(tool, {})
             for key in ("dependencies", "dev-dependencies"):
-                violations.extend(prohibited_requirements(section.get(key, {}), path.relative_to(ROOT)))
+                violations.extend(
+                    prohibited_requirements(
+                        section.get(key, {}), path.relative_to(ROOT)
+                    )
+                )
             for group in section.get("group", {}).values():
-                violations.extend(prohibited_requirements(group.get("dependencies", {}), path.relative_to(ROOT)))
+                violations.extend(
+                    prohibited_requirements(
+                        group.get("dependencies", {}), path.relative_to(ROOT)
+                    )
+                )
     for path in _project_files("setup.cfg"):
         config = configparser.ConfigParser()
         config.read(path, encoding="utf-8")
         for section in config.sections():
             if section in ("options", "options.extras_require"):
                 for key, value in config[section].items():
-                    if section == "options" and key not in {"install_requires", "setup_requires", "tests_require"}:
+                    if section == "options" and key not in {
+                        "install_requires",
+                        "setup_requires",
+                        "tests_require",
+                    }:
                         continue
-                    violations.extend(prohibited_requirements(value.splitlines(), path.relative_to(ROOT)))
-    assert not violations, "[NFR-10 / T-SEC-03] Forbidden project dependencies:\n" + "\n".join(violations)
+                    violations.extend(
+                        prohibited_requirements(
+                            value.splitlines(), path.relative_to(ROOT)
+                        )
+                    )
+    assert not violations, (
+        "[NFR-10 / T-SEC-03] Forbidden project dependencies:\n" + "\n".join(violations)
+    )
 
 
 def test_no_prohibited_imports_in_source_code():
@@ -95,5 +142,9 @@ def test_no_prohibited_imports_in_source_code():
                     continue
                 for module in modules:
                     if module.split(".")[0] in PROHIBITED_MODULES:
-                        violations.append(f"{path.relative_to(ROOT)}:{node.lineno}: {module}")
-    assert not violations, "[NFR-10 / T-SEC-03] Forbidden source imports:\n" + "\n".join(violations)
+                        violations.append(
+                            f"{path.relative_to(ROOT)}:{node.lineno}: {module}"
+                        )
+    assert not violations, (
+        "[NFR-10 / T-SEC-03] Forbidden source imports:\n" + "\n".join(violations)
+    )
