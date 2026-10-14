@@ -79,7 +79,7 @@ jobs:
         run: |
           uvicorn api.main:app --host 127.0.0.1 --port 8000 > /tmp/vteki-api.log 2>&1 &
           SERVER_PID=$!
-          trap 'kill $SERVER_PID' EXIT
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== FASTAPI ERROR LOGS ==="; if [ -f /tmp/vteki-api.log ]; then tail -n 300 /tmp/vteki-api.log; else echo "API log not found"; fi; fi; kill "$SERVER_PID" 2>/dev/null || true; exit "$rc"' EXIT
           for attempt in $(seq 1 30); do
             if curl --fail http://127.0.0.1:8000/health; then break; fi
             sleep 1
