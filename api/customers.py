@@ -38,9 +38,9 @@ class CustomerCreate(BaseModel):
 
 @router.get("", response_model=list[CustomerResponse])
 def list_customers(
-    q: str | None = None,
-    segment: str | None = None,
-    churn_risk: str | None = None,
+    q: str | None = Query(default=None, pattern=r"^[^\x00]*$"),
+    segment: str | None = Query(default=None, pattern=r"^[^\x00]*$"),
+    churn_risk: str | None = Query(default=None, pattern=r"^[^\x00]*$"),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     _: User = Depends(

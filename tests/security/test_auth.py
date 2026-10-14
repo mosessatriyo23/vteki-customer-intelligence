@@ -517,3 +517,44 @@ def test_schemathesis_regressions_round2(client):
         json=payload,
     )
     assert invalid_id.status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("url", "params"),
+    [
+        ("/customers", {"q": "A\x00B"}),
+        ("/customers", {"segment": "VIP\x00X"}),
+        ("/customers", {"churn_risk": "Low\x00X"}),
+        ("/audit/events", {"method": "GET\x00"}),
+        ("/audit/trace/abc%00def", None),
+        ("/audit/decision-trace/abc%00def", None),
+        ("/governance/reconstruct/abc%00def", None),
+    ],
+)
+def test_postgresql_nul_bytes_rejected_before_database(client, url, params):
+    token = token_for(client, "admin@example.com")
+    response = client.get(
+        url, params=params, headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 422
+    assert isinstance(response.json()["detail"], list)
+
+
+def test_customer_search_still_accepts_normal_text(client):
+    token = token_for(client, "admin@example.com")
+    response = client.get(
+        "/customers",
+        params={"q": "Budi", "segment": "Enterprise VIP", "churn_risk": "Low"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    schema = client.get("/openapi.json").json()
+    fields = schema["paths"]["/customers"]["get"]["parameters"]
+    assert all(
+        "pattern"
+        in next(
+            part for part in item["schema"]["anyOf"] if part.get("type") == "string"
+        )
+        for item in fields
+        if item["name"] in {"q", "segment", "churn_risk"}
+    )

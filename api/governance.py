@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -362,7 +362,7 @@ def get_observed_vs_incremental(
     "/reconstruct/{correlation_id}", response_model=DecisionReconstructionResponse
 )
 def reconstruct_decision(
-    correlation_id: str,
+    correlation_id: str = Path(pattern=r"^[^\x00]*$"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
 ) -> DecisionReconstructionResponse:

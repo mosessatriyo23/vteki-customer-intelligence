@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -33,7 +33,7 @@ class AuditEventResponse(BaseModel):
 @router.get("/events", response_model=list[AuditEventResponse])
 def list_audit_events(
     limit: int = Query(default=50, ge=1, le=500),
-    method: str | None = None,
+    method: str | None = Query(default=None, pattern=r"^[^\x00]*$"),
     status_code: int | None = Query(default=None, ge=100, le=599),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
@@ -48,7 +48,7 @@ def list_audit_events(
 
 @router.get("/trace/{correlation_id}", response_model=list[AuditEventResponse])
 def trace_correlation(
-    correlation_id: str,
+    correlation_id: str = Path(pattern=r"^[^\x00]*$"),
     limit: int = Query(default=200, ge=1, le=1000),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
@@ -66,7 +66,7 @@ def trace_correlation(
 
 @router.get("/decision-trace/{correlation_id}")
 def trace_decision(
-    correlation_id: str,
+    correlation_id: str = Path(pattern=r"^[^\x00]*$"),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
 ) -> dict:
