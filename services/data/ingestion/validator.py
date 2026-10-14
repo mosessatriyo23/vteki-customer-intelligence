@@ -111,6 +111,8 @@ class BatchValidator:
         try:
             start = datetime.fromisoformat(manifest["observation_period"]["from"])
             end = datetime.fromisoformat(manifest["observation_period"]["to"])
+            if start.utcoffset() != timedelta(hours=7) or end.utcoffset() != timedelta(hours=7) or start > end:
+                raise ValueError("Observation bounds must be ordered and timezone +07:00")
         except (KeyError, TypeError, ValueError) as exc:
             reject("generation_manifest.json", 0, "invalid_observation_period", exc)
             return ValidationReport(False, schema_version, counts, dict(errors), examples)
@@ -314,7 +316,8 @@ class BatchValidator:
                 if previous_expiry and occurred != previous_expiry + timedelta(days=1):
                     reject('membership_events.csv', line, 'membership_chain', customer)
                 previous, previous_expiry = event['event_id'], expiry
-                previous_tier = tiers.index(event['membership_tier'])
+                if event['membership_tier'] in tiers:
+                    previous_tier = tiers.index(event['membership_tier'])
 
     def _validate_visits(self, root: Path, db: sqlite3.Connection, reject: Any) -> None:
         transactions: dict[str, dict[str, str]] = {}
