@@ -17,6 +17,12 @@ NEW_SCHEMAS = ("stg", "source", "identity", "customer360", "segmentation")
 
 
 def upgrade() -> None:
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute(
+            "ALTER TABLE alembic_version "
+            "ALTER COLUMN version_num TYPE VARCHAR(255)"
+        )
+
     bind = op.get_bind()
     is_pg = bind.dialect.name == "postgresql"
 
