@@ -176,13 +176,18 @@ class PersistentIdentityRegistry:
 
             # 5. Populate Review Queue for REVIEW decisions
             if dec["decision"] == "REVIEW":
-                left_golden = replacements.get(
-                    current.get(dec["left_source_id"]),
-                    current.get(dec["left_source_id"]),
+                left_current = current.get(dec["left_source_id"])
+                right_current = current.get(dec["right_source_id"])
+
+                left_golden = (
+                    replacements.get(left_current, left_current)
+                    if left_current is not None
+                    else None
                 )
-                right_golden = replacements.get(
-                    current.get(dec["right_source_id"]),
-                    current.get(dec["right_source_id"]),
+                right_golden = (
+                    replacements.get(right_current, right_current)
+                    if right_current is not None
+                    else None
                 )
 
                 stmt = select(ReviewQueueItem).where(

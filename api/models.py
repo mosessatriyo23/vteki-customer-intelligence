@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -556,7 +556,7 @@ class ProfileSnapshot(Base):
     source_batch_id: Mapped[str] = mapped_column(String(64))
     identity_status: Mapped[str] = mapped_column(String(24))
     source_identity_count: Mapped[int] = mapped_column(Integer)
-    first_join_date: Mapped[Date] = mapped_column(Date)
+    first_join_date: Mapped[date] = mapped_column(Date)
     transaction_count: Mapped[int] = mapped_column(Integer, default=0)
     retained_revenue: Mapped[int] = mapped_column(BigInteger, default=0)
     last_transaction_at: Mapped[datetime | None] = mapped_column(

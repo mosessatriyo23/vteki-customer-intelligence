@@ -136,10 +136,10 @@ def resolve(
             }
         )
     mapping = []
-    for indices in groups.values():
-        anchor = min(ids[i] for i in indices)
+    for group_indices in groups.values():
+        anchor = min(ids[i] for i in group_indices)
         golden = str(uuid.uuid5(NAMESPACE, anchor))
-        for i in sorted(indices):
+        for i in sorted(group_indices):
             mapping.append(
                 {
                     "source_customer_id": ids[i],
