@@ -55,6 +55,26 @@ class NegativeIngestionTests(unittest.TestCase):
             self.assertIn('invalid_enum', report.errors)
             self.assertIn('timestamp_outside_window', report.errors)
 
+    def test_membership_chain_and_chronology(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = self.batch(Path(tmp))
+            report = self.mutate(inbound, 'membership_events.csv',
+                                 lambda rows: rows[0].update(expires_at=rows[0]['period_start']))
+            self.assertIn('membership_period', report.errors)
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = self.batch(Path(tmp))
+            report = self.mutate(inbound, 'crm_customers.csv',
+                                 lambda rows: rows[0].update(source_updated_at='2025-03-07T00:00:00+07:00',
+                                                             join_date='2026-09-06'))
+            self.assertIn('update_before_join', report.errors)
+
+    def test_visit_transaction_relationship(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = self.batch(Path(tmp))
+            report = self.mutate(inbound, 'customer_visits.csv',
+                                 lambda rows: rows[0].update(branch_code='BR-99'))
+            self.assertIn('foreign_key', report.errors)
+
     def test_header_mismatch(self):
         with tempfile.TemporaryDirectory() as tmp:
             inbound = self.batch(Path(tmp))
