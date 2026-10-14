@@ -1,2 +1,5 @@
 inbound/
 generator/ground_truth/
+chat.md
+__pycache__/
+*.py[cod]
