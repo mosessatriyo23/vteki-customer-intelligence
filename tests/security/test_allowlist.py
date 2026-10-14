@@ -7,9 +7,9 @@ import re
 
 try:
     import tomllib
-except ModuleNotFoundError:  # Python 3.10
+except ModuleNotFoundError:  # Python < 3.11
     try:
-        import tomli as tomllib
+        import tomli as tomllib  # type: ignore
     except ModuleNotFoundError:
         tomllib = None
 
