@@ -100,7 +100,9 @@ def dashboard(
                 "started_at": item.started_at,
                 "finished_at": item.finished_at,
                 "step_results": item.step_results,
-                "error_summary": item.error_summary if "operator" in actor_roles else None,
+                "error_summary": (
+                    item.error_summary if "operator" in actor_roles else None
+                ),
             }
             for item in pipeline_runs
         ],

@@ -167,7 +167,9 @@ class IdentityReview(Base):
     __table_args__ = {"schema": "core"}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    correlation_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
     customer_code: Mapped[str] = mapped_column(String(32))
     full_name: Mapped[str] = mapped_column(String(128))
     flagged_reason: Mapped[str] = mapped_column(String(256))
