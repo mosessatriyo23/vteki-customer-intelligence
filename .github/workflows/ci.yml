@@ -87,6 +87,15 @@ jobs:
           token=$(python -c "import jwt, time; print(jwt.encode({'sub':'1','roles':['admin'],'iat':int(time.time()),'exp':int(time.time())+600}, '${JWT_SECRET}', algorithm='HS256'))")
           st run http://127.0.0.1:8000/openapi.json --checks all --max-examples 10 --max-time 30 -H "Authorization: Bearer $token"
 
+      - name: Show FastAPI Error Logs
+        if: failure()
+        run: |
+          echo "=== FastAPI Error Logs ==="
+          if [ -f /tmp/vteki-api.log ]; then
+            tail -n 300 /tmp/vteki-api.log
+          else
+            echo "API log file not found"
+          fi
   frontend-production-build:
     name: React / Vite Production Build
     runs-on: ubuntu-latest
