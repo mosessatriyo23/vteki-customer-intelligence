@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -30,6 +30,15 @@ class MeasurementCreate(BaseModel):
     metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
     observed_value: float = Field(strict=True, allow_inf_nan=False)
     incremental_value: float = Field(strict=True, allow_inf_nan=False)
+
+    @field_validator("campaign_id", mode="before")
+    @classmethod
+    def normalize_integral_campaign_id(cls, value: object) -> object:
+        # OpenAPI integer also permits JSON numbers such as 262144.0.
+        # Keep strict validation for booleans, strings and fractions.
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 @router.get("/dashboard")

@@ -509,14 +509,12 @@ def test_schemathesis_regressions_round2(client):
     )
     assert missing.status_code == 404
 
-    # JSON floating-point campaign identifiers violate OpenAPI integer type.
+    # Integral JSON floats match OpenAPI integer; unknown campaign is 404.
     payload["campaign_id"] = 64.0
-    invalid_id = client.post(
-        "/monitoring/measurements",
-        headers=headers,
-        json=payload,
+    missing_integral_id = client.post(
+        "/monitoring/measurements", headers=headers, json=payload
     )
-    assert invalid_id.status_code == 422
+    assert missing_integral_id.status_code == 404
 
 
 @pytest.mark.parametrize(
@@ -558,3 +556,47 @@ def test_customer_search_still_accepts_normal_text(client):
         for item in fields
         if item["name"] in {"q", "segment", "churn_risk"}
     )
+
+
+def test_measurement_integral_float_campaign_id(client):
+    token = token_for(client, "admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    created = client.post(
+        "/campaigns",
+        headers=headers,
+        json={
+            "name": "Integral float test",
+            "target_segment": "Enterprise VIP",
+            "channel": "email_sim",
+            "message_draft": "Testing measurement references",
+        },
+    )
+    assert created.status_code == 201
+    campaign_id = created.json()["id"]
+    payload = {
+        "campaign_id": float(campaign_id),
+        "metric_name": "clicks",
+        "observed_value": 1.0,
+        "incremental_value": 0.5,
+    }
+    accepted = client.post("/monitoring/measurements", headers=headers, json=payload)
+    assert accepted.status_code == 201
+
+    # Preserve the range check, strict boolean rejection, and non-integer rejection.
+    for invalid_id in (True, False, 1.5, "1", 2147483648.0):
+        payload["campaign_id"] = invalid_id
+        rejected = client.post(
+            "/monitoring/measurements", headers=headers, json=payload
+        )
+        assert rejected.status_code == 422, (invalid_id, rejected.text)
+
+    payload["campaign_id"] = 262144.0
+    missing = client.post("/monitoring/measurements", headers=headers, json=payload)
+    assert missing.status_code == 404
+
+    schema = client.get("/openapi.json").json()
+    campaign_schema = schema["components"]["schemas"]["MeasurementCreate"][
+        "properties"
+    ]["campaign_id"]
+    assert campaign_schema["type"] == "integer"
