@@ -1,0 +1,42 @@
+VTEKI CUSTOMER INTELLIGENCE - DASHBOARD PREVIEW TANPA LOGIN
+==========================================================
+
+APA YANG DIUBAH?
+- Hanya 2 file frontend: web/src/App.tsx dan web/src/styles.css
+- Menampilkan dashboard langsung tanpa login dengan DATA CONTOH/FIKTIF
+- Ada tombol "Login untuk data asli" saat ingin memakai data PostgreSQL
+- API FastAPI, database, dan autentikasi JWT tetap diproteksi
+- Perubahan lama otomatis disimpan sebagai file backup berstempel waktu
+- Aplikasi tetap dapat diakses via Vite maupun Docker Compose
+
+INSTALASI (1x saja)
+1. Ekstrak SELURUH isi ZIP ini ke folder project:
+   C:\Users\asusr\Downloads\Capstone\vteki-customer-intelligence
+   (sejajar dengan folder web, api, dan docker-compose.yml)
+2. Klik dua kali AKTIFKAN_PREVIEW.bat
+   ATAU jalankan dalam PowerShell di folder project:
+   python .\AKTIFKAN_PREVIEW_DASHBOARD.py
+
+CARA MEMBUKA WEBSITE
+A. VS CODE + VITE
+   cd web
+   npm run dev
+   Buka http://localhost:5173
+   (Preview dashboard bisa tampil TANPA backend/database)
+
+B. DOCKER COMPOSE / ONE-CLICK LAUNCHER
+   Setelah patch diterapkan, rebuild image frontend minimal satu kali:
+   docker compose up -d --build web
+   Buka http://localhost
+   (Jika belum ada backend dan database, jalankan dahulu Docker Desktop + launcher)
+
+CARA KEMBALI KE LOGIN NANTI
+- Klik dua kali KEMBALIKAN_LOGIN.bat
+  ATAU ubah `const PREVIEW_ENABLED = true` menjadi `false` di web/src/App.tsx.
+- Setelah itu refresh browser untuk Vite, atau rebuild web untuk Docker.
+
+PENTING
+Mode preview berisi data pelanggan, kampanye, dan monitoring SIMULASI.
+Mode ini tidak mengakses, mengubah, atau mengekspos data asli.
+Jika ingin memakai data asli, klik "Login untuk data asli" dan masuk dengan akun admin.
+Jangan menganggap data simulasi sebagai hasil analisis real.

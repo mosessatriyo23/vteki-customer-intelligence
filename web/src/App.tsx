@@ -91,6 +91,44 @@ const initialCampaigns: Campaign[] = []
 const initialReviews: IdentityReview[] = []
 const initialDecisions: Decision[] = []
 
+// VTEKI_LOCAL_PREVIEW_ENABLED
+// Ubah ke false ketika login wajib diterapkan kembali.
+// Preview hanya menggunakan data contoh; endpoint FastAPI tetap memerlukan JWT.
+const PREVIEW_ENABLED = true
+const previewUser: ApiUser = { id: 0, email: 'preview@vteki.local', roles: ['preview'] }
+const previewCustomers: Customer[] = [
+  { apiId: 9001, id: 'DEMO-001', name: 'Pelanggan Demo Satu', initials: 'PS', city: 'Jakarta', tier: 'Platinum', value: 'Rp12.500.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo1@example.invalid', phone: '—', since: 'Jan 2026', visits: 16, nextBest: 'Program loyalitas VIP', color: 'coral' },
+  { apiId: 9002, id: 'DEMO-002', name: 'Pelanggan Demo Dua', initials: 'PD', city: 'Surabaya', tier: 'Gold', value: 'Rp6.700.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo2@example.invalid', phone: '—', since: 'Mar 2026', visits: 9, nextBest: 'Promo retensi', color: 'teal' },
+  { apiId: 9003, id: 'DEMO-003', name: 'Pelanggan Demo Tiga', initials: 'PT', city: 'Bandung', tier: 'Silver', value: 'Rp2.300.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo3@example.invalid', phone: '—', since: 'Jun 2026', visits: 4, nextBest: 'Follow-up personal', color: 'yellow' },
+  { apiId: 9004, id: 'DEMO-004', name: 'Pelanggan Demo Empat', initials: 'PE', city: 'Medan', tier: 'Gold', value: 'Rp7.850.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo4@example.invalid', phone: '—', since: 'Feb 2026', visits: 11, nextBest: 'Rekomendasi produk', color: 'teal' },
+]
+const previewCampaigns: Campaign[] = [
+  { apiId: 9001, name: 'Loyalty VIP (Demo)', segment: 'Platinum', channel: 'email_sim (Simulator)', status: 'Draft', reach: '120 (contoh)', color: 'coral' },
+  { apiId: 9002, name: 'Win-back Oktober (Demo)', segment: 'Gold', channel: 'sms_sim (Simulator)', status: 'Pending approval', reach: '230 (contoh)', color: 'teal' },
+  { apiId: 9003, name: 'Re-engagement (Demo)', segment: 'Silver', channel: 'email_sim (Simulator)', status: 'Approved', reach: '340 (contoh)', color: 'blue' },
+]
+const previewReviews: IdentityReview[] = [
+  { apiId: 9001, id: 'IR-DEMO-01', subject: 'DEMO-001', candidates: ['DEMO-004'], confidence: 0.77, reason: 'Kemiripan data pelanggan — kasus simulasi', status: 'Pending' },
+  { apiId: 9002, id: 'IR-DEMO-02', subject: 'DEMO-002', candidates: ['DEMO-003'], confidence: 0.68, reason: 'Perlu validasi identitas — kasus simulasi', status: 'Pending' },
+]
+const previewDecisions: Decision[] = [
+  { id: 'NBA-DEMO-01', apiId: 9001, customer: 'Pelanggan Demo Satu · DEMO-001', recommendation: 'Penawaran member VIP', rationale: 'Simulasi: loyalitas tinggi', status: 'Proposed' },
+  { id: 'NBA-DEMO-02', apiId: 9002, customer: 'Pelanggan Demo Dua · DEMO-002', recommendation: 'Voucher retensi', rationale: 'Simulasi: potensi churn', status: 'Proposed' },
+]
+const previewMonitoring = {
+  drift: [
+    { model: 'churn-risk (demo)', metric: 'PSI', value: 0.08, threshold: 0.2, status: 'healthy' },
+    { model: 'customer-ltv (demo)', metric: 'PSI', value: 0.11, threshold: 0.2, status: 'healthy' },
+  ],
+  campaign_measurements: [
+    { campaign_id: 'DEMO-001', metric: 'Engagement (demo)', observed: 72, incremental: 16 },
+    { campaign_id: 'DEMO-002', metric: 'Conversion (demo)', observed: 54, incremental: 9 },
+  ],
+  audit: [],
+  pipeline_runs: [{ id: 'DEMO-RUN', status: 'completed', started_at: 'Simulasi' }],
+}
+
+
 function mapCustomer(row: ApiCustomer): Customer {
   const tier = row.churn_risk === 'High' ? 'Silver' : row.ltv >= 10000 ? 'Platinum' : 'Gold'
   const colors = { Platinum: 'coral', Gold: 'teal', Silver: 'yellow' } as const
@@ -156,17 +194,18 @@ function mapDecision(row: ApiDecision): Decision {
 function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [token, setToken] = useState<string | null>(() => getStoredToken())
-  const [user, setUser] = useState<ApiUser | null>(null)
+  const [isPreview, setIsPreview] = useState(() => PREVIEW_ENABLED && !getStoredToken())
+  const [user, setUser] = useState<ApiUser | null>(() => PREVIEW_ENABLED && !getStoredToken() ? previewUser : null)
   const [authLoading, setAuthLoading] = useState(() => Boolean(getStoredToken()))
   const [dataLoading, setDataLoading] = useState(false)
   const [apiError, setApiError] = useState('')
-  const [customerRows, setCustomerRows] = useState<Customer[]>(customers)
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
+  const [customerRows, setCustomerRows] = useState<Customer[]>(() => PREVIEW_ENABLED && !getStoredToken() ? previewCustomers : customers)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => PREVIEW_ENABLED && !getStoredToken() ? previewCustomers[0] : null)
   const [search, setSearch] = useState('')
-  const [campaigns, setCampaigns] = useState(initialCampaigns)
-  const [reviews, setReviews] = useState(initialReviews)
-  const [decisions, setDecisions] = useState(initialDecisions)
-  const [monitoringData, setMonitoringData] = useState<{ drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }>({ drift: [], campaign_measurements: [], audit: [], pipeline_runs: [] })
+  const [campaigns, setCampaigns] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewCampaigns : initialCampaigns)
+  const [reviews, setReviews] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewReviews : initialReviews)
+  const [decisions, setDecisions] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewDecisions : initialDecisions)
+  const [monitoringData, setMonitoringData] = useState<{ drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }>(PREVIEW_ENABLED && !getStoredToken() ? previewMonitoring : { drift: [], campaign_measurements: [], audit: [], pipeline_runs: [] })
   const [builderOpen, setBuilderOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null)
@@ -208,9 +247,8 @@ function App() {
       } catch (error) {
         if (!mounted) return
         if (error instanceof ApiError && error.status === 401) {
-          storeToken(null)
-          setToken(null)
-          setUser(null)
+          if (PREVIEW_ENABLED) enterPreview()
+          else { storeToken(null); setToken(null); setUser(null) }
         } else {
           setApiError(error instanceof Error ? error.message : 'Gagal memuat data platform.')
         }
@@ -231,11 +269,36 @@ function App() {
 
   async function handleLogin(email: string, password: string) {
     const result = await api.login(email, password)
+    setIsPreview(false)
+    setUser(null)
     storeToken(result.access_token)
     setToken(result.access_token)
   }
 
+  function enterPreview() {
+    storeToken(null)
+    setToken(null)
+    setIsPreview(true)
+    setUser(previewUser)
+    setCustomerRows(previewCustomers)
+    setSelectedCustomer(previewCustomers[0])
+    setCampaigns(previewCampaigns)
+    setReviews(previewReviews)
+    setDecisions(previewDecisions)
+    setMonitoringData(previewMonitoring)
+    setProvenance(null)
+    setApiError('')
+    setPage('dashboard')
+  }
+
+  function showLogin() {
+    setIsPreview(false)
+    setUser(null)
+    setApiError('')
+  }
+
   function logout() {
+    if (PREVIEW_ENABLED) { enterPreview(); return }
     storeToken(null)
     setToken(null)
     setUser(null)
@@ -347,7 +410,7 @@ function App() {
   }
 
   if (authLoading) return <LoadingScreen />
-  if (!token || !user) return <LoginScreen onLogin={handleLogin} error={apiError} />
+  if ((!token && !isPreview) || !user) return <LoginScreen onLogin={handleLogin} error={apiError} onPreview={PREVIEW_ENABLED ? enterPreview : undefined} />
   const canManageCampaigns = user.roles.some((role) => ['admin', 'campaign_manager'].includes(role))
   const canReviewIdentity = user.roles.some((role) => ['admin', 'operator'].includes(role))
   const canCreateNBA = user.roles.some((role) => ['admin', 'analyst'].includes(role))
@@ -372,7 +435,7 @@ function App() {
         </div>
 
         <div className="persona-box">
-          <div className="persona-label">ROLE AKTIF DARI SERVER</div>
+          <div className="persona-label">{isPreview ? 'MODE PREVIEW — DATA SIMULASI' : 'ROLE AKTIF DARI SERVER'}</div>
           <div className="role-list">{user.roles.map((role) => <span className="role-chip" key={role}>{role}</span>)}</div>
         </div>
 
@@ -395,7 +458,7 @@ function App() {
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
           <button className="plain-nav" onClick={() => setNotice('CI/CD Pipeline: GitHub Actions + mypy + Schemathesis + T-SEC-03 Allowlist')}><CircleHelp size={17} /> CI/CD & Security</button>
-          <button className="plain-nav" onClick={logout}><LogOut size={17} /> Keluar</button>
+          <button className="plain-nav" onClick={isPreview ? showLogin : logout}><LogOut size={17} /> {isPreview ? 'Login ke data asli' : 'Keluar'}</button>
           <div className="profile-row">
             <div className="avatar avatar-dark">PA</div>
             <div className="profile-copy">
@@ -428,12 +491,14 @@ function App() {
           </div>
         </header>
 
+        {isPreview && <div className="preview-banner" role="status"><strong>MODE PREVIEW</strong><span>Data simulasi, bukan data pelanggan asli. Fitur penyimpanan dan akses API membutuhkan login.</span><button onClick={showLogin}>Login untuk data asli →</button></div>}
         {apiError && <div className="api-alert" role="alert"><span>{apiError}</span><button onClick={() => setApiError('')} aria-label="Tutup pesan"><X size={15} /></button></div>}
         {dataLoading && <div className="sync-note">Sinkronisasi data dari API…</div>}
 
         <main className="page-content" key={page}>
           {page === 'dashboard' && (
             <Dashboard 
+              isPreview={isPreview}
               campaigns={campaigns} 
               customers={customerRows}
               reviews={reviews}
@@ -467,7 +532,7 @@ function App() {
               canOverride={canOverrideNBA}
             />
           )}
-          {page === 'monitoring' && <MonitoringPage token={token} data={monitoringData} canTrace={canTrace} />}
+          {page === 'monitoring' && <MonitoringPage token={token ?? ''} data={monitoringData} canTrace={canTrace} />}
         </main>
       </div>
 
@@ -502,7 +567,7 @@ function PageHeading({ eyebrow, title, subtitle, action }: { eyebrow: string; ti
   return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{action && <div className="heading-action">{action}</div>}</div>
 }
 
-function Dashboard({ campaigns, customers: customerRows, reviews, decisions, monitoring, onSeedCustomers, canSeed, canManageCampaigns, onOpenCustomers, onNewCampaign, onNavigate }: { campaigns: Campaign[]; customers: Customer[]; reviews: IdentityReview[]; decisions: Decision[]; monitoring: { drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }; onSeedCustomers: () => void; canSeed: boolean; canManageCampaigns: boolean; onOpenCustomers: () => void; onNewCampaign: () => void; onNavigate: (p: Page) => void }) {
+function Dashboard({ isPreview, campaigns, customers: customerRows, reviews, decisions, monitoring, onSeedCustomers, canSeed, canManageCampaigns, onOpenCustomers, onNewCampaign, onNavigate }: { isPreview: boolean; campaigns: Campaign[]; customers: Customer[]; reviews: IdentityReview[]; decisions: Decision[]; monitoring: { drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }; onSeedCustomers: () => void; canSeed: boolean; canManageCampaigns: boolean; onOpenCustomers: () => void; onNewCampaign: () => void; onNavigate: (p: Page) => void }) {
   const measurements = monitoring.campaign_measurements
   const driftMetrics = monitoring.drift
   const pipelineRun = monitoring.pipeline_runs[0]
@@ -524,9 +589,9 @@ function Dashboard({ campaigns, customers: customerRows, reviews, decisions, mon
     />
 
     <section className="metric-grid" aria-label="Key metrics">
-      <Metric label="Total Pelanggan 360" value={customerRows.length.toLocaleString('id-ID')} change="API" detail="core.customers" icon={<UsersRound size={16} />} positive />
+      <Metric label="Total Pelanggan 360" value={customerRows.length.toLocaleString('id-ID')} change={isPreview ? "Contoh" : "API"} detail={isPreview ? "Data simulasi" : "core.customers"} icon={<UsersRound size={16} />} positive />
       <Metric label="Antrean Review Identitas" value={`${reviews.filter(r => r.status === 'Pending').length}`} change="Saat ini" detail="manual review pending" icon={<UserCheck size={16} />} positive={false} />
-      <Metric label="Keputusan NBA" value={`${decisions.length}`} change="Persisten" detail="dec.nba_decisions" icon={<Sparkles size={16} />} positive />
+      <Metric label="Keputusan NBA" value={`${decisions.length}`} change={isPreview ? "Contoh" : "Persisten"} detail={isPreview ? "Data simulasi" : "dec.nba_decisions"} icon={<Sparkles size={16} />} positive />
       <Metric label="Pipeline NFR-01" value={pipelineLabel} change={pipelineRun ? 'Scheduler' : 'Menunggu'} detail="advisory run lock · budget 60m" icon={<Clock3 size={16} />} positive={pipelineRun?.status === 'completed'} />
     </section>
 
@@ -579,7 +644,7 @@ function Dashboard({ campaigns, customers: customerRows, reviews, decisions, mon
     </article>
 
     <div className="data-note">
-      <ShieldCheck size={14} /> Keamanan & Compliance T-SEC-03: Channel Simulator aktif (Tanpa vendor email/SMS eksternal) <span>Append-only Audit Log Active</span>
+      <ShieldCheck size={14} /> {isPreview ? 'Preview saja — data fiktif, tidak ada aktivitas server' : 'Keamanan & Compliance T-SEC-03: Channel Simulator aktif (Tanpa vendor email/SMS eksternal)'} <span>{isPreview ? 'Login diperlukan untuk data asli' : 'Append-only Audit Log Active'}</span>
     </div>
   </>
 }
@@ -1171,7 +1236,7 @@ function LoadingScreen() {
   return <main className="login-shell"><div className="login-panel loading-panel"><span className="brand-mark"><span /><span /><span /></span><h1>VTEKI Intelligence</h1><p>Memverifikasi sesi dan memuat data platform…</p><div className="loading-line"><i /></div></div></main>
 }
 
-function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: string) => Promise<void>; error: string }) {
+function LoginScreen({ onLogin, error, onPreview }: { onLogin: (email: string, password: string) => Promise<void>; error: string; onPreview?: () => void }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -1190,7 +1255,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: st
   }
   return <main className="login-shell">
     <div className="login-aside"><span className="login-ornament ornament-a" /><span className="login-ornament ornament-b" /><div className="login-brand"><span className="brand-mark"><span /><span /><span /></span><b>vteki<span>.</span></b></div><div className="login-aside-copy"><small>CUSTOMER INTELLIGENCE PLATFORM</small><h1>Decisions with<br />a clear lineage.</h1><p>Secure access to customer profiles, campaign governance, and decision traceability.</p></div><div className="login-aside-foot"><ShieldCheck size={15} /> Role-based access · Audited workflows</div></div>
-    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">SECURE WORKSPACE</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{(loginError || error) && <p className="field-error">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memverifikasi…' : 'Masuk'}<ArrowRight size={15} /></button></form><div className="login-security"><ShieldCheck size={15} /><span>JWT session · role permissions · append-only audit</span></div></section>
+    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">SECURE WORKSPACE</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{(loginError || error) && <p className="field-error">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memverifikasi…' : 'Masuk'}<ArrowRight size={15} /></button></form>{onPreview && <button className="preview-return" onClick={onPreview}>← Kembali ke dashboard preview</button>}<div className="login-security"><ShieldCheck size={15} /><span>JWT session · role permissions · append-only audit</span></div></section>
   </main>
 }
 

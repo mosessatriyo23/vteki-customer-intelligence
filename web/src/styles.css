@@ -308,4 +308,43 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .step-time { width: 90px; color: #728275; font-family: monospace; }
 .step-content b { color: #1f3326; font-size: 10px; }
 .step-content p { margin: 2px 0 0; color: #4e5c51; }
-.step-content small { color: #889489; font-size: 8px; }
+.step-content small { color: #889489; font-size: 8px; }
+
+
+/* VTEKI_LOCAL_PREVIEW_ENABLED: banner mode presentasi tanpa API/token. */
+.preview-banner {
+  margin: 14px 24px 0;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid #e9d59b;
+  border-radius: 9px;
+  background: #fff9e8;
+  color: #665124;
+  font-size: 12px;
+}
+.preview-banner strong { font-weight: 750; }
+.preview-banner span { flex: 1; min-width: 190px; }
+.preview-banner button {
+  cursor: pointer;
+  background: #234b37;
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 650;
+}
+.preview-banner button:hover { background: #35684c; }
+.preview-return {
+  display: block;
+  margin: 14px auto 0;
+  padding: 8px;
+  border: 0;
+  background: transparent;
+  color: #38694b;
+  cursor: pointer;
+}
+@media (max-width: 700px) { .preview-banner { margin: 10px 12px 0; } }
