@@ -2,7 +2,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "0006_governance_workflows"
-down_revision = "0005_governance_schemas_and_traceability"
+down_revision = "0005_governance_traceability"
 branch_labels = None
 depends_on = None
 
