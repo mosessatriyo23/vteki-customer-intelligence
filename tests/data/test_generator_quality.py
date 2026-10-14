@@ -6,7 +6,7 @@ import sys
 import tempfile
 import unittest
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from generator.audit_generated import audit, digest, normalize_phone

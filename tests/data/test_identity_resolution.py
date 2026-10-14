@@ -1,5 +1,11 @@
 import unittest
-from services.data.identity.resolver import resolve, normalize_phone, normalize_email, preserve_existing_ids
+
+from services.data.identity.resolver import (
+    normalize_email,
+    normalize_phone,
+    preserve_existing_ids,
+    resolve,
+)
 
 
 def person(identity, **changes):

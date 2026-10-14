@@ -6,7 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from generator.business_events import (
-	MEMBERSHIP_FIELDS, VISIT_FIELDS, make_customer_visits, make_membership_events,
+	MEMBERSHIP_FIELDS,
+	VISIT_FIELDS,
+	make_customer_visits,
+	make_membership_events,
 )
 
 

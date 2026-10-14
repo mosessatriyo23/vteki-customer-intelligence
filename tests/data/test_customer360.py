@@ -6,8 +6,8 @@ from datetime import date, datetime
 from pathlib import Path
 
 from generator.generate import run as generate
-from services.data.identity.cli import run as resolve
 from services.data.customer360.profile import build_profiles
+from services.data.identity.cli import run as resolve
 
 
 class Customer360Tests(unittest.TestCase):

@@ -16,7 +16,6 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-
 NAMESPACE = uuid.UUID("e752ae52-a0fa-4c02-87b5-8274778ce746")
 GENERATOR_VERSION = "2.0.0"
 SCHEMA_VERSION = "2.0.0"

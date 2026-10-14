@@ -13,7 +13,6 @@ from services.data.ingestion.staging import IngestionStaging
 from services.data.ingestion.validator import BatchValidator
 
 
-
 class IngestionTests(unittest.TestCase):
     def batch(self, root):
         inbound = root / 'inbound'
