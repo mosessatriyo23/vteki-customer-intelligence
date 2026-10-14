@@ -34,7 +34,7 @@ class AuditEventResponse(BaseModel):
 def list_audit_events(
     limit: int = Query(default=50, ge=1, le=500),
     method: str | None = None,
-    status_code: int | None = None,
+    status_code: int | None = Query(default=None, ge=100, le=599),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
 ) -> list[AuditEvent]:

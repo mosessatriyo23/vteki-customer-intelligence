@@ -408,3 +408,71 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
     assert result["model_inputs"]["rationale"]["affinity"] == 0.82
     assert result["audit_events"]
     assert result["reconstructed_in_seconds"] < 300
+
+
+@pytest.mark.parametrize(
+    ("method", "url"),
+    [
+        ("GET", "/jobs/3340959425410"),
+        ("GET", "/customers/36893488147419103233"),
+        ("GET", "/customers/36893488147419103233/provenance"),
+        ("GET", "/decisions/next-best-actions?customer_id=1066596672191326978048"),
+        ("POST", "/campaigns/1503138654512/launch"),
+        ("POST", "/governance/identity-reviews/617829851819/resolve"),
+    ],
+)
+def test_out_of_range_ids_return_validation_errors(client, method, url):
+    token = token_for(client, "admin@example.com")
+    response = client.request(
+        method,
+        url,
+        headers={"Authorization": f"Bearer {token}"},
+        json=(
+            {"decision": "approved"} if method == "POST" and "resolve" in url else None
+        ),
+    )
+    assert response.status_code == 422
+
+
+def test_options_uses_static_endpoint_methods(client):
+    response = client.options("/customers/seed")
+    assert response.status_code == 204
+    allow = {item.strip() for item in response.headers["allow"].split(",")}
+    assert "POST" in allow
+    assert "GET" not in allow
+
+
+def test_invalid_role_and_resolution_decision_are_documented_validation(client):
+    token = token_for(client, "admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    role_response = client.post(
+        "/auth/users",
+        headers=headers,
+        json={
+            "email": "invalid-role@example.com",
+            "password": "long-enough-password-123",
+            "roles": ["nonexistent"],
+        },
+    )
+    assert role_response.status_code == 422
+    invalid_decision = client.post(
+        "/governance/identity-reviews/1/resolve",
+        headers=headers,
+        json={"decision": "merge"},
+    )
+    assert invalid_decision.status_code == 422
+
+
+def test_bool_is_not_accepted_as_float_metric(client):
+    token = token_for(client, "admin@example.com")
+    response = client.post(
+        "/monitoring/drift",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "model_name": "sample",
+            "metric_name": "PSI",
+            "metric_value": 0,
+            "threshold": False,
+        },
+    )
+    assert response.status_code == 422

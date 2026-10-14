@@ -9,24 +9,25 @@ from api.audit import record_audit_event
 from api.database import get_db
 from api.models import Customer, DecisionTrace, HumanOverride, NBADecision, User
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/decisions", tags=["next best action"])
 
 
 class RecommendationCreate(BaseModel):
-    customer_id: int
-    recommended_action: str = Field(min_length=2, max_length=256)
+    customer_id: int = Field(ge=1, le=2_147_483_647)
+    recommended_action: str = Field(min_length=2, max_length=256, pattern=r"^[^\x00]*$")
     rationale: dict = Field(default_factory=dict)
 
 
 class OverrideCreate(BaseModel):
-    selected_action: str = Field(min_length=2, max_length=256)
-    reason: str = Field(min_length=5, max_length=1000)
+    selected_action: str = Field(min_length=2, max_length=256, pattern=r"^[^\x00]*$")
+    reason: str = Field(min_length=5, max_length=512)
 
 
 @router.get("/next-best-actions")
 def list_decisions(
-    customer_id: int | None = None,
+    customer_id: int | None = Query(default=None, ge=1, le=2_147_483_647),
     status: str = Query(
         default="proposed", pattern="^(proposed|overridden|accepted|all)$"
     ),
@@ -102,7 +103,7 @@ def create_decision(
 
 @router.post("/next-best-actions/{decision_id}/override")
 def override_decision(
-    decision_id: int,
+    decision_id: DBId,
     payload: OverrideCreate,
     request: Request,
     db: Session = Depends(get_db),

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
@@ -21,6 +21,7 @@ from api.models import (
     User,
 )
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/governance", tags=["governance & human-in-the-loop"])
 
@@ -42,13 +43,15 @@ class IdentityReviewResponse(BaseModel):
 
 
 class IdentityResolveRequest(BaseModel):
-    decision: str = Field(description="approved or rejected")
+    decision: Literal["approved", "rejected"] = Field(
+        description="approved or rejected"
+    )
     review_note: str | None = Field(default=None, max_length=1000)
 
 
 class NBAOverrideRequest(BaseModel):
     selected_action: str = Field(min_length=3, max_length=256)
-    override_reason: str = Field(min_length=5, max_length=1000)
+    override_reason: str = Field(min_length=5, max_length=512)
 
 
 class CampaignApprovalRequest(BaseModel):
@@ -68,12 +71,14 @@ class DecisionReconstructionResponse(BaseModel):
 
 @router.get("/identity-reviews", response_model=list[IdentityReviewResponse])
 def list_identity_reviews(
-    status_filter: str | None = Query(default="pending"),
+    status_filter: str | None = Query(
+        default="pending", pattern="^(pending|resolved|all)$"
+    ),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "operator", "analyst")),
 ) -> list[IdentityReview]:
     query = db.query(IdentityReview)
-    if status_filter:
+    if status_filter and status_filter != "all":
         query = query.filter(IdentityReview.status == status_filter)
     return query.order_by(IdentityReview.id.desc()).all()
 
@@ -82,7 +87,7 @@ def list_identity_reviews(
     "/identity-reviews/{review_id}/resolve", response_model=IdentityReviewResponse
 )
 def resolve_identity_review(
-    review_id: int,
+    review_id: DBId,
     payload: IdentityResolveRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -150,7 +155,7 @@ def list_nba_decisions(
 
 @router.post("/nba-decisions/{decision_id}/override", response_model=dict[str, Any])
 def override_nba_decision(
-    decision_id: int,
+    decision_id: DBId,
     payload: NBAOverrideRequest,
     request: Request,
     db: Session = Depends(get_db),
@@ -223,7 +228,7 @@ def override_nba_decision(
 
 @router.post("/campaigns/{campaign_id}/approval", response_model=dict[str, Any])
 def campaign_approval_workflow(
-    campaign_id: int,
+    campaign_id: DBId,
     payload: CampaignApprovalRequest,
     request: Request,
     db: Session = Depends(get_db),

@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session, selectinload
@@ -29,7 +31,9 @@ class TokenResponse(BaseModel):
 class UserCreate(BaseModel):
     email: EmailStr
     password: str = Field(min_length=12, max_length=128)
-    roles: list[str] = Field(min_length=1)
+    roles: list[Literal["admin", "analyst", "operator", "campaign_manager"]] = Field(
+        min_length=1
+    )
 
 
 class UserResponse(BaseModel):

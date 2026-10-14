@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 from api.database import get_db
 from api.models import BatchJob, User
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/jobs", tags=["batch jobs"])
 JobKind = str
 
 
 class JobCreate(BaseModel):
-    kind: JobKind
+    kind: JobKind = Field(min_length=1, max_length=64, pattern=r"^[^\x00]*$")
     payload: dict = Field(default_factory=dict)
     max_attempts: int = Field(default=3, ge=1, le=10)
 
@@ -60,7 +61,7 @@ def enqueue_job(
 
 @router.get("/{job_id}", response_model=JobResponse)
 def get_job(
-    job_id: int,
+    job_id: DBId,
     db: Session = Depends(get_db),
     _: User = Depends(
         require_roles("admin", "operator", "analyst", "campaign_manager")

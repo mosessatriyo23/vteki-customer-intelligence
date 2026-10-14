@@ -18,17 +18,17 @@ router = APIRouter(prefix="/monitoring", tags=["management monitoring"])
 
 
 class DriftMetricCreate(BaseModel):
-    model_name: str = Field(min_length=1, max_length=100)
-    metric_name: str = Field(min_length=1, max_length=100)
-    metric_value: float
-    threshold: float = Field(ge=0)
+    model_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
+    metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
+    metric_value: float = Field(strict=True, allow_inf_nan=False)
+    threshold: float = Field(ge=0, strict=True, allow_inf_nan=False)
 
 
 class MeasurementCreate(BaseModel):
-    campaign_id: int
-    metric_name: str = Field(min_length=1, max_length=100)
-    observed_value: float
-    incremental_value: float
+    campaign_id: int = Field(ge=1, le=2_147_483_647)
+    metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
+    observed_value: float = Field(strict=True, allow_inf_nan=False)
+    incremental_value: float = Field(strict=True, allow_inf_nan=False)
 
 
 @router.get("/dashboard")

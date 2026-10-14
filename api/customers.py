@@ -9,6 +9,7 @@ from api.audit import record_audit_event
 from api.database import get_db
 from api.models import AuditEvent, Customer, CustomerFeature, DecisionTrace, User
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/customers", tags=["customer 360"])
 
@@ -63,7 +64,7 @@ def list_customers(
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(
-    customer_id: int,
+    customer_id: DBId,
     db: Session = Depends(get_db),
     _: User = Depends(
         require_roles("admin", "analyst", "campaign_manager", "operator")
@@ -149,7 +150,7 @@ def seed_customers(
 
 @router.get("/{customer_id}/provenance")
 def customer_provenance(
-    customer_id: int,
+    customer_id: DBId,
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     _: User = Depends(

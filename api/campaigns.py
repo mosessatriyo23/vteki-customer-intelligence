@@ -9,6 +9,7 @@ from api.audit import record_audit_event
 from api.database import get_db
 from api.models import BatchJob, Campaign, User
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/campaigns", tags=["campaign builder"])
 
@@ -29,11 +30,15 @@ class CampaignResponse(BaseModel):
 
 
 class CampaignCreate(BaseModel):
-    name: str = Field(min_length=3, max_length=128)
-    target_segment: str = Field(min_length=2, max_length=64)
-    channel: str = Field(min_length=2, max_length=32)  # email_sim, sms_sim, push_sim
+    name: str = Field(min_length=3, max_length=128, pattern=r"^[^\x00]*$")
+    target_segment: str = Field(min_length=2, max_length=64, pattern=r"^[^\x00]*$")
+    channel: str = Field(
+        min_length=2, max_length=32, pattern=r"^[^\x00]*$"
+    )  # email_sim, sms_sim, push_sim
     ab_test_ratio: int = Field(default=50, ge=0, le=100)
-    message_draft: str | None = Field(default=None, max_length=2000)
+    message_draft: str | None = Field(
+        default=None, max_length=2000, pattern=r"^[^\x00]*$"
+    )
 
 
 @router.get("", response_model=list[CampaignResponse])
@@ -81,7 +86,7 @@ def create_campaign(
 
 @router.post("/{campaign_id}/request-approval", response_model=CampaignResponse)
 def request_campaign_approval(
-    campaign_id: int,
+    campaign_id: DBId,
     request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin", "campaign_manager")),
@@ -95,7 +100,7 @@ def request_campaign_approval(
         )
     if not campaign.message_draft:
         raise HTTPException(
-            status_code=422, detail="A message draft is required for approval"
+            status_code=409, detail="A message draft is required for approval"
         )
     campaign.status = "PendingApproval"
     record_audit_event(
@@ -114,7 +119,7 @@ def request_campaign_approval(
 
 @router.post("/{campaign_id}/approve", response_model=CampaignResponse)
 def approve_campaign(
-    campaign_id: int,
+    campaign_id: DBId,
     request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin", "campaign_manager")),
@@ -143,7 +148,7 @@ def approve_campaign(
 
 @router.post("/{campaign_id}/launch", response_model=dict)
 def launch_campaign(
-    campaign_id: int,
+    campaign_id: DBId,
     request: Request,
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin", "campaign_manager")),

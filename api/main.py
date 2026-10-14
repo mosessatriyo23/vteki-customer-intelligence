@@ -1,5 +1,8 @@
 from fastapi import Depends, FastAPI
 from fastapi.openapi.utils import get_openapi
+from starlette.responses import Response
+from starlette.routing import compile_path
+from starlette.types import Receive, Scope, Send
 
 from api.audit import AuditMiddleware
 from api.audit_router import router as audit_router
@@ -16,6 +19,48 @@ from api.security import require_roles
 
 
 class GovernanceFastAPI(FastAPI):
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http" and scope["method"] == "OPTIONS":
+            path = scope.get("path", "")
+            paths = self.openapi().get("paths", {})
+            operations = paths.get(path)
+
+            if operations is None:
+                for template, item in paths.items():
+                    pattern, _, _ = compile_path(template)
+                    if pattern.fullmatch(path):
+                        operations = item
+                        break
+
+            if operations is not None:
+                supported = {
+                    method.upper()
+                    for method in operations
+                    if method.lower()
+                    in {
+                        "get",
+                        "post",
+                        "put",
+                        "patch",
+                        "delete",
+                        "head",
+                        "options",
+                        "trace",
+                    }
+                }
+
+                if supported:
+                    allow = ", ".join(sorted(supported | {"OPTIONS"}))
+                    response = Response(
+                        status_code=204,
+                        headers={"Allow": allow},
+                    )
+                    await response(scope, receive, send)
+                    return
+
+        await super().__call__(scope, receive, send)
+
     def openapi(self) -> dict:
         if self.openapi_schema:
             return self.openapi_schema

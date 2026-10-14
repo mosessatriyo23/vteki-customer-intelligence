@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -10,20 +10,23 @@ from api.audit import record_audit_event
 from api.database import get_db
 from api.models import IdentityReview, User
 from api.security import require_roles
+from api.validation import DBId
 
 router = APIRouter(prefix="/identity-reviews", tags=["identity manual review"])
 
 
 class IdentityReviewCreate(BaseModel):
-    subject_reference: str = Field(min_length=1, max_length=128)
-    candidate_references: list[str] = Field(min_length=1, max_length=20)
-    confidence: float = Field(ge=0.0, le=1.0)
-    reason: str = Field(min_length=5, max_length=256)
+    subject_reference: str = Field(min_length=1, max_length=128, pattern=r"^[^\x00]*$")
+    candidate_references: list[
+        Annotated[str, Field(min_length=1, max_length=128, pattern=r"^[^\x00]*$")]
+    ] = Field(min_length=1, max_length=20)
+    confidence: float = Field(ge=0.0, le=1.0, strict=True, allow_inf_nan=False)
+    reason: str = Field(min_length=5, max_length=256, pattern=r"^[^\x00]*$")
 
 
 class IdentityReviewDecision(BaseModel):
     decision: Literal["merge", "keep_separate"]
-    note: str | None = Field(default=None, max_length=1000)
+    note: str | None = Field(default=None, max_length=1000, pattern=r"^[^\x00]*$")
 
 
 @router.get("", response_model=list[dict])
@@ -85,7 +88,7 @@ def enqueue_review(
 
 @router.post("/{review_id}/decision")
 def decide_review(
-    review_id: int,
+    review_id: DBId,
     payload: IdentityReviewDecision,
     request: Request,
     db: Session = Depends(get_db),
