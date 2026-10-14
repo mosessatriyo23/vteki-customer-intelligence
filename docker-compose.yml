@@ -1,17 +1,20 @@
-﻿version: '3.8'
-
-services:
+﻿services:
   db:
     image: postgres:15-alpine
     container_name: vteki_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_password_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-vteki_intelligence}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-vteki_intelligence}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   api:
     build:
@@ -19,13 +22,22 @@ services:
       dockerfile: Dockerfile.api
     container_name: vteki_api
     depends_on:
-      - db
-    env_file:
-      - .env
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-vteki_intelligence}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-30}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?Set BOOTSTRAP_ADMIN_EMAIL in .env}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
     ports:
       - "8000:8000"
-    volumes:
-      - ./artifacts:/artifacts
+    command: ["sh", "-c", "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
   worker:
     build:
@@ -33,12 +45,14 @@ services:
       dockerfile: Dockerfile.worker
     container_name: vteki_worker
     depends_on:
-      - db
-    env_file:
-      - .env
-    volumes:
-      - ./artifacts:/artifacts
-      - ./inbound:/inbound
+      api:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-vteki_intelligence}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      PIPELINE_INTERVAL_MINUTES: ${PIPELINE_INTERVAL_MINUTES:-15}
+    command: ["python", "-m", "worker"]
+    restart: unless-stopped
 
   web:
     build:
@@ -48,7 +62,8 @@ services:
     ports:
       - "80:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres_data:
