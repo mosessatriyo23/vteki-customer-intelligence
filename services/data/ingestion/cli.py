@@ -13,7 +13,9 @@ from .validator import BatchValidator
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--inbound", type=Path, required=True)
-    parser.add_argument("--sqlite-staging", type=Path, help="Development-only staging database")
+    parser.add_argument(
+        "--sqlite-staging", type=Path, help="Development-only staging database"
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     if args.sqlite_staging:

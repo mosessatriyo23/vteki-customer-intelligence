@@ -1,4 +1,5 @@
 import hashlib
+import os
 from datetime import datetime, timezone
 
 import bcrypt
@@ -12,6 +13,10 @@ from api.database import get_db
 from api.models import User
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _get_jwt_secret() -> str:
+    return os.getenv("JWT_SECRET") or JWT_SECRET
 
 
 def _bcrypt_input(password: str) -> bytes:
@@ -31,7 +36,8 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 def create_access_token(user: User) -> str:
-    if not JWT_SECRET:
+    secret = _get_jwt_secret()
+    if not secret:
         raise RuntimeError(
             "JWT_SECRET must be configured before serving authentication requests"
         )
@@ -42,7 +48,7 @@ def create_access_token(user: User) -> str:
         "iat": now,
         "exp": now + ACCESS_TOKEN_TTL,
     }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
 
 def get_current_user(
@@ -54,11 +60,12 @@ def get_current_user(
         detail="Invalid or expired access token",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    if credentials is None or not JWT_SECRET:
+    secret = _get_jwt_secret()
+    if credentials is None or not secret:
         raise unauthorized
     try:
         payload = jwt.decode(
-            credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM]
+            credentials.credentials, secret, algorithms=[JWT_ALGORITHM]
         )
         user_id = int(payload["sub"])
     except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):

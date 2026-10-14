@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.database import Base
+from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.models import BatchJob
 from worker.runner import process_one
 
@@ -12,18 +12,7 @@ from worker.runner import process_one
 def make_session_factory():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-    ).execution_options(
-        schema_translate_map={
-            "core": None,
-            "gov": None,
-            "stg": None,
-            "feat": None,
-            "ml": None,
-            "dec": None,
-            "act": None,
-            "msr": None,
-        }
-    )
+    ).execution_options(schema_translate_map=SQLITE_SCHEMA_TRANSLATE_MAP)
     Base.metadata.create_all(engine)
     return engine, sessionmaker(bind=engine, expire_on_commit=False)
 

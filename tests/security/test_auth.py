@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from api.database import Base, get_db
+from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base, get_db
 from api.main import app
 from api.models import (
     AuditEvent,
@@ -32,18 +32,7 @@ def client():
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
-    ).execution_options(
-        schema_translate_map={
-            "core": None,
-            "gov": None,
-            "stg": None,
-            "feat": None,
-            "ml": None,
-            "dec": None,
-            "act": None,
-            "msr": None,
-        }
-    )
+    ).execution_options(schema_translate_map=SQLITE_SCHEMA_TRANSLATE_MAP)
     TestingSession = sessionmaker(bind=engine, expire_on_commit=False)
     Base.metadata.create_all(engine)
     with TestingSession() as db:

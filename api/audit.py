@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from uuid import uuid4
 
@@ -91,9 +92,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
     @staticmethod
     def _actor_id(authorization: str) -> int | None:
         scheme, _, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not JWT_SECRET:
+        secret = os.getenv("JWT_SECRET") or JWT_SECRET
+        if scheme.lower() != "bearer" or not secret:
             return None
         try:
-            return int(jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])["sub"])
+            return int(jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])["sub"])
         except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
             return None
