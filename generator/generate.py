@@ -6,31 +6,23 @@ import argparse
 import csv
 import hashlib
 import json
+import platform
 import random
 import re
+import sys
 import uuid
 from collections import Counter
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import Any
-
-try:
-	import numpy as np
-except ImportError:  # Optional acceleration; the standard-library RNG is sufficient.
-	np = None
-
-try:
-	import pandas as pd
-except ImportError:  # Keep the generator usable in lightweight Python environments.
-	pd = None
-
-try:
-	from faker import Faker
-except ImportError:
-	Faker = None
+from typing import Any, Mapping
 
 
 NAMESPACE = uuid.UUID("e752ae52-a0fa-4c02-87b5-8274778ce746")
+GENERATOR_VERSION = "2.0.0"
+SCHEMA_VERSION = "2.0.0"
+DEFAULT_SEED = 20260906
+JAKARTA_TZ = timezone(timedelta(hours=7), name="Asia/Jakarta")
+OBSERVATION_DAYS = 548
 REGIONS = {
 	"DI Yogyakarta": ["Yogyakarta", "Sleman", "Bantul", "Kulon Progo", "Gunungkidul"],
 	"Jawa Tengah": ["Magelang", "Klaten", "Solo", "Semarang", "Purworejo"],
@@ -59,25 +51,31 @@ CRM_GENDERS = ("F", "M", "U")
 MEMBERSHIP_TIERS = ("BRONZE", "SILVER", "GOLD", "PLATINUM")
 CUSTOMER_STATUSES = ("ACTIVE", "INACTIVE", "CLOSED")
 TRANSACTION_STATUSES = ("COMPLETED", "CANCELLED", "REFUNDED", "PARTIAL_REFUND")
+MEMBERSHIP_EVENT_FIELDS = (
+	"event_id", "source_customer_ref", "member_code", "event_type", "occurred_at",
+	"period_start", "expires_at", "membership_tier", "previous_event_id",
+)
+VISIT_FIELDS = (
+	"visit_id", "source_customer_ref", "source_transaction_id", "branch_code",
+	"visit_datetime", "status",
+)
 
 
 class RandomSource:
-	"""Small seeded RNG facade using numpy when installed and random otherwise."""
+	"""Single stdlib MT19937 stream; reproducibility scoped to the same Python runtime."""
 
 	def __init__(self, seed: int) -> None:
-		self.generator = np.random.default_rng(seed) if np is not None else random.Random(seed)
+		self.generator = random.Random(seed)
 
 	def random(self) -> float:
 		return float(self.generator.random())
 
 	def integer(self, low: int, high: int | None = None) -> int:
-		if np is not None and isinstance(self.generator, np.random.Generator):
-			return int(self.generator.integers(low, high))
 		if high is None:
-			return self.generator.randrange(low)
-		return self.generator.randrange(low, high)
+			return int(self.generator.randrange(low))
+		return int(self.generator.randrange(low, high))
 
-	def choice(self, values: tuple[Any, ...] | list[Any], probabilities: tuple[float, ...] | None = None) -> Any:
+	def choice(self, values: tuple[Any, ...] | list[Any], probabilities: tuple[float, ...] | None = None) -> Any:  # noqa: ANN401
 		if probabilities is None:
 			return values[self.integer(len(values))]
 		threshold = self.random()
@@ -89,58 +87,58 @@ class RandomSource:
 		return values[-1]
 
 	def gamma(self, shape: float, scale: float) -> float:
-		if np is not None and isinstance(self.generator, np.random.Generator):
-			return float(self.generator.gamma(shape, scale))
-		return self.generator.gammavariate(shape, scale)
+		return float(self.generator.gammavariate(shape, scale))
+
+	@staticmethod
+	def rng_name() -> str:
+		return "stdlib:random.Random (MT19937)"
 
 
 class CsvSink:
-	"""Write CSV incrementally, using pandas batches when it is available."""
+	"""Stream deterministic UTF-8 CSV; header is written even when there are no rows."""
 
-	def __init__(self, path: Path, fields: tuple[str, ...], batch_size: int = 20_000) -> None:
+	def __init__(self, path: Path, fields: tuple[str, ...]) -> None:
 		self.path = path
 		self.fields = fields
-		self.batch_size = batch_size
-		self.rows: list[dict[str, Any]] = []
 		self.count = 0
-		self.started = False
-		self.stream = None
-		self.writer = None
-		if pd is None:
-			self.stream = path.open("w", newline="", encoding="utf-8")
-			self.writer = csv.DictWriter(self.stream, fieldnames=fields, extrasaction="ignore")
-			self.writer.writeheader()
+		self.stream = path.open("w", newline="", encoding="utf-8")
+		self.writer = csv.DictWriter(self.stream, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
+		self.writer.writeheader()
 
 	def write(self, row: dict[str, Any]) -> None:
 		self.count += 1
-		if pd is None:
-			self.writer.writerow(row)
-			return
-		self.rows.append(row)
-		if len(self.rows) >= self.batch_size:
-			self.flush()
+		self.writer.writerow(row)
 
 	def flush(self) -> None:
-		if not self.rows:
-			return
-		frame = pd.DataFrame.from_records(self.rows, columns=self.fields)
-		frame.to_csv(self.path, index=False, mode="a" if self.started else "w", header=not self.started)
-		self.rows.clear()
-		self.started = True
+		self.stream.flush()
 
 	def close(self) -> None:
-		if pd is not None:
-			self.flush()
-		elif self.stream is not None:
-			self.stream.close()
+		self.stream.close()
 
 
 def stable_id(seed: int, kind: str, index: int | str) -> str:
 	return str(uuid.uuid5(NAMESPACE, f"{seed}:{kind}:{index}"))
 
 
+def as_of_bounds(as_of: date) -> tuple[datetime, datetime]:
+	start = datetime.combine(as_of - timedelta(days=OBSERVATION_DAYS), time.min, tzinfo=JAKARTA_TZ)
+	end = datetime.combine(as_of, time(hour=23, minute=59, second=59), tzinfo=JAKARTA_TZ)
+	return start, end
+
+
+def random_moment(rng: RandomSource, start: datetime, end: datetime) -> datetime:
+	span = max(1, int((end - start).total_seconds()) + 1)
+	return start + timedelta(seconds=rng.integer(span))
+
+
+def customer_start(row: Mapping[str, Any], start: datetime) -> datetime:
+	return max(start, datetime.combine(date.fromisoformat(str(row["join_date"])), time.min, tzinfo=JAKARTA_TZ))
+
+
 def iso_datetime(value: datetime) -> str:
-	return value.replace(microsecond=0).isoformat()
+	if value.tzinfo is None:
+		value = value.replace(tzinfo=JAKARTA_TZ)
+	return value.astimezone(JAKARTA_TZ).replace(microsecond=0).isoformat()
 
 
 def json_value(value: Any) -> str:
@@ -153,13 +151,9 @@ def safe_slug(value: str) -> str:
 
 class NameFactory:
 	def __init__(self, seed: int) -> None:
-		self.fake = Faker("id_ID") if Faker is not None else None
-		if self.fake is not None:
-			self.fake.seed_instance(seed)
+		self.seed = seed
 
 	def name(self, rng: RandomSource) -> str:
-		if self.fake is not None:
-			return self.fake.name()
 		return f"{rng.choice(FIRST_NAMES)} {rng.choice(LAST_NAMES)}"
 
 
@@ -195,12 +189,11 @@ def format_phone(phone: str, rng: RandomSource) -> str:
 	return f"{prefix}{national[:3]}{separator}{national[3:7]}{separator}{national[7:]}"
 
 
-def make_email(name: str, index: int, rng: RandomSource, variant: bool = False) -> str:
+def make_email(name: str, index: int, rng: RandomSource) -> str:
 	slug = safe_slug(name)
 	domains = ("example.id", "mail.id", "inbox.id", "customer.test")
-	suffix = f"{index % 997:03d}" if variant or rng.random() < 0.5 else ""
-	separator = "" if rng.random() < 0.5 else "."
-	return f"{slug}{separator}{suffix}@{rng.choice(domains)}"
+	# Canonical addresses are deterministic and unique by index; variants only add decoration.
+	return f"{slug}.{index:06d}@{rng.choice(domains)}"
 
 
 def make_branches(rng: RandomSource, seed: int, output: CsvSink) -> list[dict[str, Any]]:
@@ -273,24 +266,31 @@ def make_customers(
 	source_rows: list[dict[str, Any]] = []
 	golden_ids: list[str] = []
 	source_ids_by_golden: list[str] = []
-	canonical: list[dict[str, str]] = []
+	canonical: list[dict[str, Any]] = []
 	shared_phone_by_index: dict[int, str] = {}
+	used_phones: set[str] = set()
 
-	# A small number of unrelated customers deliberately share a phone number.
 	for index in range(0, customer_count - 1, 100):
 		if rng.random() < 0.35:
 			shared = make_phone(rng)
 			shared_phone_by_index[index] = shared
 			shared_phone_by_index[index + 1] = shared
+			used_phones.add(re.sub(r"\D", "", shared))
 
 	for index in range(customer_count):
 		golden_id = stable_id(seed, "golden-customer", index)
 		name = names.name(rng)
-		phone = shared_phone_by_index.get(index, make_phone(rng))
+		if index in shared_phone_by_index:
+			phone = shared_phone_by_index[index]
+		else:
+			phone = make_phone(rng)
+			while re.sub(r"\D", "", phone) in used_phones:
+				phone = make_phone(rng)
+			used_phones.add(re.sub(r"\D", "", phone))
 		city = rng.choice(tuple(city for cities in REGIONS.values() for city in cities))
-		region = next(region for region, cities in REGIONS.items() if city in cities)
-		created_at = start + timedelta(seconds=rng.integer(int((end - start).total_seconds())))
-		updated_at = start + timedelta(seconds=rng.integer(int((end - start).total_seconds()) + 1))
+		created_at = random_moment(rng, start, end)
+		updated_at = random_moment(rng, created_at, end)
+		has_membership = rng.random() >= 0.20
 		canonical.append({
 			"golden_id": golden_id,
 			"name": name,
@@ -298,8 +298,8 @@ def make_customers(
 			"email": make_email(name, index, rng),
 			"birth_month": rng.integer(1, 13),
 			"gender": rng.choice(CRM_GENDERS),
-			"member_code": f"MBR-{rng.integer(10000, 100000):05d}" if rng.random() >= 0.18 else "",
-			"membership_tier": rng.choice(MEMBERSHIP_TIERS) if rng.random() >= 0.2 else "",
+			"member_code": f"MBR-{seed % 100:02d}-{index + 1:06d}" if has_membership else "",
+			"membership_tier": rng.choice(MEMBERSHIP_TIERS) if has_membership else "",
 			"join_date": created_at.date().isoformat(),
 			"preferred_branch_code": f"BR-{rng.integer(1, 21):02d}",
 			"status": rng.choice(CUSTOMER_STATUSES, (0.84, 0.12, 0.04)),
@@ -313,11 +313,16 @@ def make_customers(
 		source_system = rng.choice(SOURCE_SYSTEMS)
 		source_id = stable_id(seed, "source-customer", source_index)
 		name = typo_name(person["name"], rng) if duplicate and rng.random() < 0.48 else person["name"]
-		email = make_email(name, source_index, rng, variant=duplicate) if duplicate or rng.random() < 0.12 else person["email"]
+		email = str(person["email"])
+		if duplicate and rng.random() < 0.35:
+			local, domain = email.split("@")
+			email = f"{local}+src{source_index}@{domain}"
+		elif duplicate and rng.random() < 0.50:
+			email = email.upper()
 		phone = format_phone(person["phone"], rng)
 		phone_raw = "" if rng.random() < 0.05 else phone
 		email_raw = "" if rng.random() < 0.08 else email.lower()
-		if email_raw and rng.random() < 0.2:
+		if email_raw and rng.random() < 0.20:
 			email_raw = f" {email_raw} "
 		source_row = {
 			"crm_customer_id": source_id,
@@ -439,8 +444,6 @@ def transaction_dates(
 			cursor += timedelta(days=gap)
 			if cursor < end:
 				dates.append(cursor)
-
-	# Low-frequency organic purchasing applies independently of the lifecycle cadence.
 	if trajectory not in ("ONE_TIME", "SEASONAL") and rng.random() < 0.22:
 		dates.append(start + timedelta(days=rng.integer(span_days)))
 	return sorted(dates)
@@ -448,7 +451,7 @@ def transaction_dates(
 
 def make_transactions(
 	seed: int,
-	customer_ids: list[str],
+	customers: list[dict[str, Any]],
 	branches: list[dict[str, Any]],
 	catalogue: list[dict[str, Any]],
 	start: datetime,
@@ -457,6 +460,7 @@ def make_transactions(
 	transaction_output: CsvSink,
 	item_output: CsvSink,
 	trajectory_output: CsvSink,
+	duplicate_truth: CsvSink,
 ) -> Counter[str]:
 	trajectories: Counter[str] = Counter()
 	product_ids = [item["item_code"] for item in catalogue if item["item_type"] == "PRODUCT"]
@@ -465,8 +469,10 @@ def make_transactions(
 	prices = {item["item_code"]: item["list_price"] for item in catalogue}
 	ramadan = ramadan_windows(start.date(), end.date())
 	sequence = 0
-
-	for customer_index, crm_customer_id in enumerate(customer_ids):
+	for customer_index, customer in enumerate(customers):
+		crm_customer_id = str(customer["crm_customer_id"])
+		joined = datetime.combine(date.fromisoformat(str(customer["join_date"])), time.min, tzinfo=JAKARTA_TZ)
+		active_start = max(start, joined)
 		trajectory = rng.choice(TRAJECTORIES, TRAJECTORY_PROBABILITIES)
 		trajectories[trajectory] += 1
 		trajectory_output.write({
@@ -475,10 +481,8 @@ def make_transactions(
 			"observed_from": start.date().isoformat(),
 			"observed_to": end.date().isoformat(),
 		})
-		dates = transaction_dates(trajectory, start, end, rng, ramadan)
+		dates = transaction_dates(trajectory, active_start, end, rng, ramadan)
 		for occurred in dates:
-			if rng.random() < 0.025:
-				occurred = max(start, occurred - timedelta(days=rng.integer(1, 31)))
 			transaction_id = stable_id(seed, "transaction", sequence)
 			sequence += 1
 			branch = rng.choice(branches)
@@ -504,6 +508,13 @@ def make_transactions(
 				})
 			discount_amount = rng.integer(0, gross_amount // 5 + 1)
 			status = rng.choice(TRANSACTION_STATUSES, (0.94, 0.02, 0.02, 0.02))
+			net_amount = gross_amount - discount_amount
+			refund_amount = 0
+			if status == "REFUNDED":
+				refund_amount = net_amount
+			elif status == "PARTIAL_REFUND":
+				refund_amount = rng.integer(1, max(2, net_amount // 2 + 1))
+			actual_revenue = 0 if status in ("CANCELLED", "REFUNDED") else net_amount - refund_amount
 			transaction_row = {
 				"source_transaction_id": transaction_id,
 				"source_customer_ref": "" if rng.random() < 0.03 else crm_customer_id,
@@ -513,35 +524,48 @@ def make_transactions(
 				"transaction_datetime": iso_datetime(occurred),
 				"gross_amount": gross_amount,
 				"discount_amount": discount_amount,
-				"net_amount": gross_amount - discount_amount,
+				"net_amount": net_amount,
+				"refund_amount": refund_amount,
+				"actual_revenue": actual_revenue,
 				"status": status,
 			}
 			transaction_output.write(transaction_row)
+			duplicate_truth.write({
+				"source_transaction_id": transaction_id,
+				"golden_customer_id": stable_id(seed, "golden-customer", customer_index),
+				"event_kind": "BUSINESS_TRANSACTION",
+				"duplicate_group_id": transaction_id,
+			})
 			for line in lines:
 				item_output.write(line)
-
 			if rng.random() < 0.01:
 				duplicate = dict(transaction_row)
 				duplicate_id = stable_id(seed, "transaction-duplicate", sequence)
 				duplicate["source_transaction_id"] = duplicate_id
 				transaction_output.write(duplicate)
+				duplicate_truth.write({
+					"source_transaction_id": duplicate_id,
+					"golden_customer_id": stable_id(seed, "golden-customer", customer_index),
+					"event_kind": "DUPLICATE_BUSINESS_EVENT",
+					"duplicate_group_id": transaction_id,
+				})
 				for line_number, line in enumerate(lines):
 					duplicate_line = dict(line)
 					duplicate_line["source_item_id"] = stable_id(seed, "transaction-item-duplicate", f"{sequence}:{line_number}")
 					duplicate_line["source_transaction_id"] = duplicate_id
 					item_output.write(duplicate_line)
-
 	return trajectories
 
 
-def make_app_events(seed: int, source_ids: list[str], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
+def make_app_events(seed: int, customers: list[dict[str, Any]], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
 	sequence = 0
-	span_days = max(1, (end - start).days)
-	for source_id in source_ids:
+	for row in customers:
+		source_id = str(row["crm_customer_id"])
+		active_start = customer_start(row, start)
 		if rng.random() > 0.34:
 			continue
 		for _ in range(rng.integer(1, 9)):
-			occurred = start + timedelta(days=rng.integer(span_days), seconds=rng.integer(86_400))
+			occurred = random_moment(rng, active_start, end)
 			event_type = rng.choice(APP_EVENT_TYPES)
 			output.write({
 				"event_id": stable_id(seed, "app-event", sequence),
@@ -554,15 +578,19 @@ def make_app_events(seed: int, source_ids: list[str], start: datetime, end: date
 			sequence += 1
 
 
-def make_service_cases(seed: int, source_ids: list[str], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
+def make_service_cases(seed: int, customers: list[dict[str, Any]], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
 	sequence = 0
-	span_days = max(1, (end - start).days)
-	for source_id in source_ids:
+	for row in customers:
+		source_id = str(row["crm_customer_id"])
+		active_start = customer_start(row, start)
 		if rng.random() >= 0.035:
 			continue
 		for _ in range(1 + int(rng.random() < 0.12)):
-			created = start + timedelta(days=rng.integer(span_days), seconds=rng.integer(86_400))
+			created = random_moment(rng, active_start, end)
 			status = rng.choice(("OPEN", "IN_PROGRESS", "RESOLVED"), (0.08, 0.16, 0.76))
+			closed = created + timedelta(days=rng.integer(1, 8))
+			if status == "RESOLVED" and closed > end:
+				status = "IN_PROGRESS"
 			output.write({
 				"source_case_id": stable_id(seed, "service-case", sequence),
 				"source_customer_ref": source_id,
@@ -570,20 +598,21 @@ def make_service_cases(seed: int, source_ids: list[str], start: datetime, end: d
 				"severity": rng.choice(("LOW", "MEDIUM", "HIGH", "SEVERE"), (0.5, 0.3, 0.16, 0.04)),
 				"status": status,
 				"opened_at": iso_datetime(created),
-				"closed_at": iso_datetime(created + timedelta(days=rng.integer(1, 8))) if status == "RESOLVED" else "",
+				"closed_at": iso_datetime(closed) if status == "RESOLVED" else "",
 				"resolution_code": rng.choice(("BOOKING_RESCHEDULED", "BILLING_ADJUSTED", "SERVICE_FOLLOWUP", "STOCK_UPDATED")) if status == "RESOLVED" else "",
 			})
 			sequence += 1
 
 
-def make_consent_events(seed: int, source_ids: list[str], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
+def make_consent_events(seed: int, customers: list[dict[str, Any]], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
 	sequence = 0
-	span_days = max(1, (end - start).days)
-	for source_id in source_ids:
+	for row in customers:
+		source_id = str(row["crm_customer_id"])
+		active_start = customer_start(row, start)
 		for purpose in ("MARKETING", "SERVICE"):
 			for channel in ("EMAIL", "PUSH"):
 				status = rng.choice(("OPT_IN", "OPT_OUT", "UNKNOWN"), (0.90, 0.06, 0.04))
-				captured = start + timedelta(days=rng.integer(span_days), seconds=rng.integer(86_400))
+				captured = random_moment(rng, active_start, end)
 				output.write({
 					"source_consent_id": stable_id(seed, "consent-event", sequence),
 					"source_customer_ref": source_id,
@@ -595,6 +624,23 @@ def make_consent_events(seed: int, source_ids: list[str], start: datetime, end: 
 					"capture_source": rng.choice(("CRM", "POS", "APP")),
 				})
 				sequence += 1
+
+
+def make_membership_events(seed: int, source_rows: list[dict[str, Any]], start: datetime, end: datetime, rng: RandomSource, output: CsvSink) -> None:
+	try:
+		from .business_events import make_membership_events as derive_memberships
+	except ImportError:
+		from business_events import make_membership_events as derive_memberships
+	derive_memberships(seed, source_rows, start, end, rng, output)
+
+
+def make_customer_visits(seed: int, transactions_path: Path, output: CsvSink) -> None:
+	"""Derive observable visits without using evaluation truth."""
+	try:
+		from .business_events import make_customer_visits as derive_visits
+	except ImportError:
+		from business_events import make_customer_visits as derive_visits
+	derive_visits(seed, transactions_path, output)
 
 
 def checksum(path: Path) -> str:
@@ -611,7 +657,8 @@ def create_sinks(directory: Path, schemas: dict[str, tuple[str, ...]]) -> dict[s
 
 def parse_args() -> argparse.Namespace:
 	parser = argparse.ArgumentParser(description="Generate synthetic V-TEKI customer intelligence data.")
-	parser.add_argument("--seed", type=int, default=20260906)
+	parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
+	parser.add_argument("--as-of-date", type=date.fromisoformat, default=date(2026, 9, 6), help="Inclusive simulation end YYYY-MM-DD (Asia/Jakarta).")
 	parser.add_argument("--customers", type=int, default=50_000, help="Number of golden customers to generate.")
 	parser.add_argument("--output-dir", default="./inbound/2026-09-06")
 	parser.add_argument("--ground-truth-dir", default="./generator/ground_truth")
@@ -627,11 +674,28 @@ def parse_args() -> argparse.Namespace:
 	return args
 
 
+def runtime_meta() -> dict[str, Any]:
+	try:
+		import importlib.metadata as meta
+	except ImportError:
+		meta = None  # type: ignore[assignment]
+	packages: dict[str, Any] = {}
+	for name in ("numpy", "pandas", "faker"):
+		version = None
+		if meta is not None:
+			try:
+				version = meta.version(name)  # type: ignore[attr-defined]
+			except Exception:
+				pass
+		packages[name] = version
+	return {"python": sys.version.split()[0], "platform": platform.platform(), "packages": packages}
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
 	rng = RandomSource(args.seed)
 	names = NameFactory(args.seed)
-	end = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=7))).replace(microsecond=0)
-	start = end - timedelta(days=548)
+	as_of: date = getattr(args, "as_of_date", None) or date(2026, 9, 6)
+	start, end = as_of_bounds(as_of)
 	args.output_dir.mkdir(parents=True, exist_ok=True)
 	args.ground_truth_dir.mkdir(parents=True, exist_ok=True)
 
@@ -639,50 +703,74 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 		"crm_customers.csv": CRM_FIELDS,
 		"branches.csv": ("branch_code", "branch_name", "city", "region", "active_flag"),
 		"catalogue_items.csv": ("item_code", "item_type", "name", "category", "subcategory", "list_price", "duration_minutes", "availability_flag", "suitability_flags", "approved_facts", "status"),
-		"transactions.csv": ("source_transaction_id", "source_customer_ref", "source_system", "branch_code", "channel_code", "transaction_datetime", "gross_amount", "discount_amount", "net_amount", "status"),
+		"transactions.csv": ("source_transaction_id", "source_customer_ref", "source_system", "branch_code", "channel_code", "transaction_datetime", "gross_amount", "discount_amount", "net_amount", "refund_amount", "actual_revenue", "status"),
 		"transaction_items.csv": ("source_item_id", "source_transaction_id", "item_type", "item_code", "qty", "unit_price", "line_amount"),
 		"app_events.csv": ("event_id", "source_customer_id", "event_type", "item_id", "occurred_at", "channel"),
 		"service_cases.csv": ("source_case_id", "source_customer_ref", "category", "severity", "status", "opened_at", "closed_at", "resolution_code"),
 		"consent_events.csv": ("source_consent_id", "source_customer_ref", "purpose", "channel_code", "state", "captured_at", "expires_at", "capture_source"),
+		"membership_events.csv": MEMBERSHIP_EVENT_FIELDS,
+		"customer_visits.csv": VISIT_FIELDS,
 	}
 	truth_schemas = {
 		"identity_mapping.csv": ("source_customer_id", "golden_customer_id", "source_system", "identity_scenario"),
 		"customer_latent_trajectories.csv": ("golden_customer_id", "trajectory", "observed_from", "observed_to"),
+		"transaction_duplicates.csv": ("source_transaction_id", "golden_customer_id", "event_kind", "duplicate_group_id"),
 	}
 	inbound = create_sinks(args.output_dir, inbound_schemas)
 	truth = create_sinks(args.ground_truth_dir, truth_schemas)
 	duplicate_count = round(args.customers * 11_000 / 50_000)
-	source_rows, _, primary_source_ids = make_customers(
+	source_rows, _, _ = make_customers(
 		args.seed, args.customers, duplicate_count, start, end, rng, names,
 		inbound["crm_customers.csv"], truth["identity_mapping.csv"],
 	)
 	branches = make_branches(rng, args.seed, inbound["branches.csv"])
 	catalogue = make_catalogue(args.seed, rng, inbound["catalogue_items.csv"])
 	trajectories = make_transactions(
-		args.seed, primary_source_ids, branches, catalogue, start, end, rng,
+		args.seed, source_rows[:args.customers], branches, catalogue, start, end, rng,
 		inbound["transactions.csv"], inbound["transaction_items.csv"], truth["customer_latent_trajectories.csv"],
+		truth["transaction_duplicates.csv"],
 	)
-	make_app_events(args.seed, primary_source_ids, start, end, rng, inbound["app_events.csv"])
-	make_service_cases(args.seed, primary_source_ids, start, end, rng, inbound["service_cases.csv"])
-	make_consent_events(args.seed, [row["crm_customer_id"] for row in source_rows], start, end, rng, inbound["consent_events.csv"])
-
+	make_app_events(args.seed, source_rows[:args.customers], start, end, rng, inbound["app_events.csv"])
+	make_service_cases(args.seed, source_rows[:args.customers], start, end, rng, inbound["service_cases.csv"])
+	make_consent_events(args.seed, source_rows, start, end, rng, inbound["consent_events.csv"])
+	make_membership_events(args.seed, source_rows[:args.customers], start, end, rng, inbound["membership_events.csv"])
+	inbound["transactions.csv"].flush()
+	make_customer_visits(args.seed, args.output_dir / "transactions.csv", inbound["customer_visits.csv"])
 	for sink in (*inbound.values(), *truth.values()):
 		sink.close()
 	checksums = {name: checksum(args.output_dir / name) for name in inbound_schemas}
 	effect_data = injected_campaign_effects(start.date(), end.date())
 	effect_path = args.ground_truth_dir / "injected_campaign_effects.json"
 	effect_path.write_text(json.dumps(effect_data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-	truth_checksums = {path.name: checksum(path) for path in args.ground_truth_dir.iterdir() if path.is_file()}
+	truth_checksums = {
+		name: checksum(args.ground_truth_dir / name)
+		for name in sorted((*truth_schemas, "injected_campaign_effects.json"))
+	}
 	manifest = {
 		"generator": "vteki-synthetic-data",
-		"generated_at": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
-		"output_dir": str(args.output_dir),
-		"ground_truth_dir": str(args.ground_truth_dir),
+		"generator_version": GENERATOR_VERSION,
+		"schema_version": SCHEMA_VERSION,
+		"as_of_date": as_of.isoformat(),
+		"timezone": "Asia/Jakarta (+07:00)",
+		"observation_period": {"from": start.isoformat(), "to": end.isoformat(), "days": OBSERVATION_DAYS},
+		"rng": {"implementation": rng.rng_name(), "optional_packages_affect_randomness": False},
+		"runtime": runtime_meta(),
 		"seed": args.seed,
 		"golden_customers": args.customers,
 		"duplicate_source_records": duplicate_count,
-		"transaction_period": {"from": start.date().isoformat(), "to": end.date().isoformat()},
-		"trajectory_distribution": dict(trajectories),
+		"trajectory_distribution": dict(sorted(trajectories.items())),
+		"tables": {
+			name: {"row_count": inbound[name].count, "sha256": checksums[name], "schema_version": SCHEMA_VERSION}
+			for name in sorted(inbound_schemas)
+		},
+		"ground_truth_tables": {
+			name: {
+				"row_count": truth[name].count if name in truth else None,
+				"sha256": truth_checksums[name],
+				"schema_version": SCHEMA_VERSION,
+			}
+			for name in sorted(truth_checksums)
+		},
 		"volumes": {name.removesuffix(".csv"): sink.count for name, sink in inbound.items()},
 		"checksums_sha256": checksums,
 		"ground_truth_checksums_sha256": truth_checksums,
@@ -693,10 +781,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-	manifest = run(parse_args())
+	args = parse_args()
+	manifest = run(args)
 	print(json.dumps({
-		"output_dir": manifest["output_dir"],
-		"ground_truth_dir": manifest["ground_truth_dir"],
+		"output_dir": str(args.output_dir),
+		"ground_truth_dir": str(args.ground_truth_dir),
 		"volumes": manifest["volumes"],
 	}, indent=2))
 

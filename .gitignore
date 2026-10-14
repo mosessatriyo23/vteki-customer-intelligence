@@ -32,6 +32,9 @@ logs/
 # Ground Truth Data (Wajib disembunyikan dari pipeline - TRD §11.3)
 generator/ground_truth/
 
+# Private local conversation context
+chat.md
+
 # Local Database & Temporary Files
 *.sqlite3
 *.db
