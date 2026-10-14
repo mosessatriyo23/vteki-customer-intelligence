@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -60,6 +60,12 @@ def list_customers(
     if churn_risk:
         query = query.filter(Customer.churn_risk == churn_risk)
     return query.order_by(Customer.id.desc()).limit(limit).all()
+
+
+@router.get("/seed", include_in_schema=False)
+def reject_unsupported_seed_get() -> Response:
+    # Static POST-only path must take priority over parameterized GET.
+    return Response(status_code=405, headers={"Allow": "POST, OPTIONS"})
 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)

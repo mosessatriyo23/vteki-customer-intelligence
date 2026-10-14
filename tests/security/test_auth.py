@@ -476,3 +476,44 @@ def test_bool_is_not_accepted_as_float_metric(client):
         },
     )
     assert response.status_code == 422
+
+
+def test_schemathesis_regressions_round2(client):
+    # A static POST route must not be swallowed by GET /customers/{customer_id}.
+    unsupported = client.get("/customers/seed")
+    assert unsupported.status_code == 405
+    assert "POST" in unsupported.headers["allow"]
+
+    token = token_for(client, "admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    # Pydantic must not silently coerce numeric flags to booleans.
+    invalid_approval = client.post(
+        "/governance/campaigns/1/approval",
+        headers=headers,
+        json={"approved": 0},
+    )
+    assert invalid_approval.status_code == 422
+
+    # Missing references must not trigger a PostgreSQL FK violation (500).
+    payload = {
+        "campaign_id": 51359,
+        "metric_name": "clicks",
+        "observed_value": 1.0,
+        "incremental_value": 1.0,
+    }
+    missing = client.post(
+        "/monitoring/measurements",
+        headers=headers,
+        json=payload,
+    )
+    assert missing.status_code == 404
+
+    # JSON floating-point campaign identifiers violate OpenAPI integer type.
+    payload["campaign_id"] = 64.0
+    invalid_id = client.post(
+        "/monitoring/measurements",
+        headers=headers,
+        json=payload,
+    )
+    assert invalid_id.status_code == 422

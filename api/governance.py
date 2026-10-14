@@ -55,7 +55,7 @@ class NBAOverrideRequest(BaseModel):
 
 
 class CampaignApprovalRequest(BaseModel):
-    approved: bool
+    approved: bool = Field(strict=True)
     review_comment: str | None = None
 
 

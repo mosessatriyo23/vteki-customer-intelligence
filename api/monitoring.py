@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -7,6 +7,7 @@ from api.audit import record_audit_event
 from api.database import get_db
 from api.models import (
     AuditEvent,
+    Campaign,
     CampaignMeasurement,
     ModelDriftMetric,
     PipelineRun,
@@ -25,7 +26,7 @@ class DriftMetricCreate(BaseModel):
 
 
 class MeasurementCreate(BaseModel):
-    campaign_id: int = Field(ge=1, le=2_147_483_647)
+    campaign_id: int = Field(ge=1, le=2_147_483_647, strict=True)
     metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
     observed_value: float = Field(strict=True, allow_inf_nan=False)
     incremental_value: float = Field(strict=True, allow_inf_nan=False)
@@ -151,6 +152,8 @@ def record_measurement(
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin", "analyst")),
 ) -> dict[str, int | str]:
+    if db.get(Campaign, payload.campaign_id) is None:
+        raise HTTPException(status_code=404, detail="Campaign not found")
     measurement = CampaignMeasurement(**payload.model_dump())
     db.add(measurement)
     db.flush()
