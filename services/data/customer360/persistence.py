@@ -77,3 +77,4 @@ def save_profile_snapshots(
 
     session.commit()
     return persisted_count
+ 
