@@ -70,6 +70,49 @@ class PersistenceTests(unittest.TestCase):
         )
         return inbound
 
+    def test_registry_sequential_replay_preserves_decisions(self):
+        from copy import deepcopy
+
+        from api.models import MatchDecision
+
+        result = {
+            "mapping": [
+                {"source_customer_id": "a", "golden_customer_id": "golden-a"},
+                {"source_customer_id": "b", "golden_customer_id": "golden-b"},
+            ],
+            "decisions": [
+                {
+                    "left_source_id": "a",
+                    "right_source_id": "b",
+                    "decision": "REVIEW",
+                    "heuristic_score": 0.6,
+                    "reason": "single identifier",
+                }
+            ],
+        }
+        with self.SessionLocal() as session:
+            registry = PersistentIdentityRegistry(session)
+            registry.apply_resolution_batch("replay-batch", "replay-v1", result)
+            first_mapping = registry.get_existing_mapping()
+            original = session.scalars(select(MatchDecision)).one()
+            original_id, original_time = original.id, original.created_at
+            registry.apply_resolution_batch("replay-batch", "replay-v1", result)
+            decisions = session.scalars(select(MatchDecision)).all()
+            self.assertEqual(len(decisions), 1)
+            self.assertEqual(
+                (decisions[0].id, decisions[0].created_at), (original_id, original_time)
+            )
+            self.assertEqual(registry.get_existing_mapping(), first_mapping)
+            self.assertEqual(len(session.scalars(select(ReviewQueueItem)).all()), 1)
+            changed = deepcopy(result)
+            changed["decisions"][0]["reason"] = "changed evidence"
+            with self.assertRaisesRegex(ValueError, "differs from replay"):
+                registry.apply_resolution_batch("replay-batch", "replay-v1", changed)
+            session.rollback()
+            self.assertEqual(
+                session.scalars(select(MatchDecision)).one().reason, "single identifier"
+            )
+
     def test_pg_loader_valid_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
