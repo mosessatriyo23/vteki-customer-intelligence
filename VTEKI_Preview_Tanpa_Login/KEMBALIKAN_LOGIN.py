@@ -1,4 +1,5 @@
 from pathlib import Path
+
 path = Path(__file__).resolve().parent / 'web' / 'src' / 'App.tsx'
 if not path.is_file():
     raise SystemExit('Simpan file ini di folder utama project, sejajar folder web.')

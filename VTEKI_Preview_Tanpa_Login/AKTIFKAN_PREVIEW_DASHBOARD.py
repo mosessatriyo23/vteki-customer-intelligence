@@ -5,10 +5,11 @@ Run from the repository root: python AKTIFKAN_PREVIEW_DASHBOARD.py
 Idempotent: a second run makes no changes.
 """
 from __future__ import annotations
-from datetime import datetime
-from pathlib import Path
+
 import shutil
 import sys
+from datetime import datetime
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 APP = ROOT / "web" / "src" / "App.tsx"
@@ -112,7 +113,6 @@ def main():
         print("Buka website: http://localhost:5173 (Vite) atau http://localhost (Docker).")
         return
 
-    original = src
     src = repl(src, "const initialDecisions: Decision[] = []", "const initialDecisions: Decision[] = []\n" + PREVIEW_SETUP, "deklarasi data awal")
     src = repl(src, "  const [token, setToken] = useState<string | null>(() => getStoredToken())\n  const [user, setUser] = useState<ApiUser | null>(null)",
                "  const [token, setToken] = useState<string | null>(() => getStoredToken())\n  const [isPreview, setIsPreview] = useState(() => PREVIEW_ENABLED && !getStoredToken())\n  const [user, setUser] = useState<ApiUser | null>(() => PREVIEW_ENABLED && !getStoredToken() ? previewUser : null)", "status login")
