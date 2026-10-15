@@ -8,13 +8,13 @@ CLV_STRATEGY = "median"
 MODEL_NAME = "baseline-recency90-median-clv-proposed-dev-1.0"
 
 
-def _median(values: list[int | float]) -> float:
+def _median(values: list[int] | list[float]) -> float:
     if not values:
         return 0.0
     return float(statistics.median(values))
 
 
-def _mean(values: list[int | float]) -> float:
+def _mean(values: list[int] | list[float]) -> float:
     if not values:
         return 0.0
     return float(statistics.mean(values))

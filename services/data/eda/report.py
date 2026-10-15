@@ -37,11 +37,13 @@ def summarize(inbound: Path, cutoff: datetime) -> dict:
         field: sum(not r[field] for r in customers)
         for field in ("phone_raw", "email_raw", "member_code")
     }
-    statuses = Counter()
-    seen = set()
-    purchases = Counter()
-    totals = Counter()
-    groups = {name: defaultdict(Counter) for name in ("month", "branch", "channel")}
+    statuses: Counter[str] = Counter()
+    seen: set[tuple[str, ...]] = set()
+    purchases: Counter[str] = Counter()
+    totals: Counter[str] = Counter()
+    groups: dict[str, defaultdict[str, Counter[str]]] = {
+        name: defaultdict(Counter) for name in ("month", "branch", "channel")
+    }
     for row in rows(inbound / "transactions.csv"):
         moment = datetime.fromisoformat(row["transaction_datetime"])
         if moment > cutoff:

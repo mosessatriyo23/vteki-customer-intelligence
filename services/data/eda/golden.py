@@ -7,7 +7,7 @@ import math
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from services.data.ingestion.contracts import TABLES
 from services.data.ingestion.validator import BatchValidator, sha256
@@ -44,7 +44,7 @@ def distribution(values: Iterable[int | None]) -> dict:
     """Describe numeric values, excluding nulls while reporting their count."""
     materialized = list(values)
     observed = sorted(value for value in materialized if value is not None)
-    result = {
+    result: dict[str, Any] = {
         "count": len(observed),
         "missing": len(materialized) - len(observed),
         "min": None,
