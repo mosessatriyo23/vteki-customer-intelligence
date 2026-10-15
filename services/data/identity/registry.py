@@ -236,7 +236,12 @@ class PersistentIdentityRegistry:
         correlation_id: str,
     ) -> dict[str, Any]:
         """Executes a human review decision with mandatory audit trail."""
-        item = self.session.get(ReviewQueueItem, queue_id)
+        stmt = (
+            select(ReviewQueueItem)
+            .where(ReviewQueueItem.id == queue_id)
+            .with_for_update()
+        )
+        item = self.session.scalars(stmt).first()
         if not item:
             raise ValueError(f"Review queue item {queue_id} not found")
         if item.status != "PENDING":
@@ -250,9 +255,21 @@ class PersistentIdentityRegistry:
 
         if action == "APPROVE_MERGE":
             item.status = "APPROVED_MERGE"
-            # Point right source customer to left golden ID
-            mapping = self.session.get(SourceIdentityMapping, item.right_source_id)
-            if mapping and item.left_golden_id:
+            # A Golden ID represents an entire published cluster. Reassign all
+            # members atomically, not just one reviewed source (silent partial
+            # merge would corrupt the registry).
+            if not item.left_golden_id or not item.right_golden_id:
+                raise ValueError("Both published Golden IDs are required for merge")
+            if item.left_golden_id == item.right_golden_id:
+                raise ValueError("Cannot merge a Golden ID with itself")
+            affected = self.session.scalars(
+                select(SourceIdentityMapping).where(
+                    SourceIdentityMapping.golden_customer_id == item.right_golden_id
+                )
+            ).all()
+            if not affected:
+                raise ValueError("Reviewed right Golden ID has no source mappings")
+            for mapping in affected:
                 mapping.golden_customer_id = item.left_golden_id
                 mapping.assignment_type = "MANUAL_OVERRIDE"
                 mapping.assigned_at = now
