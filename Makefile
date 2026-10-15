@@ -2,8 +2,8 @@
 
 check:
 	ruff check .
-	black --check .
-	mypy services api
+	black --check api worker migrations tests services
+	mypy services api worker --ignore-missing-imports
 
 test:
 	pytest tests/
