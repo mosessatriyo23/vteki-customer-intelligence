@@ -11,6 +11,32 @@ from sqlalchemy.orm import Session
 from api.models import RFMLifecycleSnapshot
 
 
+def _integer_idr(value: Any, field: str) -> int:
+    """Never silently round fractional money or accept booleans as integers."""
+    if isinstance(value, bool):
+        raise ValueError(f"{field}: bool is not an IDR integer")
+    if isinstance(value, int):
+        result = value
+    elif (
+        isinstance(value, str)
+        and value
+        and value.strip() == value
+        and (value.isdigit() or (value[0] == "-" and value[1:].isdigit()))
+    ):
+        result = int(value)
+    else:
+        raise ValueError(f"{field}: expected integer IDR, got {value!r}")
+    if result < 0:
+        raise ValueError(f"{field}: IDR amount must be nonnegative")
+    return result
+
+
+def _require_timezone(value: datetime, field: str) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field}: timezone-aware timestamp required")
+    return value
+
+
 def save_segmentation_snapshots(
     segments: list[dict[str, Any]],
     batch_id: str,
@@ -26,7 +52,9 @@ def save_segmentation_snapshots(
     persisted_count = 0
 
     for s in segments:
-        cutoff_dt = datetime.fromisoformat(s["cutoff_at"])
+        cutoff_dt = _require_timezone(
+            datetime.fromisoformat(s["cutoff_at"]), "cutoff_at"
+        )
         rule_version = s.get("rule_version", "lifecycle-proposed-1.0")
 
         stmt = select(RFMLifecycleSnapshot).where(
@@ -43,7 +71,7 @@ def save_segmentation_snapshots(
             existing.identity_status = s["identity_status"]
             existing.recency_days = s.get("recency_days")
             existing.frequency = int(s["frequency"])
-            existing.monetary = int(s["monetary"])
+            existing.monetary = _integer_idr(s["monetary"], "monetary")
             existing.rfm_window_days = int(s.get("rfm_window_days", 365))
             existing.r_score = int(s["r_score"])
             existing.f_score = int(s["f_score"])
@@ -52,7 +80,7 @@ def save_segmentation_snapshots(
             existing.tenure_days = int(s["tenure_days"])
             existing.transactions_60d = int(s["transactions_60d"])
             existing.transactions_90d = int(s["transactions_90d"])
-            existing.revenue_90d = int(s["revenue_90d"])
+            existing.revenue_90d = _integer_idr(s["revenue_90d"], "revenue_90d")
             existing.lifecycle = str(s["lifecycle"])
         else:
             snapshot = RFMLifecycleSnapshot(
@@ -65,7 +93,7 @@ def save_segmentation_snapshots(
                 identity_status=s["identity_status"],
                 recency_days=s.get("recency_days"),
                 frequency=int(s["frequency"]),
-                monetary=int(s["monetary"]),
+                monetary=_integer_idr(s["monetary"], "monetary"),
                 rfm_window_days=int(s.get("rfm_window_days", 365)),
                 r_score=int(s["r_score"]),
                 f_score=int(s["f_score"]),
@@ -74,7 +102,7 @@ def save_segmentation_snapshots(
                 tenure_days=int(s["tenure_days"]),
                 transactions_60d=int(s["transactions_60d"]),
                 transactions_90d=int(s["transactions_90d"]),
-                revenue_90d=int(s["revenue_90d"]),
+                revenue_90d=_integer_idr(s["revenue_90d"], "revenue_90d"),
                 lifecycle=str(s["lifecycle"]),
             )
             session.add(snapshot)

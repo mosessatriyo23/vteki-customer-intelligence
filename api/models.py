@@ -532,7 +532,7 @@ class ProfileSnapshot(Base):
             "golden_customer_id",
             "cutoff_at",
             "identity_registry_version",
-            "source_batch_id",
+            "rule_version",
             name="uq_c360_profile_snapshot",
         ),
         {"schema": "customer360"},
@@ -554,6 +554,9 @@ class ProfileSnapshot(Base):
         String(64), ForeignKey("identity.registry_versions.version_tag")
     )
     source_batch_id: Mapped[str] = mapped_column(String(64))
+    rule_version: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="c360-development-v1"
+    )
     identity_status: Mapped[str] = mapped_column(String(24))
     source_identity_count: Mapped[int] = mapped_column(Integer)
     first_join_date: Mapped[date] = mapped_column(Date)
