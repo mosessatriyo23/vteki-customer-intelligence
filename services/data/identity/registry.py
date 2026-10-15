@@ -69,6 +69,28 @@ class PersistentIdentityRegistry:
         3. Silent split of one published Golden ID cluster is rejected.
         4. Decisions and review queue are persisted with full auditability.
         """
+        # merge() matches primary keys, not the natural unique pair key. Check
+        # existing decisions before any writes so sequential replay is safe and
+        # changed evidence cannot silently overwrite published provenance.
+        existing_decisions = {
+            (row.left_source_id, row.right_source_id): row
+            for row in self.session.scalars(
+                select(MatchDecision).where(MatchDecision.source_batch_id == batch_id)
+            ).all()
+        }
+        for decision in resolution_result.get("decisions", []):
+            existing = existing_decisions.get(
+                (decision["left_source_id"], decision["right_source_id"])
+            )
+            if existing and (
+                existing.registry_version != version_tag
+                or existing.decision != decision["decision"]
+                or existing.heuristic_score != decision["heuristic_score"]
+                or existing.reason != decision["reason"]
+            ):
+                raise ValueError(
+                    "Published match decision differs from replay; review required"
+                )
         self.register_version_if_absent(version_tag)
         prior_mapping = self.get_existing_mapping()
         proposed_mapping = resolution_result["mapping"]
@@ -172,7 +194,10 @@ class PersistentIdentityRegistry:
                 reason=dec["reason"],
                 created_at=now,
             )
-            self.session.merge(decision_obj)
+            pair = (dec["left_source_id"], dec["right_source_id"])
+            if pair not in existing_decisions:
+                self.session.add(decision_obj)
+                existing_decisions[pair] = decision_obj
 
             # 5. Populate Review Queue for REVIEW decisions
             if dec["decision"] == "REVIEW":
