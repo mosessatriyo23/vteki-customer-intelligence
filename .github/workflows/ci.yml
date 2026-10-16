@@ -84,8 +84,32 @@ jobs:
             if curl --fail http://127.0.0.1:8000/health; then break; fi
             sleep 1
           done
-          token=$(python -c "import jwt, time; print(jwt.encode({'sub':'1','roles':['admin'],'iat':int(time.time()),'exp':int(time.time())+600}, '${JWT_SECRET}', algorithm='HS256'))")
-          st run http://127.0.0.1:8000/openapi.json --checks all --max-examples 10 --max-time 30 -H "Authorization: Bearer $token"
+          # Prove the real login endpoint works with the bootstrapped admin.
+          # Random credentials from fuzzing are expected to return 401, so
+          # /auth/login is excluded from fuzzing ONLY (not from the API or tests).
+          token=$(python - <<'PYLOGIN'
+          import json
+          import os
+          import urllib.request
+
+          payload = json.dumps({
+              "email": os.environ["BOOTSTRAP_ADMIN_EMAIL"],
+              "password": os.environ["BOOTSTRAP_ADMIN_PASSWORD"],
+          }).encode("utf-8")
+          request = urllib.request.Request(
+              "http://127.0.0.1:8000/auth/login",
+              data=payload,
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          with urllib.request.urlopen(request, timeout=10) as response:
+              assert response.status == 200
+              token = json.load(response)["access_token"]
+          print(token)
+          PYLOGIN
+          )
+          curl --fail --silent --show-error -H "Authorization: Bearer $token" http://127.0.0.1:8000/admin/health > /dev/null
+          st run http://127.0.0.1:8000/openapi.json --checks all --max-examples 10 --max-time 30 --exclude-path /auth/login -H "Authorization: Bearer $token"
 
       - name: Show FastAPI Error Logs
         if: failure()

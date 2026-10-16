@@ -1,4 +1,5 @@
 import os
+import re
 
 os.environ["JWT_SECRET"] = "test-only-secret-that-is-long-enough-for-hmac"
 os.environ["DATABASE_URL"] = "sqlite://"
@@ -123,6 +124,45 @@ def test_bcrypt_hash_verifies_long_password_without_truncation():
     assert encoded.startswith("$2b$")
     assert verify_password(password, encoded)
     assert not verify_password(password + "!", encoded)
+
+
+def test_user_creation_email_schema_rejects_reserved_domains(client: TestClient):
+    schema = client.get("/openapi.json").json()
+    user_email = schema["components"]["schemas"]["UserCreate"]["properties"]["email"]
+    assert user_email["format"] == "email"
+    pattern = user_email["pattern"]
+    for domain in (
+        "g.test",
+        "example.invalid",
+        "corp.local",
+        "x.ONION",
+        "a.ARPA",
+    ):
+        assert re.fullmatch(pattern, f"test@{domain}") is None, domain
+    assert re.fullmatch(pattern, "person@example.com") is not None
+
+    token = token_for(client, "admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    invalid = client.post(
+        "/auth/users",
+        json={
+            "email": "user@g.test",
+            "password": "long-enough-password",
+            "roles": ["analyst"],
+        },
+        headers=headers,
+    )
+    assert invalid.status_code == 422
+    valid = client.post(
+        "/auth/users",
+        json={
+            "email": "new.user@example.com",
+            "password": "long-enough-password",
+            "roles": ["analyst"],
+        },
+        headers=headers,
+    )
+    assert valid.status_code == 201, valid.text
 
 
 def test_openapi_documents_authentication_and_authorization_errors():

@@ -16,9 +16,27 @@ from api.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# `email-validator` rejects special-use domain suffixes even though OpenAPI's
+# `format: email` accepts them. Advertise that server restriction in the request
+# schema so contract generators do not classify *.test / *.invalid as valid.
+# Case-insensitive ASCII character classes keep this pattern JSON Schema / ECMA
+# compatible (Python-only (?i) inline flags are not portable to OpenAPI).
+_RESERVED_EMAIL_SUFFIXES = ("arpa", "invalid", "local", "localhost", "onion", "test")
+
+
+def _case_insensitive_ascii(value: str) -> str:
+    return "".join(f"[{letter.lower()}{letter.upper()}]" for letter in value)
+
+
+EMAIL_SCHEMA_PATTERN = (
+    r"^(?![^@\s]+@(?:[^@\s]+\.)*(?:"
+    + "|".join(_case_insensitive_ascii(s) for s in _RESERVED_EMAIL_SUFFIXES)
+    + r")$)[^@\s]+@[^@\s]+\.[^@\s]+$"
+)
+
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr = Field(json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN})
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -29,7 +47,7 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: EmailStr = Field(json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN})
     password: str = Field(min_length=12, max_length=128)
     roles: list[Literal["admin", "analyst", "operator", "campaign_manager"]] = Field(
         min_length=1

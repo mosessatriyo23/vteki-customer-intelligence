@@ -1,4 +1,4 @@
-import time
+from types import SimpleNamespace
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -39,23 +39,45 @@ def test_pipeline_runs_steps_in_order_and_persists_results(monkeypatch):
     engine.dispose()
 
 
-def test_pipeline_does_not_overlap_and_marks_budget_overrun(monkeypatch):
+def test_pipeline_does_not_overlap(monkeypatch):
+    # The nested call must be rejected while the outer run holds its lock.
+    # Do not tie this assertion to wall-clock performance of SQLite/CI runners.
     engine, session_factory = make_session_factory()
     monkeypatch.setattr(scheduler, "engine", engine)
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
     nested_result = []
 
-    def slow_step(_):
+    def nested_step(_):
         nested_result.append(
-            scheduler.run_pipeline(steps=(), handlers={}, budget_seconds=1)
+            scheduler.run_pipeline(steps=(), handlers={}, budget_seconds=60)
         )
-        time.sleep(0.02)
+        return {"finished": True}
+
+    assert scheduler.run_pipeline(
+        steps=("nested",), handlers={"nested": nested_step}, budget_seconds=60
+    )
+    assert nested_result == [False]
+    with session_factory() as session:
+        run = session.query(PipelineRun).one()
+        assert run.status == "completed"
+    engine.dispose()
+
+
+def test_pipeline_marks_budget_overrun(monkeypatch):
+    # Simulated monotonic time removes timing variance across CI hosts.
+    engine, session_factory = make_session_factory()
+    monkeypatch.setattr(scheduler, "engine", engine)
+    monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
+    clock = [100.0]
+    monkeypatch.setattr(scheduler, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+
+    def over_budget_step(_):
+        clock[0] += 6.0
         return {"finished": True}
 
     assert not scheduler.run_pipeline(
-        steps=("slow",), handlers={"slow": slow_step}, budget_seconds=0.005
+        steps=("slow",), handlers={"slow": over_budget_step}, budget_seconds=5
     )
-    assert nested_result == [False]
     with session_factory() as session:
         run = session.query(PipelineRun).one()
         assert run.status == "failed"
