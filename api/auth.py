@@ -16,9 +16,25 @@ from api.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# EmailStr rejects special-use domains beyond JSON Schema's generic email format.
+# Publish that restriction without relaxing runtime validation or hiding 422s.
+_RESERVED_DOMAINS = ("arpa", "invalid", "local", "localhost", "onion", "test")
+_RESERVED_PATTERN = "|".join(
+    "".join(f"[{char.lower()}{char.upper()}]" for char in domain)
+    for domain in _RESERVED_DOMAINS
+)
+EMAIL_SCHEMA_PATTERN = rf"^[^@]+@(?!(?:.*\.)?(?:{_RESERVED_PATTERN})\.?$)"
+
+
+def email_field():
+    return Field(
+        json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN},
+        description="Email address; special-use/reserved domains are not accepted.",
+    )
+
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: EmailStr = email_field()
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -28,8 +44,8 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
-class UserCreate(BaseModel):
-    email: EmailStr
+class UserCreate(BaseModel, extra="ignore"):
+    email: EmailStr = email_field()
     password: str = Field(min_length=12, max_length=128)
     roles: list[Literal["admin", "analyst", "operator", "campaign_manager"]] = Field(
         min_length=1
@@ -38,7 +54,7 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    email: EmailStr
+    email: EmailStr = email_field()
     roles: list[str]
 
 

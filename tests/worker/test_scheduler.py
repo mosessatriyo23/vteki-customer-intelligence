@@ -1,5 +1,3 @@
-import time
-
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -45,15 +43,20 @@ def test_pipeline_does_not_overlap_and_marks_budget_overrun(monkeypatch):
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
     nested_result = []
 
+    # Advance a virtual monotonic clock only inside the handler. This tests
+    # overlap and post-handler expiry without depending on machine speed.
+    current = [100.0]
+    monkeypatch.setattr(scheduler.time, "monotonic", lambda: current[0])
+
     def slow_step(_):
         nested_result.append(
             scheduler.run_pipeline(steps=(), handlers={}, budget_seconds=1)
         )
-        time.sleep(0.02)
+        current[0] += 6
         return {"finished": True}
 
     assert not scheduler.run_pipeline(
-        steps=("slow",), handlers={"slow": slow_step}, budget_seconds=0.005
+        steps=("slow",), handlers={"slow": slow_step}, budget_seconds=5
     )
     assert nested_result == [False]
     with session_factory() as session:
