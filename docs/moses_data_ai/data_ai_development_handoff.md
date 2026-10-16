@@ -8,14 +8,14 @@ production approval implied. Code is separated from ignored `inbound/`, `artifac
 
 1. Validated schema-v2 synthetic inbound with `BatchValidator`, source-only EDA to
    `artifacts/eda/dev-run2` (monthly, branch, channel, missing references, purchase
-   frequency per CRM source identity). See `docs/eda_development_v1.md`.
+   frequency per CRM source identity). See `docs/moses_data_ai/eda_development_v1.md`.
 2. Recomputed Golden-level RFM/lifecycle/identity-status aggregate EDA from checksummed
    resolver + validated inbound to `artifacts/eda/golden-run1`; never use ground truth
-   as matching/model input. See `docs/eda_golden_v1.md`.
+   as matching/model input. See `docs/moses_data_ai/eda_golden_v1.md`.
 3. Development historical features from current identity snapshot (existing PIT v1),
    separate technical PROPOSED future 90-day churn/revenue labels, and stdlib naive
    recency/median baselines with purged chronological cutoff holdout. See
-   `docs/point_in_time_features_dev.md` and `docs/model_development_baseline.md`.
+   `docs/moses_data_ai/point_in_time_features_dev.md` and `docs/moses_data_ai/model_development_baseline.md`.
 
 Observed synthetic full dataset at +07 cutoff 2026-09-06 23:59:59:
 444011 transaction rows; 4506 fingerprint replays removed; 421859 qualifying
