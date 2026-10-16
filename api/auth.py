@@ -39,10 +39,16 @@ EMAIL_SCHEMA_PATTERN = (
 )
 
 
-class LoginRequest(BaseModel):
-    email: EmailStr = Field(
-        max_length=254, json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN}
+def email_field():
+    return Field(
+        max_length=254,
+        json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN},
+        description="Email address with DNS-valid TLD; special-use/reserved domains are not accepted.",
     )
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr = email_field()
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -52,10 +58,8 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
-class UserCreate(BaseModel):
-    email: EmailStr = Field(
-        max_length=254, json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN}
-    )
+class UserCreate(BaseModel, extra="ignore"):
+    email: EmailStr = email_field()
     password: str = Field(min_length=12, max_length=128)
     roles: list[Literal["admin", "analyst", "operator", "campaign_manager"]] = Field(
         min_length=1
@@ -64,7 +68,7 @@ class UserCreate(BaseModel):
 
 class UserResponse(BaseModel):
     id: int
-    email: EmailStr
+    email: EmailStr = email_field()
     roles: list[str]
 
 

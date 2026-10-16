@@ -86,11 +86,63 @@ def token_for(client: TestClient, email: str) -> str:
     return response.json()["access_token"]
 
 
+def test_auth_openapi_declares_runtime_email_domain_restriction():
+    from api.auth import EMAIL_SCHEMA_PATTERN
+
+    schema = app.openapi()["components"]["schemas"]["UserCreate"]
+    self_email = schema["properties"]["email"]
+    assert self_email["format"] == "email"
+    assert self_email["pattern"] == EMAIL_SCHEMA_PATTERN
+    assert "additionalProperties" not in schema  # extras intentionally ignored
+
+
 def test_login_and_current_user(client: TestClient):
     token = token_for(client, "analyst@example.com")
     response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     assert response.json()["roles"] == ["analyst"]
+
+
+def test_api_extra_user_fields_are_ignored(client: TestClient):
+    token = token_for(client, "admin@example.com")
+    response = client.post(
+        "/auth/users",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "email": "extra-ignored@example.com",
+            "password": "correct-horse-battery",
+            "roles": ["analyst"],
+            "unknown": 7,
+            "": None,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["email"] == "extra-ignored@example.com"
+    assert set(response.json()) == {"id", "email", "roles"}
+
+
+def test_api_reserved_email_domain_returns_422(client: TestClient):
+    token = token_for(client, "admin@example.com")
+    assert (
+        client.post(
+            "/auth/users",
+            headers={"Authorization": f"Bearer {token}"},
+            json={
+                "email": "reserved@example.test",
+                "password": "correct-horse-battery",
+                "roles": ["analyst"],
+            },
+        ).status_code
+        == 422
+    )
+    with TestClient(app) as other:
+        assert (
+            other.post(
+                "/auth/login",
+                json={"email": "reserved@example.test", "password": "any"},
+            ).status_code
+            == 422
+        )
 
 
 def test_rbac_rejects_analyst_and_allows_admin(client: TestClient):
