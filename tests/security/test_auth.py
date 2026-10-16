@@ -131,15 +131,28 @@ def test_user_creation_email_schema_rejects_reserved_domains(client: TestClient)
     user_email = schema["components"]["schemas"]["UserCreate"]["properties"]["email"]
     assert user_email["format"] == "email"
     pattern = user_email["pattern"]
-    for domain in (
-        "g.test",
-        "example.invalid",
-        "corp.local",
-        "x.ONION",
-        "a.ARPA",
+    invalid_emails = (
+        "0@0.0",  # Schemathesis CI regression: numeric TLD
+        "other@0.123",
+        "a@b.c0",
+        "user@g.test",
+        "user@example.invalid",
+        "user@corp.local",
+        "user@x.ONION",
+        "user@a.ARPA",
+        "user@-invalid.com",
+        "user@invalid-.com",
+        "user@example..com",
+        "user..name@example.com",
+    )
+    for email in invalid_emails:
+        assert re.fullmatch(pattern, email) is None, email
+    for email in (
+        "person@example.com",
+        "new.user+tag@example.co.id",
+        "0@0.aa",  # numeric domain labels are fine if the TLD is valid
     ):
-        assert re.fullmatch(pattern, f"test@{domain}") is None, domain
-    assert re.fullmatch(pattern, "person@example.com") is not None
+        assert re.fullmatch(pattern, email) is not None, email
 
     token = token_for(client, "admin@example.com")
     headers = {"Authorization": f"Bearer {token}"}
@@ -153,6 +166,16 @@ def test_user_creation_email_schema_rejects_reserved_domains(client: TestClient)
         headers=headers,
     )
     assert invalid.status_code == 422
+    numeric_tld = client.post(
+        "/auth/users",
+        json={
+            "email": "0@0.0",
+            "password": "long-enough-password",
+            "roles": ["analyst"],
+        },
+        headers=headers,
+    )
+    assert numeric_tld.status_code == 422
     valid = client.post(
         "/auth/users",
         json={

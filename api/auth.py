@@ -16,11 +16,11 @@ from api.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# `email-validator` rejects special-use domain suffixes even though OpenAPI's
-# `format: email` accepts them. Advertise that server restriction in the request
-# schema so contract generators do not classify *.test / *.invalid as valid.
-# Case-insensitive ASCII character classes keep this pattern JSON Schema / ECMA
-# compatible (Python-only (?i) inline flags are not portable to OpenAPI).
+# OpenAPI format=email is broader than EmailStr/email-validator: for example,
+# Schemathesis considers 0@0.0 valid, but EmailStr rejects numeric-only TLDs.
+# Document a conservative ASCII subset of valid mailbox/domain syntax, including
+# DNS label and TLD rules, and exclude email-validator's special-use suffixes.
+# The pattern is portable to JSON Schema / JavaScript regular expressions.
 _RESERVED_EMAIL_SUFFIXES = ("arpa", "invalid", "local", "localhost", "onion", "test")
 
 
@@ -31,12 +31,18 @@ def _case_insensitive_ascii(value: str) -> str:
 EMAIL_SCHEMA_PATTERN = (
     r"^(?![^@\s]+@(?:[^@\s]+\.)*(?:"
     + "|".join(_case_insensitive_ascii(s) for s in _RESERVED_EMAIL_SUFFIXES)
-    + r")$)[^@\s]+@[^@\s]+\.[^@\s]+$"
+    + r")$)(?=[^@]{1,64}@)"
+    + r"[A-Za-z0-9_%+\-]+(?:\.[A-Za-z0-9_%+\-]+)*@"
+    + r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    + r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
+    + r"\.[A-Za-z]{2,63}$"
 )
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr = Field(json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN})
+    email: EmailStr = Field(
+        max_length=254, json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN}
+    )
     password: str = Field(min_length=1, max_length=256)
 
 
@@ -47,7 +53,9 @@ class TokenResponse(BaseModel):
 
 
 class UserCreate(BaseModel):
-    email: EmailStr = Field(json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN})
+    email: EmailStr = Field(
+        max_length=254, json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN}
+    )
     password: str = Field(min_length=12, max_length=128)
     roles: list[Literal["admin", "analyst", "operator", "campaign_manager"]] = Field(
         min_length=1
