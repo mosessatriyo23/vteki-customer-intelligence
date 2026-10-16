@@ -1,4 +1,4 @@
-"""Persistence adapter for Customer360 profile snapshots."""
+"""Versioned Customer 360 snapshot persistence (integer IDR, replay-safe)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,6 @@ from api.models import ProfileSnapshot
 
 
 def _integer_idr(value: Any, field: str) -> int:
-    """Never silently round fractional money or accept booleans as integers."""
     if isinstance(value, bool):
         raise ValueError(f"{field}: bool is not an IDR integer")
     if isinstance(value, int):
@@ -37,82 +36,90 @@ def _require_timezone(value: datetime, field: str) -> datetime:
     return value
 
 
+def _date_time(value: Any, field: str) -> datetime:
+    return _require_timezone(
+        datetime.fromisoformat(value) if isinstance(value, str) else value, field
+    )
+
+
+def _same_timestamp(stored: datetime | None, incoming: datetime | None) -> bool:
+    if stored is None or incoming is None:
+        return stored is None and incoming is None
+    if stored.tzinfo is None:
+        # SQLite development backend drops timezone info when persisting values.
+        return stored == incoming.replace(tzinfo=None)
+    return stored.astimezone(timezone.utc) == incoming.astimezone(timezone.utc)
+
+
 def save_profile_snapshots(
     profiles: list[dict[str, Any]],
     batch_id: str,
     registry_version: str,
     session: Session,
     rule_version: str = "c360-development-v1",
+    *,
+    commit: bool = True,
 ) -> int:
-    """Persists Customer 360 profile snapshots into persistent storage.
+    """Persist snapshots; commit=False lets a parent transaction publish both outputs.
 
-    Enforces unique constraint:
-    (golden_customer_id, cutoff_at, identity_registry_version, rule_version)
+    Once a natural key is published, replay with identical data is idempotent.
+    A conflicting replay is rejected instead of rewriting historical state.
     """
-    if not rule_version:
-        raise ValueError("rule_version must not be empty")
+    if not batch_id or not registry_version or not rule_version:
+        raise ValueError("batch_id, registry_version and rule_version are required")
     now = datetime.now(timezone.utc)
-    persisted_count = 0
-
-    for p in profiles:
-        cutoff_dt = _require_timezone(
-            datetime.fromisoformat(p["cutoff_at"]), "cutoff_at"
-        )
-        first_join = (
-            datetime.fromisoformat(p["first_join_date"]).date()
-            if isinstance(p["first_join_date"], str)
-            else p["first_join_date"]
-        )
+    processed: set[tuple[str, datetime]] = set()
+    for profile in profiles:
+        cutoff_at = _date_time(profile["cutoff_at"], "cutoff_at")
+        key = (profile["golden_customer_id"], cutoff_at)
+        if key in processed:
+            raise ValueError("Duplicate Customer 360 natural key in the same publish")
+        processed.add(key)
+        first_join = profile["first_join_date"]
+        if isinstance(first_join, str):
+            first_join = datetime.fromisoformat(first_join).date()
         last_tx = (
-            _require_timezone(
-                datetime.fromisoformat(p["last_transaction_at"]), "last_transaction_at"
-            )
-            if p.get("last_transaction_at")
+            _date_time(profile["last_transaction_at"], "last_transaction_at")
+            if profile.get("last_transaction_at")
             else None
         )
-
-        stmt = select(ProfileSnapshot).where(
-            ProfileSnapshot.golden_customer_id == p["golden_customer_id"],
-            ProfileSnapshot.cutoff_at == cutoff_dt,
-            ProfileSnapshot.identity_registry_version == registry_version,
-            ProfileSnapshot.rule_version == rule_version,
+        attrs = dict(
+            golden_customer_id=profile["golden_customer_id"],
+            cutoff_at=cutoff_at,
+            identity_registry_version=registry_version,
+            rule_version=rule_version,
+            source_batch_id=batch_id,
+            identity_status=profile["identity_status"],
+            source_identity_count=int(profile["source_identity_count"]),
+            first_join_date=first_join,
+            transaction_count=int(profile["transaction_count"]),
+            retained_revenue=_integer_idr(
+                profile["retained_revenue"], "retained_revenue"
+            ),
+            last_transaction_at=last_tx,
+            visit_count=int(profile["visit_count"]),
+            renewal_count=int(profile["renewal_count"]),
         )
-        existing = session.scalars(stmt).first()
-
+        existing = session.scalars(
+            select(ProfileSnapshot).where(
+                ProfileSnapshot.golden_customer_id == attrs["golden_customer_id"],
+                ProfileSnapshot.cutoff_at == cutoff_at,
+                ProfileSnapshot.identity_registry_version == registry_version,
+                ProfileSnapshot.rule_version == rule_version,
+            )
+        ).first()
         if existing:
-            existing.generated_at = now
-            existing.source_batch_id = batch_id
-            existing.identity_status = p["identity_status"]
-            existing.source_identity_count = int(p["source_identity_count"])
-            existing.first_join_date = first_join
-            existing.transaction_count = int(p["transaction_count"])
-            existing.retained_revenue = _integer_idr(
-                p["retained_revenue"], "retained_revenue"
-            )
-            existing.last_transaction_at = last_tx
-            existing.visit_count = int(p["visit_count"])
-            existing.renewal_count = int(p["renewal_count"])
+            # SQLite does not preserve TZINFO; do not compare timestamp object
+            # values on replay.  All other fields must agree exactly.
+            fields = set(attrs) - {"cutoff_at", "last_transaction_at"}
+            if any(getattr(existing, field) != attrs[field] for field in fields):
+                raise ValueError("Conflicting Customer 360 snapshot replay")
+            if not _same_timestamp(existing.last_transaction_at, last_tx):
+                raise ValueError("Conflicting Customer 360 last_transaction_at replay")
         else:
-            snapshot = ProfileSnapshot(
-                golden_customer_id=p["golden_customer_id"],
-                cutoff_at=cutoff_dt,
-                generated_at=now,
-                identity_registry_version=registry_version,
-                source_batch_id=batch_id,
-                rule_version=rule_version,
-                identity_status=p["identity_status"],
-                source_identity_count=int(p["source_identity_count"]),
-                first_join_date=first_join,
-                transaction_count=int(p["transaction_count"]),
-                retained_revenue=_integer_idr(
-                    p["retained_revenue"], "retained_revenue"
-                ),
-                last_transaction_at=last_tx,
-                visit_count=int(p["visit_count"]),
-                renewal_count=int(p["renewal_count"]),
-            )
-            session.add(snapshot)
-        persisted_count += 1
-
-    session.commit()
-    return persisted_count
+            session.add(ProfileSnapshot(**attrs, generated_at=now))
+    if commit:
+        session.commit()
+    else:
+        session.flush()
+    return len(profiles)

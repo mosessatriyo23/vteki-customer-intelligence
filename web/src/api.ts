@@ -10,6 +10,22 @@ export type ApiCustomer = {
   next_best_action: string | null
   created_at: string
 }
+export type ApiGoldenCustomer = {
+  golden_customer_id: string
+  cutoff_at: string
+  generated_at: string
+  identity_registry_version: string
+  rule_version: string
+  source_batch_id: string
+  identity_status: string
+  source_identity_count: number
+  transaction_count: number
+  retained_revenue: number
+  visit_count: number
+  renewal_count: number
+  lifecycle: string | null
+  rfm_code: string | null
+}
 export type ApiCampaign = {
   id: number
   name: string
@@ -98,6 +114,8 @@ export const api = {
   login: (email: string, password: string) => request<{ access_token: string; token_type: string; expires_in: number }>('/auth/login', null, { method: 'POST', body: JSON.stringify({ email, password }) }),
   me: (token: string) => request<ApiUser>('/auth/me', token),
   customers: (token: string, query = '') => request<ApiCustomer[]>(`/customers?limit=200${query ? `&q=${encodeURIComponent(query)}` : ''}`, token),
+  goldenCustomers: (token: string) => request<ApiGoldenCustomer[]>('/customers/golden?limit=200', token),
+  goldenProvenance: (token: string, goldenId: string) => request<Record<string, unknown>>(`/customers/golden/${encodeURIComponent(goldenId)}/provenance`, token),
   customerProvenance: (token: string, id: number) => request<Record<string, unknown>>(`/customers/${id}/provenance`, token),
   seedCustomers: (token: string) => request<{ message: string }>('/customers/seed', token, { method: 'POST' }),
   campaigns: (token: string) => request<ApiCampaign[]>('/campaigns', token),

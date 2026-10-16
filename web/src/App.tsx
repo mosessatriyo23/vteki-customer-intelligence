@@ -33,6 +33,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { api, ApiError, getStoredToken, storeToken } from './api'
+import { GoldenSnapshotsPanel } from './GoldenSnapshotsPanel'
 import type { ApiCampaign, ApiCustomer, ApiDecision, ApiReview, ApiUser } from './api'
 
 type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring'
@@ -94,7 +95,7 @@ const initialDecisions: Decision[] = []
 // VTEKI_LOCAL_PREVIEW_ENABLED
 // Ubah ke false ketika login wajib diterapkan kembali.
 // Preview hanya menggunakan data contoh; endpoint FastAPI tetap memerlukan JWT.
-const PREVIEW_ENABLED = true
+const PREVIEW_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOCAL_PREVIEW === 'true'
 const previewUser: ApiUser = { id: 0, email: 'preview@vteki.local', roles: ['preview'] }
 const previewCustomers: Customer[] = [
   { apiId: 9001, id: 'DEMO-001', name: 'Pelanggan Demo Satu', initials: 'PS', city: 'Jakarta', tier: 'Platinum', value: 'Rp12.500.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo1@example.invalid', phone: '—', since: 'Jan 2026', visits: 16, nextBest: 'Program loyalitas VIP', color: 'coral' },
@@ -512,7 +513,7 @@ function App() {
               onNavigate={(p) => setPage(p)}
             />
           )}
-          {page === 'customers' && <CustomerPage customers={filteredCustomers} selected={selectedCustomer} provenance={provenance} onSelect={selectCustomer} search={search} onSearch={setSearch} onSeed={seedCustomers} canSeed={user.roles.includes('admin')} />}
+          {page === 'customers' && <><CustomerPage customers={filteredCustomers} selected={selectedCustomer} provenance={provenance} onSelect={selectCustomer} search={search} onSearch={setSearch} onSeed={seedCustomers} canSeed={user.roles.includes('admin')} /><GoldenSnapshotsPanel token={token} canReview={user.roles.includes('admin') || user.roles.includes('analyst')} /></>}
           {page === 'campaigns' && <CampaignPage campaigns={campaigns} canManage={canManageCampaigns} onNew={() => setBuilderOpen(true)} onTransition={transitionCampaign} />}
           {page === 'reviews' && (
             <IdentityReviewPage 
