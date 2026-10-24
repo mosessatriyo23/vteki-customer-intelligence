@@ -53,7 +53,7 @@ jobs:
         run: mypy services api worker --ignore-missing-imports
 
       - name: Verify Python Formatting
-        run: black --check api worker migrations tests/security/test_auth.py tests/worker
+        run: black --check api worker migrations tests/security/test_auth.py tests/security/test_route_rbac_coverage.py tests/worker tests/data/test_snapshot_atomicity.py tests/integration/test_postgres_platform.py
 
       - name: Enforce T-SEC-03 Security Allowlist
         run: |
@@ -68,6 +68,25 @@ jobs:
 
       - name: Apply PostgreSQL Migrations
         run: alembic upgrade head
+
+      - name: Provision least-privilege PostgreSQL role groups
+        run: |
+          python - <<'PY'
+          import psycopg
+          from pathlib import Path
+
+          sql = Path("scripts/db_permissions.sql").read_text(encoding="utf-8")
+          with psycopg.connect(
+              "host=localhost dbname=vteki_ci user=postgres password=postgres",
+              autocommit=True,
+          ) as connection:
+              connection.execute(sql, prepare=False)
+          PY
+
+      - name: Verify PostgreSQL governance, append-only audit and role isolation
+        env:
+          VTEKI_TEST_POSTGRES_URL: "postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci"
+        run: pytest -q tests/integration/test_postgres_platform.py
 
       - name: Bootstrap CI Administrator
         run: python -m api.bootstrap

@@ -1,4 +1,4 @@
-from types import SimpleNamespace
+import time as wall_time
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -7,6 +7,20 @@ from sqlalchemy.pool import StaticPool
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.models import PipelineRun
 from worker import scheduler
+
+
+def extract_handler(_: dict) -> dict:
+    return {"rows": 4}
+
+
+def measure_handler(_: dict) -> dict:
+    return {"drift": 0.1}
+
+
+def blocking_handler(_: dict) -> dict:
+    """Importable handler used to verify that the watchdog kills a stuck process."""
+    wall_time.sleep(20)
+    return {"finished": True}
 
 
 def make_session_factory():
@@ -21,65 +35,63 @@ def test_pipeline_runs_steps_in_order_and_persists_results(monkeypatch):
     engine, session_factory = make_session_factory()
     monkeypatch.setattr(scheduler, "engine", engine)
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
-    called = []
     assert scheduler.run_pipeline(
         steps=("extract", "measure"),
-        handlers={
-            "extract": lambda _: called.append("extract") or {"rows": 4},
-            "measure": lambda _: called.append("measure") or {"drift": 0.1},
-        },
-        budget_seconds=5,
+        handlers={"extract": extract_handler, "measure": measure_handler},
+        budget_seconds=10,
     )
-    assert called == ["extract", "measure"]
     with session_factory() as session:
         run = session.query(PipelineRun).one()
         assert run.status == "completed"
+        assert list(run.step_results) == ["extract", "measure"]
         assert run.step_results == {"extract": {"rows": 4}, "measure": {"drift": 0.1}}
         assert run.finished_at is not None
     engine.dispose()
 
 
-def test_pipeline_does_not_overlap(monkeypatch):
-    # The nested call must be rejected while the outer run holds its lock.
-    # Do not tie this assertion to wall-clock performance of SQLite/CI runners.
+def test_pipeline_skips_when_local_run_lock_is_held(monkeypatch):
     engine, session_factory = make_session_factory()
     monkeypatch.setattr(scheduler, "engine", engine)
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
-    nested_result = []
-
-    def nested_step(_):
-        nested_result.append(
-            scheduler.run_pipeline(steps=(), handlers={}, budget_seconds=60)
-        )
-        return {"finished": True}
-
-    assert scheduler.run_pipeline(
-        steps=("nested",), handlers={"nested": nested_step}, budget_seconds=60
-    )
-    assert nested_result == [False]
+    assert scheduler._local_pipeline_lock.acquire(blocking=False)
+    try:
+        assert not scheduler.run_pipeline(steps=(), handlers={}, budget_seconds=2)
+    finally:
+        scheduler._local_pipeline_lock.release()
     with session_factory() as session:
-        run = session.query(PipelineRun).one()
-        assert run.status == "completed"
+        assert session.query(PipelineRun).count() == 0
     engine.dispose()
 
 
-def test_pipeline_marks_budget_overrun(monkeypatch):
-    # Simulated monotonic time removes timing variance across CI hosts.
+def test_pipeline_records_hard_timeout_and_terminates_child(monkeypatch):
     engine, session_factory = make_session_factory()
     monkeypatch.setattr(scheduler, "engine", engine)
     monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
-    clock = [100.0]
-    monkeypatch.setattr(scheduler, "time", SimpleNamespace(monotonic=lambda: clock[0]))
-
-    def over_budget_step(_):
-        clock[0] += 6.0
-        return {"finished": True}
-
+    started = wall_time.perf_counter()
     assert not scheduler.run_pipeline(
-        steps=("slow",), handlers={"slow": over_budget_step}, budget_seconds=5
+        steps=("blocked",), handlers={"blocked": blocking_handler}, budget_seconds=1.5
+    )
+    elapsed = wall_time.perf_counter() - started
+    assert elapsed < 10
+    with session_factory() as session:
+        run = session.query(PipelineRun).one()
+        assert run.status == "failed"
+        assert "deadline" in (run.error_summary or "")
+        assert "terminated" in (run.error_summary or "")
+    engine.dispose()
+
+
+def test_pipeline_rejects_non_importable_handler(monkeypatch):
+    engine, session_factory = make_session_factory()
+    monkeypatch.setattr(scheduler, "engine", engine)
+    monkeypatch.setattr(scheduler, "SessionLocal", session_factory)
+    assert not scheduler.run_pipeline(
+        steps=("inline",),
+        handlers={"inline": lambda _: {"not_safe": True}},
+        budget_seconds=2,
     )
     with session_factory() as session:
         run = session.query(PipelineRun).one()
         assert run.status == "failed"
-        assert "budget" in (run.error_summary or "")
+        assert "module-level functions" in (run.error_summary or "")
     engine.dispose()
