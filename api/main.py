@@ -10,6 +10,7 @@ from api.auth import router as auth_router
 from api.campaigns import router as campaigns_router
 from api.customers import router as customers_router
 from api.decisions import router as decisions_router
+from api.golden_customers import router as golden_customers_router
 from api.governance import router as governance_router
 from api.identity_reviews import router as identity_reviews_router
 from api.jobs import router as jobs_router
@@ -95,6 +96,7 @@ app = GovernanceFastAPI(title="VTEKI Customer Intelligence API", version="0.1.0"
 app.add_middleware(AuditMiddleware)
 app.include_router(auth_router)
 app.include_router(jobs_router)
+app.include_router(golden_customers_router)
 app.include_router(customers_router)
 app.include_router(campaigns_router)
 app.include_router(audit_router)

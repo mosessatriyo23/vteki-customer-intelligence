@@ -16,20 +16,34 @@ from api.security import (
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-# EmailStr rejects special-use domains beyond JSON Schema's generic email format.
-# Publish that restriction without relaxing runtime validation or hiding 422s.
-_RESERVED_DOMAINS = ("arpa", "invalid", "local", "localhost", "onion", "test")
-_RESERVED_PATTERN = "|".join(
-    "".join(f"[{char.lower()}{char.upper()}]" for char in domain)
-    for domain in _RESERVED_DOMAINS
+# OpenAPI format=email is broader than EmailStr/email-validator: for example,
+# Schemathesis considers 0@0.0 valid, but EmailStr rejects numeric-only TLDs.
+# Document a conservative ASCII subset of valid mailbox/domain syntax, including
+# DNS label and TLD rules, and exclude email-validator's special-use suffixes.
+# The pattern is portable to JSON Schema / JavaScript regular expressions.
+_RESERVED_EMAIL_SUFFIXES = ("arpa", "invalid", "local", "localhost", "onion", "test")
+
+
+def _case_insensitive_ascii(value: str) -> str:
+    return "".join(f"[{letter.lower()}{letter.upper()}]" for letter in value)
+
+
+EMAIL_SCHEMA_PATTERN = (
+    r"^(?![^@\s]+@(?:[^@\s]+\.)*(?:"
+    + "|".join(_case_insensitive_ascii(s) for s in _RESERVED_EMAIL_SUFFIXES)
+    + r")$)(?=[^@]{1,64}@)"
+    + r"[A-Za-z0-9_%+\-]+(?:\.[A-Za-z0-9_%+\-]+)*@"
+    + r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    + r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
+    + r"\.[A-Za-z]{2,63}$"
 )
-EMAIL_SCHEMA_PATTERN = rf"^[^@]+@(?!(?:.*\.)?(?:{_RESERVED_PATTERN})\.?$)"
 
 
 def email_field():
     return Field(
+        max_length=254,
         json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN},
-        description="Email address; special-use/reserved domains are not accepted.",
+        description="Email address with DNS-valid TLD; special-use/reserved domains are not accepted.",
     )
 
 
