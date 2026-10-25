@@ -130,7 +130,7 @@ jobs:
           PYLOGIN
           )
           curl --fail --silent --show-error -H "Authorization: Bearer $token" http://127.0.0.1:8000/admin/health > /dev/null
-          st run http://127.0.0.1:8000/openapi.json --checks all --max-examples 10 --max-time 30 --request-timeout 5 --exclude-path /auth/login -H "Authorization: Bearer $token"
+          st run http://127.0.0.1:8000/openapi.json --checks all --phases fuzzing,stateful --max-examples 10 --max-time 30 --request-timeout 5 --exclude-path /auth/login -H "Authorization: Bearer $token"
 
       - name: Show FastAPI Error Logs
         if: failure()
