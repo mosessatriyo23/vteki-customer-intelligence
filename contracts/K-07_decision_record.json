@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-07_decision_record.json",
+  "title": "K-07 Decision Record Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk pencatatan riwayat keputusan Next-Best-Action (NBA). Field wajib meliputi: decision_id, customer_id, selected_action_id, expected_value, candidates, checks, rationale_text, dan correlation_id.",
+  "type": "object",
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier unik rekaman keputusan (contoh: DEC-20261028-0001 atau UUID)"
+    },
+    "customer_id": {
+      "type": ["string", "integer"],
+      "description": "Identifier pelanggan target keputusan (ID CRM atau Golden Customer ID)"
+    },
+    "selected_action_id": {
+      "type": "string",
+      "enum": [
+        "NO_ACTION",
+        "COMPLAINT_RESOLUTION",
+        "RELATIONSHIP_MANAGER_CONTACT",
+        "RETENTION_OUTREACH",
+        "CROSS_SELL",
+        "UPSELL",
+        "RENEWAL_REMINDER",
+        "SERVICE_REMINDER",
+        "EDUCATION",
+        "LOYALTY_REWARD",
+        "WIN_BACK_OFFER"
+      ],
+      "description": "ID aksi resmi terpilih dari katalog NBA (termasuk NO_ACTION sebagai first-class decision)"
+    },
+    "expected_value": {
+      "type": "number",
+      "description": "Nilai harapan ekonomi (Expected Value) dari aksi yang dipilih (0.0 jika NO_ACTION)"
+    },
+    "candidates": {
+      "type": "array",
+      "description": "Daftar seluruh kandidat aksi yang dievaluasi beserta metrik kalkulasi EV dan kelayakannya",
+      "items": {
+        "type": "object",
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "description": "ID aksi kandidat"
+          },
+          "expected_value": {
+            "type": "number",
+            "description": "Nilai Expected Value hasil kalkulasi untuk kandidat ini"
+          },
+          "propensity": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Skor kecenderungan pelanggan terhadap aksi ini"
+          },
+          "action_weight": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Bobot prioritas strategis aksi"
+          },
+          "incentive_cost": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Estimasi biaya insentif yang dibebankan"
+          },
+          "is_eligible": {
+            "type": "boolean",
+            "description": "Apakah kandidat lolos aturan kelayakan bisnis"
+          },
+          "rejection_reason": {
+            "type": ["string", "null"],
+            "description": "Alasan diskualifikasi jika kandidat tidak lolos"
+          },
+          "rank": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Peringkat kandidat berdasarkan Expected Value"
+          }
+        },
+        "required": [
+          "action_id",
+          "expected_value",
+          "is_eligible"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "checks": {
+      "type": "array",
+      "description": "Daftar hasil evaluasi pemeriksaan protektif dan kebijakan (Suppression, Fatigue, Eligibility, Suitability)",
+      "items": {
+        "type": "object",
+        "properties": {
+          "check_name": {
+            "type": "string",
+            "description": "Nama pemeriksaan (contoh: CONSENT_CHECK, COMPLAINT_SUPPRESSION_CHECK, FATIGUE_CHECK, SUITABILITY_CHECK)"
+          },
+          "check_category": {
+            "type": "string",
+            "enum": [
+              "SUPPRESSION",
+              "FATIGUE",
+              "ELIGIBILITY",
+              "SUITABILITY",
+              "VALIDITY",
+              "SYSTEM"
+            ],
+            "description": "Kategori pemeriksaan kebijakan"
+          },
+          "passed": {
+            "type": "boolean",
+            "description": "Status kelulusan pemeriksaan (true = lolos, false = melanggar/terblokir)"
+          },
+          "status": {
+            "type": "string",
+            "description": "Label status hasil pemeriksaan (contoh: PASSED, FREQ_CAP_SUPPRESSED, OPT_OUT_SUPPRESSED, COMPLAINT_SUPPRESSED)"
+          },
+          "reason": {
+            "type": ["string", "null"],
+            "description": "Penjelasan detail jika pemeriksaan gagal atau memblokir"
+          },
+          "details": {
+            "type": "object",
+            "description": "Metadata kontekstual pendukung pemeriksaan"
+          }
+        },
+        "required": [
+          "check_name",
+          "passed",
+          "status"
+        ],
+        "additionalProperties": true
+      }
+    },
+    "rationale_text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Penjelasan naratif keputusan dalam bahasa bisnis yang jelas dan terstruktur"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Correlation identifier untuk melacak alur keputusan end-to-end"
+    },
+    "evaluation_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Waktu UTC saat keputusan dievaluasi"
+    },
+    "engine_version": {
+      "type": "string",
+      "description": "Versi modul NBAEngine yang menghasilkan keputusan"
+    },
+    "channel_selected": {
+      "type": ["string", "null"],
+      "description": "Kanal komunikasi terpilih untuk penghantaran aksi"
+    },
+    "scores_snapshot": {
+      "type": "object",
+      "description": "Snapshot skor prediktif AI dan konteks pelanggan saat evaluasi",
+      "properties": {
+        "churn_score": { "type": "number" },
+        "churn_risk_band": { "type": "string" },
+        "propensity_purchase": { "type": "number" },
+        "propensity_renew": { "type": "number" },
+        "clv_amount": { "type": "number" },
+        "clv_tier": { "type": "string" },
+        "lifecycle_stage": { "type": "string" },
+        "reason_codes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "decision_id",
+    "customer_id",
+    "selected_action_id",
+    "expected_value",
+    "candidates",
+    "checks",
+    "rationale_text",
+    "correlation_id"
+  ],
+  "additionalProperties": true
+}
+

@@ -1,0 +1,161 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-11_audit_event_contract.json",
+  "title": "K-11 Centralized Audit Event Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk struktur log audit terpusat. Field wajib harus menyertakan X-Correlation-ID untuk memfasilitasi pelacakan (traceability).",
+  "type": "object",
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier unik peristiwa audit (UUID atau kode serial audit)"
+    },
+    "event_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Klasifikasi tipe peristiwa audit (misal: http.request, decision.evaluation, campaign.created, policy.suppression, override.applied)"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Waktu pencatatan audit dalam format ISO-8601 UTC"
+    },
+    "X-Correlation-ID": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Correlation identifier untuk memfasilitasi pelacakan (traceability) end-to-end lintas modul dan jaringan"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Alias correlation ID yang dipetakan langsung ke kolom basis data (gov.audit_event.correlation_id)"
+    },
+    "actor": {
+      "type": "object",
+      "description": "Informasi pelaku atau sistem yang mengeksekusi tindakan",
+      "properties": {
+        "actor_id": {
+          "type": ["string", "integer", "null"],
+          "description": "ID pengguna atau sistem pelaku"
+        },
+        "actor_type": {
+          "type": "string",
+          "enum": [
+            "USER",
+            "SYSTEM",
+            "WORKER",
+            "SERVICE",
+            "ANONYMOUS"
+          ],
+          "description": "Jenis entitas pelaku"
+        },
+        "actor_role": {
+          "type": ["string", "null"],
+          "description": "Peran otorisasi aktor (misal: admin, analyst, campaign_manager, operator, system)"
+        }
+      },
+      "required": [
+        "actor_type"
+      ],
+      "additionalProperties": true
+    },
+    "action": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Aksi spesifik yang dijalankan (contoh: EVALUATE_NBA, CREATE_CAMPAIGN, APPLY_OVERRIDE, INGEST_DATA)"
+    },
+    "entity": {
+      "type": "object",
+      "description": "Entitas bisnis yang menjadi target tindakan audit",
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "description": "Tipe entitas (contoh: customer, decision, campaign, ticket, user)"
+        },
+        "entity_id": {
+          "type": ["string", "integer", "null"],
+          "description": "Identifier unik dari entitas bisnis yang dipengaruhi"
+        }
+      },
+      "required": [
+        "entity_type"
+      ],
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "SUCCESS",
+        "FAILURE",
+        "DENIED",
+        "SUPPRESSED",
+        "ERROR"
+      ],
+      "description": "Status hasil dari pelaksanaan tindakan"
+    },
+    "http_context": {
+      "type": "object",
+      "description": "Detail konteks protokol HTTP jika dipicu melalui endpoint REST API",
+      "properties": {
+        "method": {
+          "type": "string",
+          "description": "HTTP Method (GET, POST, PUT, DELETE, PATCH)"
+        },
+        "path": {
+          "type": "string",
+          "description": "Endpoint URL path"
+        },
+        "status_code": {
+          "type": "integer",
+          "description": "Kode respon status HTTP"
+        },
+        "client_ip": {
+          "type": ["string", "null"],
+          "description": "Alamat IP klien pengirim permintaan"
+        },
+        "user_agent": {
+          "type": ["string", "null"],
+          "description": "Informasi browser atau agen pengguna pengirim"
+        }
+      },
+      "additionalProperties": true
+    },
+    "details": {
+      "type": "object",
+      "description": "Payload rincian kontekstual peristiwa audit dalam format JSON",
+      "additionalProperties": true
+    },
+    "immutability": {
+      "type": "object",
+      "description": "Jaminan integritas catatan audit yang bersifat append-only",
+      "properties": {
+        "is_append_only": {
+          "type": "boolean",
+          "default": true,
+          "description": "Menandai bahwa catatan audit ini tidak dapat diubah (immutable)"
+        },
+        "tamper_proof_checksum": {
+          "type": ["string", "null"],
+          "description": "Checksum integritas data audit jika diterapkan"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "X-Correlation-ID",
+    "actor",
+    "action",
+    "entity",
+    "status"
+  ],
+  "additionalProperties": true
+}
+

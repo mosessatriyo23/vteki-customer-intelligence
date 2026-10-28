@@ -1,0 +1,195 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-09_outcome_definition.json",
+  "title": "K-09 Outcome Definition Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk definisi konversi dan akuisisi pendapatan. Harus memuat tipe konversi (BOOKING, PURCHASE, MEMBERSHIP_RENEWAL, UPGRADE) dan aturan transisi dari Pendapatan Kotor (Gross Revenue) hingga Neto.",
+  "type": "object",
+  "properties": {
+    "outcome_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier unik peristiwa konversi atau hasil pendapatan (contoh: OUT-20261028-001)"
+    },
+    "customer_id": {
+      "type": ["string", "integer"],
+      "description": "Identifier pelanggan yang melakukan transaksi konversi"
+    },
+    "conversion_type": {
+      "type": "string",
+      "enum": [
+        "BOOKING",
+        "PURCHASE",
+        "MEMBERSHIP_RENEWAL",
+        "UPGRADE"
+      ],
+      "description": "Tipe konversi resmi sistem: BOOKING (perawatan), PURCHASE (produk retail), MEMBERSHIP_RENEWAL (perpanjangan keanggotaan), UPGRADE (peningkatan tier)"
+    },
+    "transaction_id": {
+      "type": "string",
+      "description": "Identifier transaksi sumber dari POS atau sistem billing"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Waktu terjadinya transaksi konversi (ISO-8601 UTC)"
+    },
+    "currency": {
+      "type": "string",
+      "default": "IDR",
+      "description": "Mata uang transaksi pendapatan (standar sistem: IDR)"
+    },
+    "gross_revenue": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "Pendapatan Kotor (Gross Revenue): nilai total transaksi sebelum potongan diskon, voucher, retur, atau pajak"
+    },
+    "deductions": {
+      "type": "object",
+      "description": "Rincian pemotongan dan penyesuaian biaya dari Pendapatan Kotor",
+      "properties": {
+        "discount_amount": {
+          "type": "number",
+          "minimum": 0.0,
+          "default": 0.0,
+          "description": "Potongan harga langsung dari promosi atau diskon katalog"
+        },
+        "voucher_amount": {
+          "type": "number",
+          "minimum": 0.0,
+          "default": 0.0,
+          "description": "Nilai insentif voucher atau kupon diskon berbatas waktu"
+        },
+        "refund_amount": {
+          "type": "number",
+          "minimum": 0.0,
+          "default": 0.0,
+          "description": "Pengembalian dana akibat retur barang atau pembatalan pesanan"
+        },
+        "tax_amount": {
+          "type": "number",
+          "minimum": 0.0,
+          "default": 0.0,
+          "description": "Kewajiban pajak pertambahan nilai (PPN)"
+        },
+        "cancellation_deduction": {
+          "type": "number",
+          "minimum": 0.0,
+          "default": 0.0,
+          "description": "Pengurangan akibat komplain terselesaikan atau pembatalan layanan"
+        }
+      },
+      "required": [
+        "discount_amount",
+        "voucher_amount",
+        "refund_amount"
+      ],
+      "additionalProperties": true
+    },
+    "net_revenue": {
+      "type": "number",
+      "description": "Pendapatan Neto (Net Revenue): Nilai bersih setelah Gross Revenue dikurangi seluruh komponen pemotongan (Deductions)"
+    },
+    "revenue_transition": {
+      "type": "object",
+      "description": "Aturan dan status transisi dari Pendapatan Kotor (Gross Revenue) hingga Neto (Net Revenue)",
+      "properties": {
+        "current_stage": {
+          "type": "string",
+          "enum": [
+            "GROSS_OBSERVED",
+            "DISCOUNT_APPLIED",
+            "REFUND_PENDING",
+            "REFUND_ADJUSTED",
+            "NET_FINALIZED"
+          ],
+          "description": "Tahapan saat ini dalam siklus hidup pengakuan pendapatan"
+        },
+        "transition_rules": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Kaidah aturan transisi pendapatan yang ditegakkan sistem",
+          "default": [
+            "1. GROSS_OBSERVED: Nilai transaksi bruto diamati pada titik penjualan POS/billing.",
+            "2. DISCOUNT_APPLIED: Diskon langsung dan voucher promosi dikurangkan dari gross revenue.",
+            "3. REFUND_ADJUSTED: Pengurangan akibat refund/retur dipantau dalam adjustment window (14 hari).",
+            "4. NET_FINALIZED: Pendapatan neto dikunci secara permanen setelah 14 hari adjustment window berlalu."
+          ]
+        },
+        "adjustment_window_days": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 14,
+          "description": "Jangka waktu penyesuaian refund/retur dalam hari (standar: 14 hari)"
+        },
+        "is_finalized": {
+          "type": "boolean",
+          "default": false,
+          "description": "Menandai apakah angka pendapatan neto sudah dikunci final dan bersifat permanen"
+        },
+        "finalized_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Waktu penetapan status Net Finalized (ISO-8601 UTC)"
+        }
+      },
+      "required": [
+        "current_stage",
+        "transition_rules",
+        "adjustment_window_days",
+        "is_finalized"
+      ],
+      "additionalProperties": true
+    },
+    "attribution": {
+      "type": "object",
+      "description": "Metadata atribusi ke kampanye pemasaran atau rekomendasi aksi NBA",
+      "properties": {
+        "campaign_id": {
+          "type": ["string", "null"],
+          "description": "ID kampanye yang diatribusikan"
+        },
+        "decision_id": {
+          "type": ["string", "null"],
+          "description": "ID keputusan NBA yang mendahului konversi"
+        },
+        "action_id": {
+          "type": ["string", "null"],
+          "description": "ID aksi yang menghasilkan konversi"
+        },
+        "attributed_channel": {
+          "type": ["string", "null"],
+          "description": "Kanal yang diatribusikan untuk sentuhan terakhir (last touch)"
+        },
+        "days_to_convert": {
+          "type": ["number", "null"],
+          "description": "Jumlah hari antara eksposur penawaran dan konversi terjadi"
+        },
+        "is_incremental": {
+          "type": ["boolean", "null"],
+          "description": "Apakah konversi ini terbukti inkremental terhadap kelompok kontrol A/B"
+        }
+      },
+      "additionalProperties": true
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Correlation ID untuk audit trail pelacakan konversi"
+    }
+  },
+  "required": [
+    "outcome_id",
+    "customer_id",
+    "conversion_type",
+    "gross_revenue",
+    "net_revenue",
+    "deductions",
+    "revenue_transition"
+  ],
+  "additionalProperties": true
+}
+

@@ -1,0 +1,133 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-08_campaign_identifier.json",
+  "title": "K-08 Campaign Identifier Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk identifikasi dan metadata kampanye. Field wajib meliputi: campaign_id, exposure_window, conversion_window_days (default 30), dan adjustment_window_days (default 14).",
+  "type": "object",
+  "properties": {
+    "campaign_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier unik kampanye (contoh: CMP-2026-RET-001)"
+    },
+    "exposure_window": {
+      "type": "object",
+      "description": "Rentang waktu pemaparan (exposure window) pesan kampanye kepada pelanggan",
+      "properties": {
+        "start_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu mulai exposure kampanye (ISO-8601 UTC)"
+        },
+        "end_time": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu selesai exposure kampanye (ISO-8601 UTC)"
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC",
+          "description": "Zona waktu yang digunakan (default: UTC)"
+        }
+      },
+      "required": ["start_time", "end_time"],
+      "additionalProperties": true
+    },
+    "conversion_window_days": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 30,
+      "description": "Jendela observasi konversi dalam hari (default: 30 hari untuk retail/service)"
+    },
+    "adjustment_window_days": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 14,
+      "description": "Jendela observasi penyesuaian refund/retur dan cooling-off fatigue dalam hari (default: 14 hari)"
+    },
+    "campaign_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Nama deskriptif kampanye"
+    },
+    "target_segment": {
+      "type": "string",
+      "description": "Segmen audiens target (misal: AT_RISK, LOYAL, NEW, DORMANT, ACTIVE)"
+    },
+    "target_action_id": {
+      "type": "string",
+      "description": "ID aksi katalog NBA yang menjadi dasar kampanye ini"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "email",
+        "push",
+        "sms",
+        "whatsapp",
+        "branch",
+        "omnichannel",
+        "task_rm",
+        "email_sim",
+        "push_sim",
+        "sms_sim"
+      ],
+      "description": "Kanal distribusi pesan kampanye"
+    },
+    "ab_test_ratio": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "default": 50,
+      "description": "Rasio persentase kelompok perlakuan dalam A/B testing (0 - 100)"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "PROPOSED",
+        "APPROVED",
+        "ACTIVE",
+        "PAUSED",
+        "COMPLETED",
+        "CANCELLED",
+        "ARCHIVED"
+      ],
+      "default": "DRAFT",
+      "description": "Status siklus hidup kampanye"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Correlation ID untuk audit trail pembuatan dan eksekusi kampanye"
+    },
+    "created_by": {
+      "type": ["string", "integer", "null"],
+      "description": "User ID pembuat kampanye"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Waktu pembuatan kampanye (ISO-8601 UTC)"
+    },
+    "approved_by": {
+      "type": ["string", "integer", "null"],
+      "description": "User ID yang menyetujui kampanye"
+    },
+    "approved_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Waktu persetujuan kampanye (ISO-8601 UTC)"
+    }
+  },
+  "required": [
+    "campaign_id",
+    "exposure_window",
+    "conversion_window_days",
+    "adjustment_window_days"
+  ],
+  "additionalProperties": true
+}
+

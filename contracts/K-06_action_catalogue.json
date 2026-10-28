@@ -1,0 +1,169 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-06_action_catalogue.json",
+  "title": "K-06 Action Catalogue Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk Katalog Aksi NBA. Menampung 10 aksi bisnis resmi ditambah NO_ACTION sebagai first-class decision. Field wajib meliputi: action_id, category, allowed_channels, incentive_band, dan required_fact_package.",
+  "anyOf": [
+    {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "type": "string",
+          "default": "INTG-v1.0",
+          "description": "Versi kontrak integrasi data"
+        },
+        "catalogue_id": {
+          "type": "string",
+          "description": "Identifier versi katalog aksi"
+        },
+        "as_of_date": {
+          "type": "string",
+          "format": "date",
+          "description": "Tanggal berlakunya katalog aksi"
+        },
+        "total_actions": {
+          "type": "integer",
+          "minimum": 11,
+          "description": "Jumlah total aksi yang terdaftar (10 aksi bisnis + 1 NO_ACTION)"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ActionDefinition"
+          },
+          "minItems": 1,
+          "description": "Daftar definisi aksi dalam katalog"
+        }
+      },
+      "required": ["actions"],
+      "additionalProperties": true
+    },
+    {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ActionDefinition"
+      },
+      "minItems": 1,
+      "description": "Koleksi array langsung dari definisi aksi"
+    },
+    {
+      "$ref": "#/definitions/ActionDefinition"
+    }
+  ],
+  "definitions": {
+    "ActionDefinition": {
+      "type": "object",
+      "description": "Spesifikasi satu aksi dalam katalog Next-Best-Action (NBA)",
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "enum": [
+            "NO_ACTION",
+            "COMPLAINT_RESOLUTION",
+            "RELATIONSHIP_MANAGER_CONTACT",
+            "RETENTION_OUTREACH",
+            "CROSS_SELL",
+            "UPSELL",
+            "RENEWAL_REMINDER",
+            "SERVICE_REMINDER",
+            "EDUCATION",
+            "LOYALTY_REWARD",
+            "WIN_BACK_OFFER"
+          ],
+          "description": "ID unik aksi sistem, mencakup 10 aksi bisnis dan NO_ACTION sebagai first-class decision"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nama deskriptif aksi bisnis"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "Proteksi / System",
+            "Layanan",
+            "Retensi Khusus",
+            "Retensi",
+            "Pertumbuhan",
+            "Retensi / Keanggotaan",
+            "Layanan / Pengingat",
+            "Edukasi Pelanggan",
+            "Apresiasi",
+            "Reaktivasi"
+          ],
+          "description": "Kategori bisnis aksi"
+        },
+        "description": {
+          "type": "string",
+          "description": "Penjelasan rinci tujuan bisnis dan skenario eksekusi aksi"
+        },
+        "allowed_channels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "email",
+              "push",
+              "sms",
+              "whatsapp",
+              "task_rm",
+              "branch",
+              "phone"
+            ]
+          },
+          "description": "Kanal komunikasi yang diizinkan untuk eksekusi aksi. Kosong untuk NO_ACTION."
+        },
+        "incentive_band": {
+          "type": "string",
+          "enum": [
+            "Tanpa Insentif",
+            "Band Rendah",
+            "Band Sedang",
+            "Band Tinggi",
+            "Hadiah / Poin Loyalitas",
+            "Diskon Berbatas Waktu"
+          ],
+          "description": "Tingkat insentif atau kompensasi biaya yang dialokasikan"
+        },
+        "required_fact_package": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "Paket data fakta kontekstual yang wajib disediakan untuk evaluasi kelayakan aksi"
+        },
+        "action_weight": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 5.0,
+          "description": "Bobot prioritas strategis aksi dalam kalkulasi formula Expected Value"
+        },
+        "is_commercial": {
+          "type": "boolean",
+          "description": "Menandai apakah aksi ini bersifat komersial (dihitung dalam fatigue contact frequency capping)"
+        },
+        "blocks_all_commercial": {
+          "type": "boolean",
+          "description": "Jika true, aksi ini memblokir seluruh pesan promosi komersial lainnya (misal: penanganan keluhan aktif)"
+        },
+        "trigger_conditions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Daftar syarat kelayakan (eligibility) dan kondisi pemicu dalam bahasa bisnis"
+        }
+      },
+      "required": [
+        "action_id",
+        "category",
+        "allowed_channels",
+        "incentive_band",
+        "required_fact_package"
+      ],
+      "additionalProperties": true
+    }
+  }
+}
+
