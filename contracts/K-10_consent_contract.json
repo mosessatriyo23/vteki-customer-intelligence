@@ -1,0 +1,193 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vteki.co.id/contracts/K-10_consent_contract.json",
+  "title": "K-10 Customer Consent Contract",
+  "description": "Skema JSON Kontrak Integrasi (INTG-v1.0) untuk hierarki persetujuan (consent) kanal komunikasi. Menegakkan status Opt-In/Opt-Out, aturan bahwa unknown/expired = blocked, dan penanda bahwa status paling restriktif menang saat terjadi merge identitas.",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier pelanggan (ID CRM atau Golden Customer ID)"
+    },
+    "global_consent": {
+      "type": "object",
+      "description": "Status consent global pelanggan. Jika berstatus OPT_OUT, seluruh penawaran komersial diblokir mutlak.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "OPT_IN",
+            "OPT_OUT",
+            "UNKNOWN",
+            "EXPIRED",
+            "BLOCKED"
+          ],
+          "description": "Status persetujuan tingkat global"
+        },
+        "is_global_opt_out": {
+          "type": "boolean",
+          "description": "True jika pelanggan menyatakan Opt-Out secara menyeluruh (Hard Suppression)"
+        },
+        "updated_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu pembaruan status consent global (ISO-8601 UTC)"
+        }
+      },
+      "required": [
+        "status",
+        "is_global_opt_out"
+      ],
+      "additionalProperties": true
+    },
+    "channels": {
+      "type": "object",
+      "description": "Hierarki preferensi persetujuan per kanal komunikasi (email, push, sms, whatsapp, phone)",
+      "properties": {
+        "email": {
+          "$ref": "#/definitions/ChannelConsentDetail"
+        },
+        "push": {
+          "$ref": "#/definitions/ChannelConsentDetail"
+        },
+        "sms": {
+          "$ref": "#/definitions/ChannelConsentDetail"
+        },
+        "whatsapp": {
+          "$ref": "#/definitions/ChannelConsentDetail"
+        },
+        "phone": {
+          "$ref": "#/definitions/ChannelConsentDetail"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/ChannelConsentDetail"
+      }
+    },
+    "unknown_expired_policy": {
+      "type": "string",
+      "enum": [
+        "BLOCKED",
+        "TREAT_AS_BLOCKED"
+      ],
+      "default": "BLOCKED",
+      "description": "Aturan kepatuhan: status consent bernilai UNKNOWN atau EXPIRED secara otomatis dievaluasi sebagai BLOCKED (tidak diizinkan kontak)."
+    },
+    "identity_merge_policy": {
+      "type": "string",
+      "enum": [
+        "MOST_RESTRICTIVE_WINS"
+      ],
+      "default": "MOST_RESTRICTIVE_WINS",
+      "description": "Kebijakan saat terjadi rekonsiliasi merge identitas: status paling restriktif menang (Opt-Out/Blocked mengalahkan Opt-In)."
+    },
+    "most_restrictive_wins": {
+      "type": "boolean",
+      "default": true,
+      "description": "Penanda bahwa status paling restriktif (Opt-Out / Blocked) selalu diutamakan saat terjadi merge profil atau identitas."
+    },
+    "is_merged_identity": {
+      "type": "boolean",
+      "default": false,
+      "description": "Menandai apakah rekaman consent ini merupakan hasil rekonsiliasi penggabungan (merge) beberapa akun pelanggan."
+    },
+    "merge_details": {
+      "type": "object",
+      "description": "Detail riwayat penggabungan identitas jika profil ini merupakan hasil merge",
+      "properties": {
+        "merged_source_customer_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Daftar ID pelanggan sumber yang digabungkan"
+        },
+        "merge_timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Waktu penggabungan identitas dilakukan (ISO-8601 UTC)"
+        },
+        "applied_rule": {
+          "type": "string",
+          "default": "MOST_RESTRICTIVE_WINS",
+          "description": "Aturan resolusi konflik yang diterapkan saat merge"
+        }
+      },
+      "additionalProperties": true
+    },
+    "last_updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Waktu terakhir rekaman consent diperbarui (ISO-8601 UTC)"
+    },
+    "correlation_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$",
+      "description": "Correlation ID untuk pelacakan perubahan consent"
+    }
+  },
+  "required": [
+    "customer_id",
+    "global_consent",
+    "channels",
+    "unknown_expired_policy",
+    "identity_merge_policy",
+    "most_restrictive_wins"
+  ],
+  "definitions": {
+    "ChannelConsentDetail": {
+      "type": "object",
+      "description": "Detail status persetujuan pada kanal komunikasi tertentu",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "OPT_IN",
+            "OPT_OUT",
+            "UNKNOWN",
+            "EXPIRED",
+            "BLOCKED"
+          ],
+          "description": "Status deklarasi izin untuk kanal tersebut"
+        },
+        "opt_in": {
+          "type": "boolean",
+          "description": "Nilai boolean izin kontak. True HANYA jika status OPT_IN eksplisit dan belum kadaluarsa."
+        },
+        "effective_permission": {
+          "type": "string",
+          "enum": [
+            "ALLOWED",
+            "BLOCKED"
+          ],
+          "description": "Hasil evaluasi efektif izin: ALLOWED hanya jika status OPT_IN aktif; BLOCKED jika OPT_OUT, UNKNOWN, atau EXPIRED."
+        },
+        "valid_until": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Batas waktu masa berlaku izin. Jika waktu ini terlewati, status menjadi EXPIRED dan izin otomatis BLOCKED."
+        },
+        "collected_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Waktu saat persetujuan dikumpulkan dari pelanggan"
+        },
+        "source": {
+          "type": ["string", "null"],
+          "description": "Sumber deklarasi consent (contoh: CRM, APP_PROFILE, POS, UNSUBSCRIBE_PAGE, IDENTITY_MERGE)"
+        }
+      },
+      "required": [
+        "status",
+        "opt_in",
+        "effective_permission"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
+
