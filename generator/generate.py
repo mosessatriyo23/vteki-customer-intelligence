@@ -344,11 +344,13 @@ def make_catalogue(
             "item_type": "PRODUCT" if is_retail else "SERVICE",
             "name": name,
             "category": category,
-            "subcategory": "RETAIL_GOODS"
-            if is_retail
-            else SERVICE_TYPES[(index - 100) % len(SERVICE_TYPES)]
-            .upper()
-            .replace(" ", "_"),
+            "subcategory": (
+                "RETAIL_GOODS"
+                if is_retail
+                else SERVICE_TYPES[(index - 100) % len(SERVICE_TYPES)]
+                .upper()
+                .replace(" ", "_")
+            ),
             "list_price": price,
             "duration_minutes": duration,
             "availability_flag": rng.random() >= 0.04,
@@ -408,12 +410,12 @@ def make_customers(
                 "email": make_email(name, index, rng),
                 "birth_month": rng.integer(1, 13),
                 "gender": rng.choice(CRM_GENDERS),
-                "member_code": f"MBR-{seed % 100:02d}-{index + 1:06d}"
-                if has_membership
-                else "",
-                "membership_tier": rng.choice(MEMBERSHIP_TIERS)
-                if has_membership
-                else "",
+                "member_code": (
+                    f"MBR-{seed % 100:02d}-{index + 1:06d}" if has_membership else ""
+                ),
+                "membership_tier": (
+                    rng.choice(MEMBERSHIP_TIERS) if has_membership else ""
+                ),
                 "join_date": created_at.date().isoformat(),
                 "preferred_branch_code": f"BR-{rng.integer(1, 21):02d}",
                 "status": rng.choice(CUSTOMER_STATUSES, (0.84, 0.12, 0.04)),
@@ -464,9 +466,11 @@ def make_customers(
                 "source_customer_id": source_id,
                 "golden_customer_id": person["golden_id"],
                 "source_system": source_system,
-                "identity_scenario": "SHARED_PHONE_TRAP"
-                if customer_index in shared_phone_by_index
-                else ("DUPLICATE_VARIANT" if duplicate else "GOLDEN_SOURCE"),
+                "identity_scenario": (
+                    "SHARED_PHONE_TRAP"
+                    if customer_index in shared_phone_by_index
+                    else ("DUPLICATE_VARIANT" if duplicate else "GOLDEN_SOURCE")
+                ),
             }
         )
         source_rows.append(source_row)
@@ -750,9 +754,11 @@ def make_app_events(
                     "event_id": stable_id(seed, "app-event", sequence),
                     "source_customer_id": source_id,
                     "event_type": event_type,
-                    "item_id": f"ITM-{rng.integer(1, 101):04d}"
-                    if event_type in ("PRODUCT_VIEW", "CART_ADD")
-                    else "",
+                    "item_id": (
+                        f"ITM-{rng.integer(1, 101):04d}"
+                        if event_type in ("PRODUCT_VIEW", "CART_ADD")
+                        else ""
+                    ),
                     "occurred_at": iso_datetime(occurred),
                     "channel": "APP",
                 }
@@ -791,16 +797,18 @@ def make_service_cases(
                     "status": status,
                     "opened_at": iso_datetime(created),
                     "closed_at": iso_datetime(closed) if status == "RESOLVED" else "",
-                    "resolution_code": rng.choice(
-                        (
-                            "BOOKING_RESCHEDULED",
-                            "BILLING_ADJUSTED",
-                            "SERVICE_FOLLOWUP",
-                            "STOCK_UPDATED",
+                    "resolution_code": (
+                        rng.choice(
+                            (
+                                "BOOKING_RESCHEDULED",
+                                "BILLING_ADJUSTED",
+                                "SERVICE_FOLLOWUP",
+                                "STOCK_UPDATED",
+                            )
                         )
-                    )
-                    if status == "RESOLVED"
-                    else "",
+                        if status == "RESOLVED"
+                        else ""
+                    ),
                 }
             )
             sequence += 1

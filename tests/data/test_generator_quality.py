@@ -192,9 +192,11 @@ class GeneratorQualityTests(unittest.TestCase):
                         self.assertEqual(int(r["net_amount"]), net)
                         self.assertEqual(
                             int(r["actual_revenue"]),
-                            0
-                            if r["status"] in ("CANCELLED", "REFUNDED")
-                            else net - refund,
+                            (
+                                0
+                                if r["status"] in ("CANCELLED", "REFUNDED")
+                                else net - refund
+                            ),
                         )
                         self.assertEqual(refund == net, r["status"] == "REFUNDED")
                         self.assertEqual(

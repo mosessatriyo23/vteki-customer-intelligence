@@ -7,8 +7,9 @@ Jalankan dengan:
     pytest docs/christ_business/reference/test/ -v
 """
 
-import pytest
 from datetime import datetime
+
+import pytest
 
 from services.decision.policy.suppression import (
     ComplaintStatus,
@@ -19,7 +20,6 @@ from services.decision.policy.suppression import (
     has_open_severe_complaint,
     is_opted_out,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -61,6 +61,7 @@ def _make_ticket(
 # Tests: check_suppression — Skenario CLEAR
 # ---------------------------------------------------------------------------
 
+
 class TestCheckSuppressionClear:
 
     def test_no_suppression_when_clear(self):
@@ -99,6 +100,7 @@ class TestCheckSuppressionClear:
 # Tests: check_suppression — Skenario OPT_OUT
 # ---------------------------------------------------------------------------
 
+
 class TestCheckSuppressionOptOut:
 
     def test_global_opt_out_suppresses(self):
@@ -136,6 +138,7 @@ class TestCheckSuppressionOptOut:
 # ---------------------------------------------------------------------------
 # Tests: check_suppression — Skenario OPEN_SEVERE_COMPLAINT
 # ---------------------------------------------------------------------------
+
 
 class TestCheckSuppressionComplaint:
 
@@ -191,6 +194,7 @@ class TestCheckSuppressionComplaint:
 # Tests: check_suppression — Validasi Customer ID Mismatch
 # ---------------------------------------------------------------------------
 
+
 class TestCheckSuppressionValidation:
 
     def test_raises_when_consent_customer_id_mismatch(self):
@@ -203,6 +207,7 @@ class TestCheckSuppressionValidation:
 # ---------------------------------------------------------------------------
 # Tests: has_open_severe_complaint
 # ---------------------------------------------------------------------------
+
 
 class TestHasOpenSevereComplaint:
 
@@ -233,6 +238,7 @@ class TestHasOpenSevereComplaint:
 # ---------------------------------------------------------------------------
 # Tests: is_opted_out
 # ---------------------------------------------------------------------------
+
 
 class TestIsOptedOut:
 

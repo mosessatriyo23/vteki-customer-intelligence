@@ -27,6 +27,11 @@ from worker import tasks as worker_tasks
 from worker.runner import process_one
 
 
+def inline_executor(handler, payload, timeout_seconds):
+    """Run the handler in-process for the SQLite TestClient database."""
+    return handler(payload)
+
+
 @pytest.fixture
 def client():
     engine = create_engine(
@@ -274,7 +279,11 @@ def test_audit_records_authenticated_actor(client: TestClient):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert trace.status_code == 200
-    assert any(event["path"] == "/auth/me" for event in trace.json())
+    trace_payload = trace.json()
+    assert trace_payload["correlation_id"] == correlation_id
+    assert any(event["path"] == "/auth/me" for event in trace_payload["audit_events"])
+    assert trace_payload["audit_events_returned"] >= 1
+    assert trace_payload["audit_events_truncated"] is False
 
 
 def test_customer_seed_and_search_require_authentication(client: TestClient):
@@ -355,7 +364,10 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
         assert job.status == "queued"
         assert db.query(Campaign).count() == 1
         assert db.query(Customer).count() == 0
-    assert process_one(app.state.audit_session_factory)
+    assert process_one(
+        app.state.audit_session_factory,
+        handler_executor=inline_executor,
+    )
     with app.state.audit_session_factory() as db:
         job = db.query(BatchJob).filter(BatchJob.kind == "campaign_execution").one()
         assert job.status == "completed"

@@ -56,11 +56,19 @@ def publish_serving_snapshots(
         if session.get(RegistryVersion, registry_version) is None:
             raise ValueError("Unknown identity registry version")
         profile_count = save_profile_snapshots(
-            profiles, batch_id, registry_version, session,
-            rule_version=c360_rule_version, commit=False,
+            profiles,
+            batch_id,
+            registry_version,
+            session,
+            rule_version=c360_rule_version,
+            commit=False,
         )
         segment_count = save_segmentation_snapshots(
-            segments, batch_id, registry_version, session, commit=False,
+            segments,
+            batch_id,
+            registry_version,
+            session,
+            commit=False,
         )
     return {
         "status": "PUBLISHED",
