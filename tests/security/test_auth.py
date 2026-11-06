@@ -715,3 +715,10 @@ def test_measurement_integral_float_campaign_id(client):
         "properties"
     ]["campaign_id"]
     assert campaign_schema["type"] == "integer"
+
+
+def test_email_schema_pattern_handles_many_subdomains():
+    from api.auth import EMAIL_SCHEMA_PATTERN
+
+    email = f"person@{'.'.join(['a'] * 25)}.example.com"
+    assert re.fullmatch(EMAIL_SCHEMA_PATTERN, email) is not None
