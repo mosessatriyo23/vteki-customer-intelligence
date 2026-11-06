@@ -437,10 +437,10 @@ jobs:
           token = login["access_token"]
 
           users = [
-              ("e2e-admin@example.com", ["ADMIN"]),
-              ("e2e-analyst@example.com", ["ANALYST"]),
-              ("e2e-operator@example.com", ["OPERATOR"]),
-              ("e2e-campaign@example.com", ["CAMPAIGN_MANAGER"]),
+              ("e2e-admin@example.com", ["admin"]),
+              ("e2e-analyst@example.com", ["analyst"]),
+              ("e2e-operator@example.com", ["operator"]),
+              ("e2e-campaign@example.com", ["campaign_manager"]),
           ]
 
           for email, roles in users:
