@@ -101,9 +101,27 @@ class BatchJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
     available_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
     )
+
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    lease_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+    claim_token: Mapped[str | None] = mapped_column(
+        String(36),
+        nullable=True,
+    )
+
     created_by: Mapped[int | None]
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

@@ -68,3 +68,13 @@ Tes PostgreSQL lokal memerlukan environment variable `VTEKI_TEST_POSTGRES_URL` y
 - Tidak ada pengiriman campaign ke provider eksternal; channel tetap simulator.
 - Tidak ada perubahan kontrak CSV v2 atau penggunaan synthetic ground truth sebagai input resolver.
 - Tidak ada klaim bahwa SLA produksi, keamanan deployment, atau E2E UI sudah lulus sebelum ada hasil pengujian nyata.
+
+## Pembaruan status — 26 Oktober 2026
+
+PR #16 telah berhasil di-merge ke `main`. Workflow CI pada PR (run `40194042823`) dan setelah merge ke `main` (run `40194220485`) berhasil.
+
+Pemeriksaan yang berhasil meliputi Ruff, MyPy, Black, tes Python, migrasi PostgreSQL, tes governance dan hak akses database, pengujian API Schemathesis sesuai konfigurasi saat ini, serta production build frontend.
+
+**Catatan:** Fase Coverage Schemathesis sementara dilewati karena masalah timeout. Keberhasilan CI ini tidak berarti seluruh fase pengujian kontrak API sudah selesai.
+
+Implementasi inti telah melewati pemeriksaan CI yang dikonfigurasi. Namun, penyelesaian keseluruhan masih memerlukan pembuktian SLA audit trace, pengujian operasional worker, isolasi akun database runtime, serta pengujian frontend end-to-end untuk setiap role.

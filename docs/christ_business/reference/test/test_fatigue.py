@@ -7,19 +7,16 @@ Jalankan dengan:
     pytest docs/christ_business/reference/test/ -v
 """
 
-import pytest
 from datetime import datetime, timedelta
 
 from services.decision.policy.fatigue import (
-    ContactRecord,
-    FatigueCheckResult,
+    EXCLUDED_ACTIONS,
     FREQ_CAP_MAX_CONTACTS,
     FREQ_CAP_WINDOW_DAYS,
-    EXCLUDED_ACTIONS,
+    ContactRecord,
     check_frequency_cap,
     remaining_quota,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -29,7 +26,9 @@ CUSTOMER_ID = "CUST-001"
 EVAL_DATE = datetime(2026, 10, 28, 10, 0, 0)
 
 
-def _make_contact(action_id: str, days_ago: int, customer_id: str = CUSTOMER_ID) -> ContactRecord:
+def _make_contact(
+    action_id: str, days_ago: int, customer_id: str = CUSTOMER_ID
+) -> ContactRecord:
     """Helper: membuat ContactRecord N hari sebelum EVAL_DATE."""
     return ContactRecord(
         customer_id=customer_id,
@@ -43,6 +42,7 @@ def _make_contact(action_id: str, days_ago: int, customer_id: str = CUSTOMER_ID)
 # ---------------------------------------------------------------------------
 # Tests: check_frequency_cap
 # ---------------------------------------------------------------------------
+
 
 class TestCheckFrequencyCap:
 
@@ -87,7 +87,7 @@ class TestCheckFrequencyCap:
         """Kontak di luar 14 hari tidak dihitung."""
         history = [
             _make_contact("CROSS_SELL", days_ago=15),  # Tepat di luar window
-            _make_contact("UPSELL", days_ago=20),      # Jauh di luar window
+            _make_contact("UPSELL", days_ago=20),  # Jauh di luar window
         ]
         result = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE)
         assert result.is_suppressed is False
@@ -129,8 +129,12 @@ class TestCheckFrequencyCap:
     def test_only_counts_contacts_for_target_customer(self):
         """Kontak milik pelanggan lain tidak dihitung."""
         history = [
-            ContactRecord("OTHER-CUST", "CROSS_SELL", "email", EVAL_DATE - timedelta(days=2), True),
-            ContactRecord("OTHER-CUST", "UPSELL", "push", EVAL_DATE - timedelta(days=5), True),
+            ContactRecord(
+                "OTHER-CUST", "CROSS_SELL", "email", EVAL_DATE - timedelta(days=2), True
+            ),
+            ContactRecord(
+                "OTHER-CUST", "UPSELL", "push", EVAL_DATE - timedelta(days=5), True
+            ),
             _make_contact("CROSS_SELL", days_ago=3),  # Hanya 1 milik CUST-001
         ]
         result = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE)
@@ -140,7 +144,7 @@ class TestCheckFrequencyCap:
     def test_boundary_contact_at_window_start_is_included(self):
         """Kontak tepat pada batas awal window (14 hari lalu) harus dihitung."""
         history = [
-            _make_contact("CROSS_SELL", days_ago=14),   # Tepat di batas window
+            _make_contact("CROSS_SELL", days_ago=14),  # Tepat di batas window
             _make_contact("UPSELL", days_ago=7),
         ]
         result = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE)
@@ -172,20 +176,34 @@ class TestCheckFrequencyCap:
         assert result.is_suppressed is False
 
         # Dengan batas 3 (tepat sama dengan jumlah kontak), suppressed (>= logika)
-        result_at_cap = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE, max_contacts=3)
+        result_at_cap = check_frequency_cap(
+            CUSTOMER_ID, history, EVAL_DATE, max_contacts=3
+        )
         assert result_at_cap.is_suppressed is True
 
         # Dengan batas 2 (default), tetap suppressed
-        result_default = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE, max_contacts=2)
+        result_default = check_frequency_cap(
+            CUSTOMER_ID, history, EVAL_DATE, max_contacts=2
+        )
         assert result_default.is_suppressed is True
 
     def test_non_commercial_records_not_counted(self):
         """ContactRecord dengan is_commercial=False tidak dihitung."""
         history = [
-            ContactRecord(CUSTOMER_ID, "EDUCATION", "email",
-                          EVAL_DATE - timedelta(days=3), is_commercial=False),
-            ContactRecord(CUSTOMER_ID, "EDUCATION", "push",
-                          EVAL_DATE - timedelta(days=6), is_commercial=False),
+            ContactRecord(
+                CUSTOMER_ID,
+                "EDUCATION",
+                "email",
+                EVAL_DATE - timedelta(days=3),
+                is_commercial=False,
+            ),
+            ContactRecord(
+                CUSTOMER_ID,
+                "EDUCATION",
+                "push",
+                EVAL_DATE - timedelta(days=6),
+                is_commercial=False,
+            ),
         ]
         result = check_frequency_cap(CUSTOMER_ID, history, EVAL_DATE)
         assert result.contact_count_in_window == 0
@@ -195,6 +213,7 @@ class TestCheckFrequencyCap:
 # ---------------------------------------------------------------------------
 # Tests: remaining_quota
 # ---------------------------------------------------------------------------
+
 
 class TestRemainingQuota:
 
@@ -225,6 +244,7 @@ class TestRemainingQuota:
 # ---------------------------------------------------------------------------
 # Tests: Verifikasi Konstanta
 # ---------------------------------------------------------------------------
+
 
 class TestConstants:
 

@@ -67,6 +67,10 @@ class DecisionReconstructionResponse(BaseModel):
     model_inputs: dict[str, Any]
     decision_output: dict[str, Any]
     human_intervention: dict[str, Any] | None
+    audit_events_returned: int
+    decision_traces_returned: int
+    audit_events_truncated: bool
+    decision_traces_truncated: bool
 
 
 @router.get("/identity-reviews", response_model=list[IdentityReviewResponse])
@@ -370,17 +374,24 @@ def reconstruct_decision(
     events = (
         db.query(AuditEvent)
         .filter(AuditEvent.correlation_id == correlation_id)
-        .order_by(AuditEvent.occurred_at.asc())
-        .limit(2000)
+        .order_by(AuditEvent.occurred_at.asc(), AuditEvent.id.asc())
+        .limit(2001)
         .all()
     )
     traces = (
         db.query(DecisionTrace)
         .filter(DecisionTrace.correlation_id == correlation_id)
         .order_by(DecisionTrace.created_at.asc(), DecisionTrace.id.asc())
-        .limit(100)
+        .limit(101)
         .all()
     )
+
+    audit_events_truncated = len(events) > 2000
+    decision_traces_truncated = len(traces) > 100
+
+    events = events[:2000]
+    traces = traces[:100]
+
     event_list = [
         {
             "request_id": e.request_id,
@@ -426,4 +437,8 @@ def reconstruct_decision(
             if override_event
             else None
         ),
+        audit_events_returned=len(events),
+        decision_traces_returned=len(traces),
+        audit_events_truncated=audit_events_truncated,
+        decision_traces_truncated=decision_traces_truncated,
     )

@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from services.decision.nba.catalogue import (
     ACTION_CATALOGUE,
@@ -64,6 +64,7 @@ DEFAULT_SCORE_VALIDITY_DAYS: int = 30
 # Data Classes — Input
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AIScores:
     """
@@ -81,6 +82,7 @@ class AIScores:
         score_generated_at: Waktu skor diterbitkan (untuk cek valid_until).
         reason_codes: Minimal 3 reason codes churn.
     """
+
     customer_id: str
     churn_score: float
     churn_risk_band: str
@@ -106,6 +108,7 @@ class EligibilityProfile:
         purchased_categories: Kategori produk yang sudah pernah dibeli.
         has_active_win_back_offer: Apakah sudah ada penawaran win-back aktif.
     """
+
     customer_id: str
     tenure_days: int
     membership_days_remaining: int
@@ -123,6 +126,7 @@ class ProductSuitability:
         available_action_ids: Daftar action_id yang produk/layanannya tersedia.
         unsuitable_action_ids: Daftar action_id yang tidak sesuai untuk pelanggan ini.
     """
+
     available_action_ids: List[str] = field(default_factory=list)
     unsuitable_action_ids: List[str] = field(default_factory=list)
 
@@ -131,9 +135,11 @@ class ProductSuitability:
 # Data Classes — Output
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ActionCandidate:
     """Sebuah aksi kandidat dengan Expected Value yang telah dihitung."""
+
     action: Action
     propensity: float
     expected_revenue: float
@@ -159,6 +165,7 @@ class NBAResult:
         candidates_evaluated: Semua kandidat yang dievaluasi beserta EV-nya.
         decision_rationale: Penjelasan singkat keputusan dalam bahasa bisnis.
     """
+
     customer_id: str
     selected_action: Action
     expected_value: float
@@ -173,6 +180,7 @@ class NBAResult:
 # ---------------------------------------------------------------------------
 # Kelas Utama: NBAEngine
 # ---------------------------------------------------------------------------
+
 
 class NBAEngine:
     """
@@ -212,7 +220,10 @@ class NBAEngine:
         """
         self.min_ev_threshold = min_ev_threshold
         self.score_validity_days = score_validity_days
-        self._no_action = get_action("NO_ACTION")
+        no_action = get_action("NO_ACTION")
+        if no_action is None:
+            raise RuntimeError("Konfigurasi NBA tidak memiliki aksi NO_ACTION.")
+        self._no_action = no_action
 
     # ------------------------------------------------------------------
     # Public Method: evaluate
@@ -279,10 +290,17 @@ class NBAEngine:
                     f"[NBAEngine] {customer_id} memiliki OPEN_SEVERE_COMPLAINT. "
                     f"Memilih COMPLAINT_RESOLUTION."
                 )
-                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
+                complaint_action = get_action("COMPLAINT_RESOLUTION")
+                if complaint_action is None:
+                    raise RuntimeError(
+                        "Konfigurasi NBA tidak memiliki aksi COMPLAINT_RESOLUTION."
+                    )
+                fatigue_result = check_frequency_cap(
+                    customer_id, contact_history, evaluation_date
+                )
                 return self._build_result(
                     customer_id=customer_id,
-                    selected_action=get_action("COMPLAINT_RESOLUTION"),
+                    selected_action=complaint_action,
                     expected_value=0.0,
                     evaluation_timestamp=evaluation_date,
                     suppression_result=suppression_result,
@@ -296,7 +314,9 @@ class NBAEngine:
                 logger.info(
                     f"[NBAEngine] {customer_id} berstatus OPT_OUT. Memilih NO_ACTION."
                 )
-                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
+                fatigue_result = check_frequency_cap(
+                    customer_id, contact_history, evaluation_date
+                )
                 return self._build_result(
                     customer_id=customer_id,
                     selected_action=self._no_action,
@@ -350,7 +370,10 @@ class NBAEngine:
         # Pilih kandidat dengan EV tertinggi yang memenuhi threshold
         best_candidate = self._select_best_candidate(eligible_candidates)
 
-        if best_candidate is None or best_candidate.expected_value < self.min_ev_threshold:
+        if (
+            best_candidate is None
+            or best_candidate.expected_value < self.min_ev_threshold
+        ):
             logger.info(
                 f"[NBAEngine] Tidak ada kandidat dengan EV >= {self.min_ev_threshold}. "
                 f"Memilih NO_ACTION."
@@ -393,12 +416,13 @@ class NBAEngine:
     # Private Methods
     # ------------------------------------------------------------------
 
-    def _is_score_expired(
-        self, ai_scores: AIScores, evaluation_date: datetime
-    ) -> bool:
+    def _is_score_expired(self, ai_scores: AIScores, evaluation_date: datetime) -> bool:
         """Memeriksa apakah skor AI sudah melampaui masa berlaku (valid_until)."""
         from datetime import timedelta
-        valid_until = ai_scores.score_generated_at + timedelta(days=self.score_validity_days)
+
+        valid_until = ai_scores.score_generated_at + timedelta(
+            days=self.score_validity_days
+        )
         return evaluation_date > valid_until
 
     def _evaluate_candidates(
@@ -424,27 +448,31 @@ class NBAEngine:
                 product_suitability.available_action_ids
                 and action_id not in product_suitability.available_action_ids
             ):
-                candidates.append(ActionCandidate(
-                    action=action,
-                    propensity=0.0,
-                    expected_revenue=0.0,
-                    incentive_cost=0.0,
-                    expected_value=0.0,
-                    blocked_reason="Produk/layanan tidak tersedia (Masukan 5)",
-                    is_eligible=False,
-                ))
+                candidates.append(
+                    ActionCandidate(
+                        action=action,
+                        propensity=0.0,
+                        expected_revenue=0.0,
+                        incentive_cost=0.0,
+                        expected_value=0.0,
+                        blocked_reason="Produk/layanan tidak tersedia (Masukan 5)",
+                        is_eligible=False,
+                    )
+                )
                 continue
 
             if action_id in product_suitability.unsuitable_action_ids:
-                candidates.append(ActionCandidate(
-                    action=action,
-                    propensity=0.0,
-                    expected_revenue=0.0,
-                    incentive_cost=0.0,
-                    expected_value=0.0,
-                    blocked_reason="Produk tidak sesuai untuk pelanggan ini (Masukan 5)",
-                    is_eligible=False,
-                ))
+                candidates.append(
+                    ActionCandidate(
+                        action=action,
+                        propensity=0.0,
+                        expected_revenue=0.0,
+                        incentive_cost=0.0,
+                        expected_value=0.0,
+                        blocked_reason="Produk tidak sesuai untuk pelanggan ini (Masukan 5)",
+                        is_eligible=False,
+                    )
+                )
                 continue
 
             # Masukan 2: Cek kelayakan bisnis (eligibility rules)
@@ -452,15 +480,17 @@ class NBAEngine:
                 action_id, ai_scores, eligibility
             )
             if eligibility_check is not None:
-                candidates.append(ActionCandidate(
-                    action=action,
-                    propensity=0.0,
-                    expected_revenue=0.0,
-                    incentive_cost=0.0,
-                    expected_value=0.0,
-                    blocked_reason=eligibility_check,
-                    is_eligible=False,
-                ))
+                candidates.append(
+                    ActionCandidate(
+                        action=action,
+                        propensity=0.0,
+                        expected_revenue=0.0,
+                        incentive_cost=0.0,
+                        expected_value=0.0,
+                        blocked_reason=eligibility_check,
+                        is_eligible=False,
+                    )
+                )
                 continue
 
             # Hitung Expected Value
@@ -471,14 +501,16 @@ class NBAEngine:
             # Formula EV: Propensity * Expected_Revenue * Action_Weight - Incentive_Cost
             ev = (propensity * expected_revenue * action.action_weight) - incentive_cost
 
-            candidates.append(ActionCandidate(
-                action=action,
-                propensity=propensity,
-                expected_revenue=expected_revenue,
-                incentive_cost=incentive_cost,
-                expected_value=ev,
-                is_eligible=True,
-            ))
+            candidates.append(
+                ActionCandidate(
+                    action=action,
+                    propensity=propensity,
+                    expected_revenue=expected_revenue,
+                    incentive_cost=incentive_cost,
+                    expected_value=ev,
+                    is_eligible=True,
+                )
+            )
 
         return candidates
 
@@ -496,47 +528,56 @@ class NBAEngine:
         clv_tier = ai_scores.clv_tier
         churn_band = ai_scores.churn_risk_band
 
-        eligibility_rules: Dict[str, callable] = {
+        eligibility_rules: Dict[str, Callable[[], Optional[str]]] = {
             "RELATIONSHIP_MANAGER_CONTACT": lambda: (
-                None if (
-                    clv_tier == "PLATINUM"
-                    and churn_band in ("HIGH", "VERY_HIGH")
-                ) else "CLV bukan PLATINUM atau Churn Risk tidak HIGH/VERY_HIGH"
+                None
+                if (clv_tier == "PLATINUM" and churn_band in ("HIGH", "VERY_HIGH"))
+                else "CLV bukan PLATINUM atau Churn Risk tidak HIGH/VERY_HIGH"
             ),
             "RETENTION_OUTREACH": lambda: (
-                None if (
+                None
+                if (
                     churn_band in ("HIGH", "VERY_HIGH")
                     and clv_tier in ("GOLD", "PLATINUM")
                     and lifecycle in ("AT_RISK", "DORMANT")
-                ) else "Tidak memenuhi syarat RETENTION_OUTREACH (churn/CLV/lifecycle)"
+                )
+                else "Tidak memenuhi syarat RETENTION_OUTREACH (churn/CLV/lifecycle)"
             ),
             "CROSS_SELL": lambda: (
-                None if lifecycle in ("ACTIVE", "LOYAL")
+                None
+                if lifecycle in ("ACTIVE", "LOYAL")
                 else "Lifecycle bukan ACTIVE/LOYAL untuk CROSS_SELL"
             ),
             "UPSELL": lambda: (
-                None if (lifecycle in ("ACTIVE", "LOYAL") and eligibility.tenure_days >= 60)
+                None
+                if (lifecycle in ("ACTIVE", "LOYAL") and eligibility.tenure_days >= 60)
                 else "Lifecycle atau tenure tidak memenuhi syarat UPSELL"
             ),
             "RENEWAL_REMINDER": lambda: (
-                None if (
+                None
+                if (
                     eligibility.has_active_membership
                     and eligibility.membership_days_remaining <= 15
-                ) else "Membership tidak akan kadaluarsa dalam 15 hari"
+                )
+                else "Membership tidak akan kadaluarsa dalam 15 hari"
             ),
             "LOYALTY_REWARD": lambda: (
-                None if (lifecycle == "LOYAL" and clv_tier in ("GOLD", "PLATINUM"))
+                None
+                if (lifecycle == "LOYAL" and clv_tier in ("GOLD", "PLATINUM"))
                 else "Lifecycle bukan LOYAL atau CLV tidak memenuhi syarat"
             ),
             "WIN_BACK_OFFER": lambda: (
-                None if (
+                None
+                if (
                     lifecycle == "DORMANT"
                     and clv_tier in ("GOLD", "PLATINUM")
                     and not eligibility.has_active_win_back_offer
-                ) else "Tidak memenuhi syarat WIN_BACK_OFFER"
+                )
+                else "Tidak memenuhi syarat WIN_BACK_OFFER"
             ),
             "EDUCATION": lambda: (
-                None if (lifecycle == "NEW" and churn_band == "LOW")
+                None
+                if (lifecycle == "NEW" and churn_band == "LOW")
                 else "Lifecycle bukan NEW atau Churn Risk bukan LOW untuk EDUCATION"
             ),
         }
@@ -574,7 +615,7 @@ class NBAEngine:
         """
         clv = ai_scores.clv_amount
         revenue_factor_map: Dict[str, float] = {
-            "RETENTION_OUTREACH": clv * 0.5,        # Retensi mencegah kehilangan 50% CLV
+            "RETENTION_OUTREACH": clv * 0.5,  # Retensi mencegah kehilangan 50% CLV
             "RELATIONSHIP_MANAGER_CONTACT": clv * 0.6,
             "WIN_BACK_OFFER": clv * 0.4,
             "CROSS_SELL": clv * 0.3,
@@ -583,7 +624,7 @@ class NBAEngine:
             "LOYALTY_REWARD": clv * 0.2,
             "EDUCATION": clv * 0.15,
             "SERVICE_REMINDER": clv * 0.1,
-            "COMPLAINT_RESOLUTION": 0.0,            # Non-revenue, tapi protektif
+            "COMPLAINT_RESOLUTION": 0.0,  # Non-revenue, tapi protektif
         }
         return revenue_factor_map.get(action_id, clv * 0.1)
 
@@ -592,6 +633,7 @@ class NBAEngine:
         Estimasi biaya insentif berdasarkan incentive_band aksi dan CLV pelanggan.
         """
         from services.decision.nba.catalogue import IncentiveBand
+
         clv = ai_scores.clv_amount
 
         cost_map: Dict[str, float] = {

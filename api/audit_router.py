@@ -46,45 +46,66 @@ def list_audit_events(
     return query.order_by(AuditEvent.id.desc()).limit(limit).all()
 
 
-@router.get("/trace/{correlation_id}", response_model=list[AuditEventResponse])
+@router.get("/trace/{correlation_id}")
 def trace_correlation(
     correlation_id: str = Path(pattern=r"^[^\x00]*$"),
-    limit: int = Query(default=200, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_roles("admin", "analyst")),
-) -> list[AuditEvent]:
-    if len(correlation_id) > 128:
-        raise HTTPException(status_code=400, detail="Invalid correlation ID")
-    return (
-        db.query(AuditEvent)
-        .filter(AuditEvent.correlation_id == correlation_id)
-        .order_by(AuditEvent.occurred_at.asc(), AuditEvent.id.asc())
-        .limit(limit)
-        .all()
-    )
-
-
-@router.get("/decision-trace/{correlation_id}")
-def trace_decision(
-    correlation_id: str = Path(pattern=r"^[^\x00]*$"),
+    limit: int = Query(default=200, ge=1, le=5000),
     db: Session = Depends(get_db),
     _: User = Depends(require_roles("admin", "analyst")),
 ) -> dict:
     if len(correlation_id) > 128:
         raise HTTPException(status_code=400, detail="Invalid correlation ID")
+
+    events = (
+        db.query(AuditEvent)
+        .filter(AuditEvent.correlation_id == correlation_id)
+        .order_by(AuditEvent.occurred_at.asc(), AuditEvent.id.asc())
+        .limit(limit + 1)
+        .all()
+    )
+
+    has_more = len(events) > limit
+    events = events[:limit]
+
+    return {
+        "correlation_id": correlation_id,
+        "audit_events": [AuditEventResponse.model_validate(event) for event in events],
+        "audit_events_returned": len(events),
+        "audit_events_truncated": has_more,
+    }
+
+
+@router.get("/decision-trace/{correlation_id}")
+def trace_decision(
+    correlation_id: str = Path(pattern=r"^[^\x00]*$"),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_roles("admin", "analyst")),
+) -> dict:
+    if len(correlation_id) > 128:
+        raise HTTPException(status_code=400, detail="Invalid correlation ID")
+
     decisions = (
         db.query(DecisionTrace)
         .filter(DecisionTrace.correlation_id == correlation_id)
         .order_by(DecisionTrace.created_at.asc(), DecisionTrace.id.asc())
+        .limit(limit + 1)
         .all()
     )
     events = (
         db.query(AuditEvent)
         .filter(AuditEvent.correlation_id == correlation_id)
         .order_by(AuditEvent.occurred_at.asc(), AuditEvent.id.asc())
-        .limit(1000)
+        .limit(limit + 1)
         .all()
     )
+
+    decisions_truncated = len(decisions) > limit
+    events_truncated = len(events) > limit
+
+    decisions = decisions[:limit]
+    events = events[:limit]
+
     return {
         "correlation_id": correlation_id,
         "decision_steps": [
@@ -98,4 +119,8 @@ def trace_decision(
             for item in decisions
         ],
         "audit_events": [AuditEventResponse.model_validate(event) for event in events],
+        "decision_steps_returned": len(decisions),
+        "audit_events_returned": len(events),
+        "decision_steps_truncated": decisions_truncated,
+        "audit_events_truncated": events_truncated,
     }

@@ -23,13 +23,14 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-
 # ---------------------------------------------------------------------------
 # Enums & Konstanta
 # ---------------------------------------------------------------------------
 
+
 class SuppressionReason(str, Enum):
     """Jenis alasan suppression yang dapat diterapkan."""
+
     NONE = "NONE"
     OPT_OUT = "OPT_OUT_SUPPRESSED"
     COMPLAINT = "COMPLAINT_SUPPRESSED"
@@ -38,6 +39,7 @@ class SuppressionReason(str, Enum):
 
 class ComplaintStatus(str, Enum):
     """Status tiket keluhan pelanggan."""
+
     OPEN_SEVERE = "OPEN_SEVERE_COMPLAINT"
     OPEN_MILD = "OPEN_MILD_COMPLAINT"
     IN_PROGRESS = "IN_PROGRESS"
@@ -53,9 +55,11 @@ COMPLAINT_ALLOWED_ACTION = "COMPLAINT_RESOLUTION"
 # Data Classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ComplaintTicket:
     """Representasi tiket keluhan pelanggan."""
+
     ticket_id: str
     customer_id: str
     status: ComplaintStatus
@@ -68,6 +72,7 @@ class ComplaintTicket:
 @dataclass
 class CustomerConsent:
     """Status consent/persetujuan komunikasi pelanggan."""
+
     customer_id: str
     email_opt_in: bool = True
     push_opt_in: bool = True
@@ -80,6 +85,7 @@ class CustomerConsent:
 @dataclass
 class SuppressionCheckResult:
     """Hasil pemeriksaan suppression untuk seorang pelanggan."""
+
     customer_id: str
     is_suppressed: bool
     suppression_reason: SuppressionReason
@@ -93,6 +99,7 @@ class SuppressionCheckResult:
 # ---------------------------------------------------------------------------
 # Fungsi Utama
 # ---------------------------------------------------------------------------
+
 
 def check_suppression(
     customer_id: str,
@@ -183,7 +190,9 @@ def check_suppression(
         is_suppressed=False,
         suppression_reason=SuppressionReason.NONE,
         status="SUPPRESSION_CLEAR",
-        allowed_actions=["ALL"],  # Semua aksi berpotensi diizinkan (tergantung policy lain)
+        allowed_actions=[
+            "ALL"
+        ],  # Semua aksi berpotensi diizinkan (tergantung policy lain)
         message=(
             f"Pelanggan {customer_id} tidak memiliki kondisi suppression aktif. "
             f"Lanjutkan evaluasi fatigue dan eligibility."

@@ -8,8 +8,6 @@ Jalankan dengan:
     pytest docs/christ_business/reference/test/ -v
 """
 
-import pytest
-
 from services.decision.nba.catalogue import (
     ACTION_CATALOGUE,
     Action,
@@ -40,6 +38,7 @@ EXPECTED_ACTION_IDS = {
 # Tests: Integritas Katalog
 # ---------------------------------------------------------------------------
 
+
 class TestCatalogueIntegrity:
 
     def test_catalogue_has_exactly_11_actions(self):
@@ -58,7 +57,9 @@ class TestCatalogueIntegrity:
     def test_all_action_ids_match_keys(self):
         """action_id dalam objek Action harus cocok dengan kuncinya."""
         for key, action in ACTION_CATALOGUE.items():
-            assert action.action_id == key, f"action_id '{action.action_id}' tidak cocok dengan key '{key}'"
+            assert (
+                action.action_id == key
+            ), f"action_id '{action.action_id}' tidak cocok dengan key '{key}'"
 
     def test_all_actions_have_non_empty_name(self):
         """Semua aksi harus memiliki nama yang tidak kosong."""
@@ -68,8 +69,9 @@ class TestCatalogueIntegrity:
     def test_all_actions_have_trigger_conditions(self):
         """Semua aksi (kecuali NO_ACTION) harus memiliki syarat pemicu."""
         for action_id, action in ACTION_CATALOGUE.items():
-            assert len(action.trigger_conditions) > 0, \
-                f"Action {action_id} tidak memiliki trigger_conditions"
+            assert (
+                len(action.trigger_conditions) > 0
+            ), f"Action {action_id} tidak memiliki trigger_conditions"
 
     def test_all_actions_have_valid_category(self):
         """Semua aksi harus memiliki kategori yang valid."""
@@ -84,13 +86,15 @@ class TestCatalogueIntegrity:
     def test_all_action_weights_are_non_negative(self):
         """Semua action_weight harus >= 0.0."""
         for action in ACTION_CATALOGUE.values():
-            assert action.action_weight >= 0.0, \
-                f"{action.action_id} memiliki action_weight negatif: {action.action_weight}"
+            assert (
+                action.action_weight >= 0.0
+            ), f"{action.action_id} memiliki action_weight negatif: {action.action_weight}"
 
 
 # ---------------------------------------------------------------------------
 # Tests: NO_ACTION
 # ---------------------------------------------------------------------------
+
 
 class TestNoAction:
 
@@ -122,6 +126,7 @@ class TestNoAction:
 # Tests: COMPLAINT_RESOLUTION
 # ---------------------------------------------------------------------------
 
+
 class TestComplaintResolution:
 
     def test_complaint_resolution_is_not_commercial(self):
@@ -135,7 +140,9 @@ class TestComplaintResolution:
     def test_complaint_resolution_has_highest_weight(self):
         """COMPLAINT_RESOLUTION harus memiliki action_weight tertinggi atau sangat tinggi."""
         cr_weight = ACTION_CATALOGUE["COMPLAINT_RESOLUTION"].action_weight
-        assert cr_weight >= 1.5, f"COMPLAINT_RESOLUTION weight terlalu rendah: {cr_weight}"
+        assert (
+            cr_weight >= 1.5
+        ), f"COMPLAINT_RESOLUTION weight terlalu rendah: {cr_weight}"
 
     def test_complaint_resolution_channels(self):
         """COMPLAINT_RESOLUTION harus mencakup kanal RM atau branch."""
@@ -146,6 +153,7 @@ class TestComplaintResolution:
 # ---------------------------------------------------------------------------
 # Tests: Aksi Komersial
 # ---------------------------------------------------------------------------
+
 
 class TestCommercialActions:
 
@@ -164,8 +172,9 @@ class TestCommercialActions:
         """Aksi komersial harus memiliki minimal satu kanal komunikasi."""
         for action_id in self.COMMERCIAL_ACTION_IDS:
             action = ACTION_CATALOGUE[action_id]
-            assert len(action.allowed_channels) > 0, \
-                f"{action_id} tidak memiliki allowed_channels"
+            assert (
+                len(action.allowed_channels) > 0
+            ), f"{action_id} tidak memiliki allowed_channels"
 
     def test_retention_outreach_has_discount_incentive(self):
         """RETENTION_OUTREACH harus menggunakan insentif diskon berbatas waktu."""
@@ -185,6 +194,7 @@ class TestCommercialActions:
 # ---------------------------------------------------------------------------
 # Tests: get_action
 # ---------------------------------------------------------------------------
+
 
 class TestGetAction:
 
@@ -210,6 +220,7 @@ class TestGetAction:
 # Tests: get_actions_by_category
 # ---------------------------------------------------------------------------
 
+
 class TestGetActionsByCategory:
 
     def test_get_retention_actions(self):
@@ -230,9 +241,11 @@ class TestGetActionsByCategory:
 
     def test_empty_result_for_nonexistent_category(self):
         """Kategori yang tidak memiliki aksi mengembalikan list kosong."""
+
         # Buat kategori fake dengan nilai string
         class FakeCategory:
             value = "FAKE_CATEGORY"
+
         result = get_actions_by_category(FakeCategory())
         assert result == []
 
@@ -240,6 +253,7 @@ class TestGetActionsByCategory:
 # ---------------------------------------------------------------------------
 # Tests: list_all_action_ids
 # ---------------------------------------------------------------------------
+
 
 class TestListAllActionIds:
 
