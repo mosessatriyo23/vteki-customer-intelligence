@@ -159,6 +159,15 @@
       "type": ["string", "null"],
       "description": "Kanal komunikasi terpilih untuk penghantaran aksi"
     },
+    "degraded_input": {
+      "type": "boolean",
+      "description": "True jika skor AI kedaluwarsa atau belum dihitung sehingga nilai default dipakai (Requirement_Capstone Bab 3, masukan 1)."
+    },
+    "no_action_reason": {
+      "type": ["string", "null"],
+      "enum": ["OPT_OUT_SUPPRESSED", "FREQ_CAP_SUPPRESSED", "ALL_CANDIDATES_BLOCKED", null],
+      "description": "Alasan NO_ACTION yang disebut Requirement_Capstone Bab 4 (baris NO_ACTION). Null untuk alasan lain atau jika aksi bukan NO_ACTION."
+    },
     "scores_snapshot": {
       "type": "object",
       "description": "Snapshot skor prediktif AI dan konteks pelanggan saat evaluasi",
@@ -190,4 +199,3 @@
   ],
   "additionalProperties": true
 }
-

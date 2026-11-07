@@ -6,7 +6,7 @@
   "type": "object",
   "properties": {
     "customer_id": {
-      "type": "string",
+      "type": ["string", "integer"],
       "minLength": 1,
       "description": "Identifier pelanggan (ID CRM atau Golden Customer ID)"
     },
@@ -84,6 +84,7 @@
     },
     "most_restrictive_wins": {
       "type": "boolean",
+      "const": true,
       "default": true,
       "description": "Penanda bahwa status paling restriktif (Opt-Out / Blocked) selalu diutamakan saat terjadi merge profil atau identitas."
     },
@@ -185,9 +186,18 @@
         "opt_in",
         "effective_permission"
       ],
+      "if": {
+        "properties": { "status": { "const": "OPT_IN" } },
+        "required": ["status"]
+      },
+      "else": {
+        "properties": {
+          "opt_in": { "const": false },
+          "effective_permission": { "const": "BLOCKED" }
+        }
+      },
       "additionalProperties": true
     }
   },
   "additionalProperties": true
 }
-

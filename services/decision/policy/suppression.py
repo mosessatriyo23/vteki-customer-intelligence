@@ -10,6 +10,12 @@ Aturan Bisnis (dari target_definitions.md §4.2):
   Hanya aksi COMPLAINT_RESOLUTION yang diizinkan.
 - OPT_OUT: Memblokir SELURUH komunikasi. NO_ACTION mutlak, tanpa pengecualian.
 
+Field aditif `reason_code` (Minggu 5) pada hasil pemeriksaan:
+- OPT_OUT_SUPPRESSED      -> opt-out global
+- EXCL_OPEN_SEVERE_COMPLAINT -> tiket keluhan OPEN_SEVERE_COMPLAINT aktif
+- ""                      -> tidak ada suppression
+Field `status` lama TIDAK berubah (kompatibel dengan test yang sudah ada).
+
 Suppression bersifat MUTLAK — tidak ada skor AI, CLV, atau urgensi bisnis
 yang dapat meng-override kondisi suppression ini.
 
@@ -27,10 +33,8 @@ from typing import List, Optional
 # Enums & Konstanta
 # ---------------------------------------------------------------------------
 
-
 class SuppressionReason(str, Enum):
     """Jenis alasan suppression yang dapat diterapkan."""
-
     NONE = "NONE"
     OPT_OUT = "OPT_OUT_SUPPRESSED"
     COMPLAINT = "COMPLAINT_SUPPRESSED"
@@ -39,7 +43,6 @@ class SuppressionReason(str, Enum):
 
 class ComplaintStatus(str, Enum):
     """Status tiket keluhan pelanggan."""
-
     OPEN_SEVERE = "OPEN_SEVERE_COMPLAINT"
     OPEN_MILD = "OPEN_MILD_COMPLAINT"
     IN_PROGRESS = "IN_PROGRESS"
@@ -50,16 +53,18 @@ class ComplaintStatus(str, Enum):
 # Satu-satunya aksi yang diizinkan saat COMPLAINT_SUPPRESSED aktif
 COMPLAINT_ALLOWED_ACTION = "COMPLAINT_RESOLUTION"
 
+# Kode alasan penekanan sesuai roadmap Minggu 5 (aditif terhadap `status`)
+REASON_CODE_OPT_OUT = "OPT_OUT_SUPPRESSED"
+REASON_CODE_OPEN_SEVERE_COMPLAINT = "EXCL_OPEN_SEVERE_COMPLAINT"
+
 
 # ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class ComplaintTicket:
     """Representasi tiket keluhan pelanggan."""
-
     ticket_id: str
     customer_id: str
     status: ComplaintStatus
@@ -72,7 +77,6 @@ class ComplaintTicket:
 @dataclass
 class CustomerConsent:
     """Status consent/persetujuan komunikasi pelanggan."""
-
     customer_id: str
     email_opt_in: bool = True
     push_opt_in: bool = True
@@ -85,7 +89,6 @@ class CustomerConsent:
 @dataclass
 class SuppressionCheckResult:
     """Hasil pemeriksaan suppression untuk seorang pelanggan."""
-
     customer_id: str
     is_suppressed: bool
     suppression_reason: SuppressionReason
@@ -94,12 +97,13 @@ class SuppressionCheckResult:
     message: str
     active_complaints: List[ComplaintTicket] = field(default_factory=list)
     is_global_opt_out: bool = False
+    reason_code: str = ""
+    """Kode alasan penekanan (aditif). Kosong jika tidak ada suppression."""
 
 
 # ---------------------------------------------------------------------------
 # Fungsi Utama
 # ---------------------------------------------------------------------------
-
 
 def check_suppression(
     customer_id: str,
@@ -154,6 +158,7 @@ def check_suppression(
                 f"Seluruh komunikasi diblokir secara mutlak. Tidak ada pengecualian."
             ),
             is_global_opt_out=True,
+            reason_code=REASON_CODE_OPT_OUT,
         )
 
     # --- Pemeriksaan 2: OPEN_SEVERE_COMPLAINT ---
@@ -182,6 +187,7 @@ def check_suppression(
                 f"Hanya aksi '{COMPLAINT_ALLOWED_ACTION}' yang diizinkan."
             ),
             active_complaints=active_severe_complaints,
+            reason_code=REASON_CODE_OPEN_SEVERE_COMPLAINT,
         )
 
     # --- Tidak Ada Suppression ---
@@ -190,9 +196,7 @@ def check_suppression(
         is_suppressed=False,
         suppression_reason=SuppressionReason.NONE,
         status="SUPPRESSION_CLEAR",
-        allowed_actions=[
-            "ALL"
-        ],  # Semua aksi berpotensi diizinkan (tergantung policy lain)
+        allowed_actions=["ALL"],  # Semua aksi berpotensi diizinkan (tergantung policy lain)
         message=(
             f"Pelanggan {customer_id} tidak memiliki kondisi suppression aktif. "
             f"Lanjutkan evaluasi fatigue dan eligibility."
