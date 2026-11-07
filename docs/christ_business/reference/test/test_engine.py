@@ -8,8 +8,9 @@ Jalankan dengan:
     pytest docs/christ_business/reference/test/ -v
 """
 
-import pytest
 from datetime import datetime, timedelta
+
+import pytest
 
 from services.decision.nba.engine import (
     AIScores,
@@ -25,14 +26,13 @@ from services.decision.policy.suppression import (
     CustomerConsent,
 )
 
-
 # ---------------------------------------------------------------------------
 # Constants & Helpers
 # ---------------------------------------------------------------------------
 
 CUSTOMER_ID = "CUST-ENGINE-001"
 EVAL_DATE = datetime(2026, 10, 28, 10, 0, 0)
-SCORE_DATE = EVAL_DATE - timedelta(days=5)   # Skor baru (tidak kadaluarsa)
+SCORE_DATE = EVAL_DATE - timedelta(days=5)  # Skor baru (tidak kadaluarsa)
 EXPIRED_SCORE_DATE = EVAL_DATE - timedelta(days=35)  # Skor kadaluarsa
 
 
@@ -40,7 +40,9 @@ def _make_engine(**kwargs) -> NBAEngine:
     return NBAEngine(**kwargs)
 
 
-def _make_consent(global_opt_out: bool = False, cid: str = CUSTOMER_ID) -> CustomerConsent:
+def _make_consent(
+    global_opt_out: bool = False, cid: str = CUSTOMER_ID
+) -> CustomerConsent:
     return CustomerConsent(
         customer_id=cid,
         email_opt_in=True,
@@ -109,7 +111,9 @@ def _make_eligibility(
     )
 
 
-def _make_suitability(available: list = None, unsuitable: list = None) -> ProductSuitability:
+def _make_suitability(
+    available: list = None, unsuitable: list = None
+) -> ProductSuitability:
     return ProductSuitability(
         available_action_ids=available or [],
         unsuitable_action_ids=unsuitable or [],
@@ -119,6 +123,7 @@ def _make_suitability(available: list = None, unsuitable: list = None) -> Produc
 # ---------------------------------------------------------------------------
 # Tests: Skenario Suppression → NO_ACTION / COMPLAINT_RESOLUTION
 # ---------------------------------------------------------------------------
+
 
 class TestEngineSuppressionPriority:
 
@@ -189,6 +194,7 @@ class TestEngineSuppressionPriority:
 # Tests: Skenario Fatigue → NO_ACTION
 # ---------------------------------------------------------------------------
 
+
 class TestEngineFatiguePriority:
 
     def test_freq_cap_reached_returns_no_action(self):
@@ -250,6 +256,7 @@ class TestEngineFatiguePriority:
 # Tests: Skenario Skor Kadaluarsa
 # ---------------------------------------------------------------------------
 
+
 class TestEngineExpiredScores:
 
     def test_expired_scores_causes_no_action(self):
@@ -286,6 +293,7 @@ class TestEngineExpiredScores:
 # Tests: Skenario Eligibility Rules
 # ---------------------------------------------------------------------------
 
+
 class TestEngineEligibilityRules:
 
     def test_cross_sell_selected_for_active_customer(self):
@@ -310,8 +318,10 @@ class TestEngineEligibilityRules:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="DORMANT", clv_tier="GOLD",
-                churn_score=0.75, churn_band="HIGH"
+                lifecycle="DORMANT",
+                clv_tier="GOLD",
+                churn_score=0.75,
+                churn_band="HIGH",
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -332,7 +342,9 @@ class TestEngineEligibilityRules:
             consent=_make_consent(),
             complaint_tickets=[],
             contact_history=[],
-            eligibility=_make_eligibility(membership_days=60),  # 60 hari tersisa, bukan <= 15
+            eligibility=_make_eligibility(
+                membership_days=60
+            ),  # 60 hari tersisa, bukan <= 15
             product_suitability=_make_suitability(),
             evaluation_date=EVAL_DATE,
         )
@@ -376,7 +388,9 @@ class TestEngineEligibilityRules:
         """EDUCATION hanya eligible untuk pelanggan NEW dengan churn risk LOW."""
         engine = _make_engine()
         result = engine.evaluate(
-            ai_scores=_make_ai_scores(lifecycle="NEW", churn_band="LOW", churn_score=0.1),
+            ai_scores=_make_ai_scores(
+                lifecycle="NEW", churn_band="LOW", churn_score=0.1
+            ),
             consent=_make_consent(),
             complaint_tickets=[],
             contact_history=[],
@@ -393,8 +407,10 @@ class TestEngineEligibilityRules:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="AT_RISK", churn_band="HIGH",
-                churn_score=0.75, clv_tier="GOLD"
+                lifecycle="AT_RISK",
+                churn_band="HIGH",
+                churn_score=0.75,
+                clv_tier="GOLD",
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -411,6 +427,7 @@ class TestEngineEligibilityRules:
 # ---------------------------------------------------------------------------
 # Tests: Skenario Product Suitability (Masukan 5)
 # ---------------------------------------------------------------------------
+
 
 class TestEngineProductSuitability:
 
@@ -463,8 +480,11 @@ class TestEngineProductSuitability:
         )
         # Tidak semua diblokir karena masalah produk
         product_blocked = [
-            c for c in result.candidates_evaluated
-            if not c.is_eligible and c.blocked_reason and "Masukan 5" in c.blocked_reason
+            c
+            for c in result.candidates_evaluated
+            if not c.is_eligible
+            and c.blocked_reason
+            and "Masukan 5" in c.blocked_reason
         ]
         assert len(product_blocked) == 0
 
@@ -473,6 +493,7 @@ class TestEngineProductSuitability:
 # Tests: Formula Expected Value
 # ---------------------------------------------------------------------------
 
+
 class TestEngineExpectedValue:
 
     def test_ev_positive_for_eligible_action(self):
@@ -480,8 +501,10 @@ class TestEngineExpectedValue:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="ACTIVE", propensity_purchase=0.9,
-                clv=1_500_000, clv_tier="PLATINUM"
+                lifecycle="ACTIVE",
+                propensity_purchase=0.9,
+                clv=1_500_000,
+                clv_tier="PLATINUM",
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -513,8 +536,10 @@ class TestEngineExpectedValue:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="ACTIVE", clv=800_000, clv_tier="GOLD",
-                propensity_purchase=0.8
+                lifecycle="ACTIVE",
+                clv=800_000,
+                clv_tier="GOLD",
+                propensity_purchase=0.8,
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -532,6 +557,7 @@ class TestEngineExpectedValue:
 # ---------------------------------------------------------------------------
 # Tests: Struktur NBAResult
 # ---------------------------------------------------------------------------
+
 
 class TestEngineResultStructure:
 
@@ -591,6 +617,7 @@ class TestEngineResultStructure:
 # Tests: End-to-End Skenario
 # ---------------------------------------------------------------------------
 
+
 class TestEngineEndToEnd:
 
     def test_at_risk_platinum_high_churn_returns_retention_or_rm(self):
@@ -598,8 +625,11 @@ class TestEngineEndToEnd:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="AT_RISK", clv=1_200_000, clv_tier="PLATINUM",
-                churn_score=0.80, churn_band="VERY_HIGH"
+                lifecycle="AT_RISK",
+                clv=1_200_000,
+                clv_tier="PLATINUM",
+                churn_score=0.80,
+                churn_band="VERY_HIGH",
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -608,19 +638,22 @@ class TestEngineEndToEnd:
             product_suitability=_make_suitability(),
             evaluation_date=EVAL_DATE,
         )
-        retention_actions = {
-            "RETENTION_OUTREACH", "RELATIONSHIP_MANAGER_CONTACT"
-        }
-        assert result.selected_action.action_id in retention_actions or \
-               result.selected_action.action_id != "NO_ACTION"
+        retention_actions = {"RETENTION_OUTREACH", "RELATIONSHIP_MANAGER_CONTACT"}
+        assert (
+            result.selected_action.action_id in retention_actions
+        ), f"Expected a retention action, got {result.selected_action.action_id}"
 
     def test_new_low_churn_returns_education(self):
         """Pelanggan NEW dengan churn LOW harus mendapat EDUCATION."""
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="NEW", churn_band="LOW", churn_score=0.05,
-                propensity_purchase=0.5, clv=50_000, clv_tier="INSUFFICIENT_HISTORY"
+                lifecycle="NEW",
+                churn_band="LOW",
+                churn_score=0.05,
+                propensity_purchase=0.5,
+                clv=50_000,
+                clv_tier="INSUFFICIENT_HISTORY",
             ),
             consent=_make_consent(),
             complaint_tickets=[],
@@ -639,8 +672,11 @@ class TestEngineEndToEnd:
         engine = _make_engine()
         result = engine.evaluate(
             ai_scores=_make_ai_scores(
-                lifecycle="LOYAL", clv=2_000_000, clv_tier="PLATINUM",
-                churn_score=0.95, churn_band="VERY_HIGH"
+                lifecycle="LOYAL",
+                clv=2_000_000,
+                clv_tier="PLATINUM",
+                churn_score=0.95,
+                churn_band="VERY_HIGH",
             ),
             consent=_make_consent(global_opt_out=True),
             complaint_tickets=[],

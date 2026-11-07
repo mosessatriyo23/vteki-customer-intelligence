@@ -122,9 +122,9 @@ def test_no_prohibited_dependencies_declared():
                             value.splitlines(), path.relative_to(ROOT)
                         )
                     )
-    assert not violations, (
-        "[NFR-10 / T-SEC-03] Forbidden project dependencies:\n" + "\n".join(violations)
-    )
+    assert (
+        not violations
+    ), "[NFR-10 / T-SEC-03] Forbidden project dependencies:\n" + "\n".join(violations)
 
 
 def test_no_prohibited_imports_in_source_code():
@@ -145,6 +145,6 @@ def test_no_prohibited_imports_in_source_code():
                         violations.append(
                             f"{path.relative_to(ROOT)}:{node.lineno}: {module}"
                         )
-    assert not violations, (
-        "[NFR-10 / T-SEC-03] Forbidden source imports:\n" + "\n".join(violations)
-    )
+    assert (
+        not violations
+    ), "[NFR-10 / T-SEC-03] Forbidden source imports:\n" + "\n".join(violations)

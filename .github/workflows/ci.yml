@@ -1,19 +1,28 @@
-name: CI/CD Pipeline & Governance Enforcement
+
+name: VTEKI CI
 
 on:
   push:
-    branches: [ main, master, dev ]
+    branches:
+      - "**"
   pull_request:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   quality-security-contract:
-    name: Code Quality, T-SEC-03 Allowlist & Schemathesis Contract Testing
+    name: Quality, Security and Backend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
     services:
       postgres:
-        image: postgres:15-alpine
+        image: postgres:15
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -23,92 +32,226 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres -d vteki_ci"
           --health-interval 5s
-          --health-timeout 3s
+          --health-timeout 5s
           --health-retries 10
+
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
-      JWT_SECRET: ci-pipeline-test-jwt-secret-key-32bytes-minimum
-      BOOTSTRAP_ADMIN_EMAIL: ci-admin@example.com
-      BOOTSTRAP_ADMIN_PASSWORD: ci-pipeline-admin-password-26
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
+      JWT_SECRET: ci-only-secret-not-for-production
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: CI-Only-Admin-Password-123!
 
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
+      - name: Set Up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          python-version: "3.11"
+          cache: pip
 
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-      - name: Run Ruff Linter
+      - name: Install PostgreSQL Client
         run: |
-          ruff check .
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
-      - name: Run Type Checking (mypy)
+      - name: Wait for PostgreSQL
+        run: |
+          for attempt in $(seq 1 30); do
+            if pg_isready -h localhost -U postgres -d vteki_ci; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"
+          exit 1
+
+      - name: Run Ruff
+        run: ruff check .
+
+      - name: Run Mypy
         run: mypy services api worker --ignore-missing-imports
 
-      - name: Verify Python Formatting
-        run: black --check api worker migrations tests/security/test_auth.py tests/security/test_route_rbac_coverage.py tests/worker tests/data/test_snapshot_atomicity.py tests/integration/test_postgres_platform.py
+      - name: Verify Black Formatting
+        run: black --check .
 
-      - name: Enforce T-SEC-03 Security Allowlist
-        run: |
-          pytest tests/security/test_allowlist.py -v
+      - name: Enforce Security Allowlist
+        run: pytest -v tests/security/test_allowlist.py
 
-      - name: Run Unit & Integration Test Suite
+      - name: Run Python Unit and Integration Tests
         env:
-          JWT_SECRET: "ci-pipeline-test-jwt-secret-key-32bytes-minimum"
-          DATABASE_URL: "sqlite://"
-        run: |
-          pytest -v
+          DATABASE_URL: sqlite://
+        run: pytest -v tests
 
       - name: Apply PostgreSQL Migrations
         run: alembic upgrade head
 
-      - name: Provision least-privilege PostgreSQL role groups
+      - name: Verify Alembic Heads
+        run: |
+          alembic heads
+          python - <<'PY'
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+
+          config = Config("alembic.ini")
+          scripts = ScriptDirectory.from_config(config)
+          heads = scripts.get_heads()
+
+          if len(heads) != 1:
+              raise SystemExit(f"Expected one Alembic head, found: {heads}")
+
+          print(f"PASS: single Alembic head: {heads[0]}")
+          PY
+
+      - name: Provision Least-Privilege and Runtime PostgreSQL Roles
         run: |
           python - <<'PY'
           import psycopg
           from pathlib import Path
 
-          sql = Path("scripts/db_permissions.sql").read_text(encoding="utf-8")
-          with psycopg.connect(
-              "host=localhost dbname=vteki_ci user=postgres password=postgres",
-              autocommit=True,
-          ) as connection:
-              connection.execute(sql, prepare=False)
+          connection_string = (
+              "host=localhost dbname=vteki_ci "
+              "user=postgres password=postgres"
+          )
+
+          scripts = (
+              "scripts/db_permissions.sql",
+              "scripts/runtime_roles.sql",
+          )
+
+          for filename in scripts:
+              sql = Path(filename).read_text(encoding="utf-8")
+
+              with psycopg.connect(
+                  connection_string,
+                  autocommit=True,
+              ) as connection:
+                  connection.execute(sql, prepare=False)
+
+              print(f"PASS: provisioned {filename}")
           PY
 
-      - name: Verify PostgreSQL governance, append-only audit and role isolation
+      - name: Verify PostgreSQL Runtime Role Permissions
+        run: |
+          python - <<'PY'
+          import psycopg
+
+          connection_string = (
+              "host=localhost dbname=vteki_ci "
+              "user=postgres password=postgres"
+          )
+
+          with psycopg.connect(connection_string) as connection:
+              checks = {
+                  "API role membership": """
+                      SELECT pg_has_role(
+                          'vteki_api',
+                          'vteki_api_runtime',
+                          'MEMBER'
+                      )
+                  """,
+                  "Worker role membership": """
+                      SELECT pg_has_role(
+                          'vteki_worker',
+                          'vteki_worker_runtime',
+                          'MEMBER'
+                      )
+                  """,
+                  "API can read audit": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'gov.audit_event', 'SELECT'
+                      )
+                  """,
+                  "API can insert audit": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'gov.audit_event', 'INSERT'
+                      )
+                  """,
+                  "Worker can read audit": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'gov.audit_event', 'SELECT'
+                      )
+                  """,
+                  "Worker can insert audit": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'gov.audit_event', 'INSERT'
+                      )
+                  """,
+                  "Worker can update batch jobs": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'act.batch_jobs', 'UPDATE'
+                      )
+                  """,
+              }
+
+              for label, query in checks.items():
+                  result = connection.execute(query).fetchone()[0]
+
+                  if not result:
+                      raise SystemExit(f"FAILED: {label}")
+
+                  print(f"PASS: {label}")
+
+              for role in ("vteki_api", "vteki_worker"):
+                  for privilege in ("UPDATE", "DELETE"):
+                      allowed = connection.execute(
+                          """
+                          SELECT has_table_privilege(
+                              %s, 'gov.audit_event', %s
+                          )
+                          """,
+                          (role, privilege),
+                      ).fetchone()[0]
+
+                      if allowed:
+                          raise SystemExit(
+                              f"FAILED: {role} unexpectedly has "
+                              f"{privilege} on gov.audit_event"
+                          )
+
+                      print(
+                          f"PASS: {role} cannot {privilege} audit events"
+                      )
+          PY
+
+      - name: Verify PostgreSQL Audit and Role Isolation
         env:
-          VTEKI_TEST_POSTGRES_URL: "postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci"
+          VTEKI_TEST_POSTGRES_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
         run: pytest -q tests/integration/test_postgres_platform.py
 
       - name: Bootstrap CI Administrator
         run: python -m api.bootstrap
 
-      - name: Run Schemathesis API Contract Testing
+      - name: Run Schemathesis Coverage, Fuzzing and Stateful Tests
         timeout-minutes: 5
-        env:
-          JWT_SECRET: "ci-pipeline-test-jwt-secret-key-32bytes-minimum"
-          DATABASE_URL: "postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci"
         run: |
           uvicorn api.main:app --host 127.0.0.1 --port 8000 > /tmp/vteki-api.log 2>&1 &
           SERVER_PID=$!
-          trap 'rc=$?; if [ "$rc" -ne 0 ]; then echo "=== FASTAPI ERROR LOGS ==="; if [ -f /tmp/vteki-api.log ]; then tail -n 300 /tmp/vteki-api.log; else echo "API log not found"; fi; fi; kill "$SERVER_PID" 2>/dev/null || true; exit "$rc"' EXIT
+          trap 'rc=$?; if [ "$rc" -ne 0 ]; then tail -n 300 /tmp/vteki-api.log; fi; kill "$SERVER_PID" 2>/dev/null || true; exit "$rc"' EXIT
+
+          READY=0
           for attempt in $(seq 1 30); do
-            if curl --fail http://127.0.0.1:8000/health; then break; fi
+            if curl --fail http://127.0.0.1:8000/health; then
+              READY=1
+              break
+            fi
             sleep 1
           done
-          # Prove the real login endpoint works with the bootstrapped admin.
-          # Random credentials from fuzzing are expected to return 401, so
-          # /auth/login is excluded from fuzzing ONLY (not from the API or tests).
-          token=$(python - <<'PYLOGIN'
+
+          if [ "$READY" -ne 1 ]; then
+            echo "API did not become ready"
+            exit 1
+          fi
+
+          token=$(python - <<'PY'
           import json
           import os
           import urllib.request
@@ -116,45 +259,240 @@ jobs:
           payload = json.dumps({
               "email": os.environ["BOOTSTRAP_ADMIN_EMAIL"],
               "password": os.environ["BOOTSTRAP_ADMIN_PASSWORD"],
-          }).encode("utf-8")
+          }).encode()
+
           request = urllib.request.Request(
               "http://127.0.0.1:8000/auth/login",
               data=payload,
               headers={"Content-Type": "application/json"},
               method="POST",
           )
-          with urllib.request.urlopen(request, timeout=10) as response:
-              assert response.status == 200
-              token = json.load(response)["access_token"]
-          print(token)
-          PYLOGIN
-          )
-          curl --fail --silent --show-error -H "Authorization: Bearer $token" http://127.0.0.1:8000/admin/health > /dev/null
-          st run http://127.0.0.1:8000/openapi.json --checks all --phases fuzzing,stateful --max-examples 10 --max-time 30 --request-timeout 5 --exclude-path /auth/login -H "Authorization: Bearer $token"
 
-      - name: Show FastAPI Error Logs
-        if: failure()
-        run: |
-          echo "=== FastAPI Error Logs ==="
-          if [ -f /tmp/vteki-api.log ]; then
-            tail -n 300 /tmp/vteki-api.log
-          else
-            echo "API log file not found"
-          fi
+          with urllib.request.urlopen(request, timeout=10) as response:
+              data = json.load(response)
+
+          print(data["access_token"])
+          PY
+          )
+
+          st run http://127.0.0.1:8000/openapi.json \
+            --checks all \
+            --phases coverage,fuzzing,stateful \
+            --max-examples 10 \
+            --max-time 30 \
+            --request-timeout 5 \
+            --exclude-path /auth/login \
+            -H "Authorization: Bearer $token" \
+            --report junit,json \
+            --report-dir schemathesis-report
+
+      - name: Upload Schemathesis Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schemathesis-report
+          path: schemathesis-report/
+          if-no-files-found: ignore
+
   frontend-production-build:
-    name: React / Vite Production Build
+    name: Frontend Production Build
     runs-on: ubuntu-latest
+
     defaults:
       run:
         working-directory: web
+
     steps:
-      - name: Checkout Code
+      - name: Checkout Repository
         uses: actions/checkout@v4
-      - name: Set up Node.js
+
+      - name: Set Up Node
         uses: actions/setup-node@v4
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - run: npm ci
-      - run: npm run build
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+  frontend-e2e:
+    name: Frontend RBAC End-to-End Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vteki_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d vteki_e2e"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_e2e
+      MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_e2e
+      JWT_SECRET: ci-only-e2e-secret-not-for-production
+      BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+      BOOTSTRAP_ADMIN_PASSWORD: CI-Only-Admin-Password-123!
+      E2E_TEST_PASSWORD: CI-Only-E2E-Password-123!
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Backend Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install PostgreSQL Client (E2E)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
+      - name: Wait for PostgreSQL
+        run: |
+          for attempt in $(seq 1 30); do
+            if pg_isready -h localhost -U postgres -d vteki_e2e; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready"
+          exit 1
+
+      - name: Apply Database Migrations
+        run: alembic upgrade head
+
+      - name: Bootstrap Administrator
+        run: python -m api.bootstrap
+
+      - name: Start API and Seed E2E Users
+        run: |
+          uvicorn api.main:app --host 127.0.0.1 --port 8001 > /tmp/vteki-e2e-api.log 2>&1 &
+          echo $! > /tmp/vteki-e2e-api.pid
+
+          READY=0
+          for attempt in $(seq 1 30); do
+            if curl --fail http://127.0.0.1:8001/health; then
+              READY=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$READY" -ne 1 ]; then
+            cat /tmp/vteki-e2e-api.log
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          base = "http://127.0.0.1:8001"
+          password = os.environ["E2E_TEST_PASSWORD"]
+
+          def request(path, payload, token=None):
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+
+              req = urllib.request.Request(
+                  base + path,
+                  data=json.dumps(payload).encode(),
+                  headers=headers,
+                  method="POST",
+              )
+
+              with urllib.request.urlopen(req, timeout=15) as response:
+                  body = response.read()
+                  return json.loads(body) if body else {}
+
+          login = request(
+              "/auth/login",
+              {
+                  "email": os.environ["BOOTSTRAP_ADMIN_EMAIL"],
+                  "password": os.environ["BOOTSTRAP_ADMIN_PASSWORD"],
+              },
+          )
+
+          token = login["access_token"]
+
+          users = [
+              ("e2e-admin@example.com", ["admin"]),
+              ("e2e-analyst@example.com", ["analyst"]),
+              ("e2e-operator@example.com", ["operator"]),
+              ("e2e-campaign@example.com", ["campaign_manager"]),
+          ]
+
+          for email, roles in users:
+              request(
+                  "/auth/users",
+                  {
+                      "email": email,
+                      "password": password,
+                      "roles": roles,
+                  },
+                  token,
+              )
+              print(f"Created E2E user: {email}")
+
+          request("/customers/seed", {}, token)
+          print("E2E customers seeded")
+          PY
+
+      - name: Set Up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Frontend Dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright E2E
+        working-directory: web
+        env:
+          E2E_TEST_PASSWORD: CI-Only-E2E-Password-123!
+        run: npx playwright test
+
+      - name: Upload Playwright Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-e2e-results
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+
+      - name: Stop API
+        if: always()
+        run: |
+          if [ -f /tmp/vteki-e2e-api.pid ]; then
+            kill "$(cat /tmp/vteki-e2e-api.pid)" 2>/dev/null || true
+          fi

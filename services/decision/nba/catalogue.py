@@ -16,17 +16,18 @@ Referensi: Requirement_Capstone.md Bab 4 (FRD §10.1 / TRD §10.1)
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional
-
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class ActionCategory(str, Enum):
     """Kategori bisnis untuk setiap aksi NBA."""
+
     PROTECTION = "Proteksi / System"
     SERVICE = "Layanan"
     RETENTION_SPECIAL = "Retensi Khusus"
@@ -41,6 +42,7 @@ class ActionCategory(str, Enum):
 
 class IncentiveBand(str, Enum):
     """Band insentif / biaya yang diasosiasikan dengan aksi."""
+
     NONE = "Tanpa Insentif"
     LOW = "Band Rendah"
     MEDIUM = "Band Sedang"
@@ -52,6 +54,7 @@ class IncentiveBand(str, Enum):
 # ---------------------------------------------------------------------------
 # Data Class
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Action:
@@ -70,6 +73,7 @@ class Action:
         is_commercial: Apakah aksi ini bersifat komersial (dihitung dalam fatigue cap).
         blocks_all_commercial: Jika True, aksi ini menghentikan semua penawaran komersial.
     """
+
     action_id: str
     name: str
     category: ActionCategory
@@ -87,7 +91,6 @@ class Action:
 # ---------------------------------------------------------------------------
 
 ACTION_CATALOGUE: Dict[str, Action] = {
-
     # 1. NO_ACTION — Aksi Protektif Default
     "NO_ACTION": Action(
         action_id="NO_ACTION",
@@ -111,7 +114,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         is_commercial=False,
         blocks_all_commercial=False,
     ),
-
     # 2. COMPLAINT_RESOLUTION — Prioritas Layanan Tertinggi
     "COMPLAINT_RESOLUTION": Action(
         action_id="COMPLAINT_RESOLUTION",
@@ -132,7 +134,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         is_commercial=False,  # Bukan aksi komersial, tidak dihitung dalam fatigue cap
         blocks_all_commercial=True,
     ),
-
     # 3. RELATIONSHIP_MANAGER_CONTACT — Retensi Pelanggan Premium
     "RELATIONSHIP_MANAGER_CONTACT": Action(
         action_id="RELATIONSHIP_MANAGER_CONTACT",
@@ -153,7 +154,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.8,
         is_commercial=True,
     ),
-
     # 4. RETENTION_OUTREACH — Upaya Retensi Standar
     "RETENTION_OUTREACH": Action(
         action_id="RETENTION_OUTREACH",
@@ -175,7 +175,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.6,
         is_commercial=True,
     ),
-
     # 5. CROSS_SELL — Penawaran Lintas Kategori
     "CROSS_SELL": Action(
         action_id="CROSS_SELL",
@@ -197,7 +196,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.2,
         is_commercial=True,
     ),
-
     # 6. UPSELL — Upgrade Keanggotaan / Paket Premium
     "UPSELL": Action(
         action_id="UPSELL",
@@ -219,7 +217,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.4,
         is_commercial=True,
     ),
-
     # 7. RENEWAL_REMINDER — Pengingat Perpanjangan Membership
     "RENEWAL_REMINDER": Action(
         action_id="RENEWAL_REMINDER",
@@ -240,7 +237,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.5,
         is_commercial=True,
     ),
-
     # 8. SERVICE_REMINDER — Pengingat Jadwal Layanan
     "SERVICE_REMINDER": Action(
         action_id="SERVICE_REMINDER",
@@ -260,7 +256,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.0,
         is_commercial=False,  # Non-komersial, dikecualikan dari fatigue cap
     ),
-
     # 9. EDUCATION — Edukasi Pelanggan Baru
     "EDUCATION": Action(
         action_id="EDUCATION",
@@ -281,7 +276,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=0.8,
         is_commercial=True,
     ),
-
     # 10. LOYALTY_REWARD — Apresiasi Pelanggan Setia
     "LOYALTY_REWARD": Action(
         action_id="LOYALTY_REWARD",
@@ -302,7 +296,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         action_weight=1.3,
         is_commercial=True,
     ),
-
     # 11. WIN_BACK_OFFER — Penawaran Reaktivasi
     "WIN_BACK_OFFER": Action(
         action_id="WIN_BACK_OFFER",
@@ -331,6 +324,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
 # Fungsi Utilitas Katalog
 # ---------------------------------------------------------------------------
 
+
 def get_action(action_id: str) -> Optional[Action]:
     """
     Mengambil definisi aksi dari katalog berdasarkan action_id.
@@ -355,9 +349,7 @@ def get_actions_by_category(category: ActionCategory) -> List[Action]:
         List of Action yang termasuk dalam kategori tersebut.
     """
     return [
-        action
-        for action in ACTION_CATALOGUE.values()
-        if action.category == category
+        action for action in ACTION_CATALOGUE.values() if action.category == category
     ]
 
 

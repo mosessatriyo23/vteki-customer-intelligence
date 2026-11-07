@@ -211,19 +211,34 @@ function App() {
   const [notice, setNotice] = useState('')
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null)
 
-  async function refreshWorkspace(sessionToken: string) {
+  async function refreshWorkspace(sessionToken: string, roles: string[]) {
+    const canLoadReviews = roles.some((role) => ['admin', 'operator'].includes(role))
+    const reviewRequest = canLoadReviews
+      ? api.reviews(sessionToken)
+      : Promise.resolve([] as Awaited<ReturnType<typeof api.reviews>>)
+
     const [customerData, campaignData, reviewData, decisionData, monitoring] = await Promise.all([
       api.customers(sessionToken),
       api.campaigns(sessionToken),
-      api.reviews(sessionToken),
+      reviewRequest,
       api.decisions(sessionToken),
       api.monitoring(sessionToken),
     ])
+
     const mappedCustomers = customerData.map(mapCustomer)
     setCustomerRows(mappedCustomers)
-    const activeCustomer = mappedCustomers.find((customer) => customer.apiId === selectedCustomer?.apiId) ?? mappedCustomers[0] ?? null
+
+    const activeCustomer =
+      mappedCustomers.find((customer) => customer.apiId === selectedCustomer?.apiId) ??
+      mappedCustomers[0] ??
+      null
+
     setSelectedCustomer(activeCustomer)
-    setProvenance(activeCustomer ? await api.customerProvenance(sessionToken, activeCustomer.apiId) : null)
+    setProvenance(
+      activeCustomer
+        ? await api.customerProvenance(sessionToken, activeCustomer.apiId)
+        : null,
+    )
     setCampaigns(campaignData.map(mapCampaign))
     setReviews(reviewData.map(mapReview))
     setDecisions(decisionData.map(mapDecision))
@@ -244,7 +259,7 @@ function App() {
         if (!mounted) return
         setUser(currentUser)
         setDataLoading(true)
-        await refreshWorkspace(token)
+        await refreshWorkspace(token, currentUser.roles)
       } catch (error) {
         if (!mounted) return
         if (error instanceof ApiError && error.status === 401) {
@@ -315,7 +330,7 @@ function App() {
     try {
       const simulatorChannel = `${channel.toLowerCase().replace(/[^a-z]+/g, '_').replace(/^_|_$/g, '')}_sim`
       await api.createCampaign(token, { name, target_segment: segment, channel: simulatorChannel, message_draft: messageDraft })
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setBuilderOpen(false)
       setPage('campaigns')
       setNotice(`Kampanye "${name}" tersimpan di server sebagai draf.`)
@@ -333,7 +348,7 @@ function App() {
       else if (campaign.status === 'Pending approval' && status === 'Approved') await api.approveCampaign(token, campaign.apiId)
       else if (campaign.status === 'Pending approval' && status === 'Rejected') await api.rejectCampaign(token, campaign.apiId, 'Ditolak melalui review workflow')
       else if (campaign.status === 'Approved' && status === 'Live') await api.launchCampaign(token, campaign.apiId)
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice(`Status kampanye "${name}" diperbarui menjadi ${status}.`)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal memperbarui status kampanye.')
@@ -355,7 +370,7 @@ function App() {
     if (!token) return
     try {
       const result = await api.seedCustomers(token)
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice(result.message)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal memuat data contoh.')
@@ -368,7 +383,7 @@ function App() {
     if (!review) return
     try {
       await api.resolveReview(token, review.apiId, approved, 'Keputusan reviewer pada antrean manual')
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice(`Identitas ${id} ${approved ? 'disetujui' : 'ditolak'}.`)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal menyimpan keputusan review.')
@@ -381,7 +396,7 @@ function App() {
     if (!decision) return
     try {
       await api.overrideDecision(token, decision.apiId, selected, reason)
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice(`Human override ${id} tersimpan dan tercatat di audit.`)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal menyimpan human override.')
@@ -392,7 +407,7 @@ function App() {
     if (!token) return
     try {
       await api.createReview(token, { subject_reference: subject, candidate_references: candidates, confidence, reason })
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice('Kasus identity review tersimpan di antrean.')
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal membuat kasus identity review.')
@@ -403,7 +418,7 @@ function App() {
     if (!token) return
     try {
       await api.createDecision(token, { customer_id: customerId, recommended_action: action, rationale })
-      await refreshWorkspace(token)
+      await refreshWorkspace(token, user?.roles ?? [])
       setNotice('Rekomendasi NBA tersimpan dan dapat ditinjau.')
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal membuat rekomendasi NBA.')
