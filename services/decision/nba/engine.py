@@ -49,9 +49,11 @@ from services.decision.nba.ev_calculator import (
 )
 from services.decision.nba.evaluator import (
     GATE_BUSINESS_ELIGIBILITY,
+    GATE_CUSTOMER_CONSENT,
     GATE_PRODUCT_SUITABILITY,
     GateResult,
     check_business_eligibility,
+    check_channel_availability,
     check_product_suitability,
     evaluate_complaint_block,
     evaluate_consent_gate,
@@ -114,7 +116,10 @@ class AIScores:
         propensity_renew: Kecenderungan memperpanjang membership (0.0 - 1.0).
         clv_amount: Nilai CLV dalam IDR.
         clv_tier: PLATINUM / GOLD / SILVER / INSUFFICIENT_HISTORY.
-        lifecycle_stage: Tahap lifecycle saat ini.
+        lifecycle_stage: Tahap lifecycle saat ini. 9 segmen (target_definitions §3):
+            NEW / ACTIVE / LOYAL / AT_RISK / DORMANT / CHURNED / REACTIVATED /
+            OCCASIONAL / NEVER_TRANSACTED. Label yang tidak dikenal aturan aksi
+            otomatis tidak eligible untuk aksi yang dibatasi lifecycle.
         score_generated_at: Waktu skor diterbitkan (untuk cek valid_until).
         reason_codes: Minimal 3 reason codes churn.
     """
@@ -433,6 +438,7 @@ class NBAEngine:
             eligibility=eligibility,
             product_suitability=product_suitability,
             scores_expired=scores_expired,
+            consent=consent,
         )
 
         # Filter kandidat yang lolos pemeriksaan (is_eligible=True)
@@ -603,6 +609,7 @@ class NBAEngine:
         eligibility: EligibilityProfile,
         product_suitability: ProductSuitability,
         scores_expired: bool,
+        consent: Optional[CustomerConsent] = None,
     ) -> List[ActionCandidate]:
         """
         Mengevaluasi semua aksi dalam katalog sebagai kandidat potensial.
@@ -638,6 +645,20 @@ class NBAEngine:
                     )
                 )
                 continue
+
+            # Masukan 3 per kanal: aksi tanpa satu pun kanal yang diizinkan consent
+            # tidak dapat dieksekusi (K-10: unknown/expired/opt-out = BLOCKED)
+            if consent is not None:
+                channel_reason = check_channel_availability(
+                    action.allowed_channels, consent
+                )
+                if channel_reason is not None:
+                    candidates.append(
+                        self._blocked_candidate(
+                            action, channel_reason, GATE_CUSTOMER_CONSENT
+                        )
+                    )
+                    continue
 
             # Hitung Expected Value (ev_calculator.py)
             propensity = get_propensity(action_id, ai_scores, scores_expired)
@@ -832,37 +853,48 @@ class NBAEngine:
         cands = result.candidates_evaluated
         complaint_gate = evaluate_complaint_block(result.suppression_result)
 
+        total = len(cands)
+        suit_blocked = sum(1 for c in cands if c.blocked_gate == GATE_PRODUCT_SUITABILITY)
+        elig_blocked = sum(1 for c in cands if c.blocked_gate == GATE_BUSINESS_ELIGIBILITY)
+        consent_blocked = sum(1 for c in cands if c.blocked_gate == GATE_CUSTOMER_CONSENT)
+        passed_eligibility = total - suit_blocked - elig_blocked  # lolos masukan 5 & 2
+
+        if cands:
+            consent_check = checks[1]
+            consent_check["details"]["candidates_blocked_by_channel_consent"] = consent_blocked
+            if consent_check["passed"] and passed_eligibility > 0 and (
+                consent_blocked == passed_eligibility
+            ):
+                consent_check["passed"] = False
+                consent_check["status"] = "CHANNEL_CONSENT_BLOCKED"
+                consent_check["reason"] = (
+                    "Seluruh kandidat yang layak tidak punya kanal yang diizinkan consent."
+                )
+
         if not complaint_gate.passed:
             checks.append(self._gate_to_check("ELIGIBILITY_CHECK", complaint_gate))
         elif cands:
-            total = len(cands)
-            eligible = sum(1 for c in cands if c.is_eligible)
-            eligibility_blocked = sum(
-                1 for c in cands if c.blocked_gate == GATE_BUSINESS_ELIGIBILITY
-            )
             checks.append(
                 {
                     "check_name": "ELIGIBILITY_CHECK",
                     "check_category": "ELIGIBILITY",
-                    "passed": eligible > 0,
-                    "status": "PASSED" if eligible > 0 else "NOT_ELIGIBLE",
+                    "passed": (total - suit_blocked - elig_blocked) > 0,
+                    "status": "PASSED"
+                    if (total - suit_blocked - elig_blocked) > 0
+                    else "NOT_ELIGIBLE",
                     "reason": None
-                    if eligible > 0
+                    if (total - suit_blocked - elig_blocked) > 0
                     else "Tidak ada kandidat aksi yang lolos kelayakan bisnis.",
                     "details": {
                         "candidates_total": total,
-                        "candidates_eligible": eligible,
-                        "blocked_by_eligibility": eligibility_blocked,
+                        "candidates_eligible": sum(1 for c in cands if c.is_eligible),
+                        "blocked_by_eligibility": elig_blocked,
                     },
                 }
             )
 
         if cands:
-            total = len(cands)
-            suitability_blocked = sum(
-                1 for c in cands if c.blocked_gate == GATE_PRODUCT_SUITABILITY
-            )
-            suitable = total - suitability_blocked
+            suitable = total - suit_blocked
             checks.append(
                 {
                     "check_name": "SUITABILITY_CHECK",
@@ -874,7 +906,7 @@ class NBAEngine:
                     else "Seluruh kandidat gagal ketersediaan/kesesuaian produk.",
                     "details": {
                         "candidates_total": total,
-                        "blocked_by_suitability": suitability_blocked,
+                        "blocked_by_suitability": suit_blocked,
                     },
                 }
             )
