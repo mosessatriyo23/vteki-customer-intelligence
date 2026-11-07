@@ -130,8 +130,7 @@
           "items": {
             "type": "string"
           },
-          "minItems": 1,
-          "description": "Paket data fakta kontekstual yang wajib disediakan untuk evaluasi kelayakan aksi"
+          "description": "Paket data fakta kontekstual yang wajib disediakan untuk evaluasi kelayakan aksi. Minimal 1 item untuk aksi bisnis; HARUS kosong untuk NO_ACTION (lihat aturan if/then di bawah)."
         },
         "action_weight": {
           "type": "number",
@@ -162,8 +161,23 @@
         "incentive_band",
         "required_fact_package"
       ],
+      "if": {
+        "properties": { "action_id": { "const": "NO_ACTION" } },
+        "required": ["action_id"]
+      },
+      "then": {
+        "properties": {
+          "allowed_channels": { "maxItems": 0 },
+          "incentive_band": { "const": "Tanpa Insentif" },
+          "required_fact_package": { "maxItems": 0 }
+        }
+      },
+      "else": {
+        "properties": {
+          "required_fact_package": { "minItems": 1 }
+        }
+      },
       "additionalProperties": true
     }
   }
 }
-

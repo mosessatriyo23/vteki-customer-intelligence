@@ -19,20 +19,44 @@ Prinsip Utama (Requirement_Capstone.md Bab 3):
     4. Contact Policy / Frequency Cap (Fatigue)
     5. Product Suitability & Availability
 
+Pembagian modul (Minggu 6-7):
+    - nba/ev_calculator.py : rumus EV & estimasi komponen (fungsi murni)
+    - nba/evaluator.py     : evaluasi 5 gerbang independen -> GateResult
+    - nba/engine.py        : orkestrasi. `evaluate()` (asli) dan `decide()` (keluaran bentuk K-07)
+
 Referensi: Requirement_Capstone.md Bab 3, 4, 5 (FRD §9.6, §10.1, §10.3 / TRD §10.1, §10.2)
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
 
 from services.decision.nba.catalogue import (
     ACTION_CATALOGUE,
     Action,
     get_action,
+)
+from services.decision.nba.ev_calculator import (
+    calculate_expected_value,
+    estimate_expected_revenue,
+    estimate_incentive_cost,
+    get_propensity,
+)
+from services.decision.nba.evaluator import (
+    GATE_BUSINESS_ELIGIBILITY,
+    GATE_PRODUCT_SUITABILITY,
+    GateResult,
+    check_business_eligibility,
+    check_product_suitability,
+    evaluate_complaint_block,
+    evaluate_consent_gate,
+    evaluate_contact_policy_gate,
+    evaluate_ml_score_gate,
 )
 from services.decision.policy.fatigue import (
     ContactRecord,
@@ -44,6 +68,7 @@ from services.decision.policy.suppression import (
     CustomerConsent,
     SuppressionCheckResult,
     check_suppression,
+    is_opted_out,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +81,18 @@ logger = logging.getLogger(__name__)
 DEFAULT_MIN_EV_THRESHOLD: float = 0.0
 """EV minimum agar aksi dapat dipilih. Jika EV < threshold, pilih NO_ACTION."""
 
+ENGINE_VERSION: str = "nba-engine-1.1.0"
+"""Versi NBAEngine yang dicatat pada rekaman keputusan K-07 (`engine_version`)."""
+
+NO_ACTION_REASON_OPT_OUT = "OPT_OUT_SUPPRESSED"
+NO_ACTION_REASON_FREQ_CAP = "FREQ_CAP_SUPPRESSED"
+NO_ACTION_REASON_ALL_BLOCKED = "ALL_CANDIDATES_BLOCKED"
+"""Alasan NO_ACTION menurut Requirement_Capstone Bab 4 (baris NO_ACTION): Consent = Opt-Out,
+Frequency Cap tercapai, atau ALL_CANDIDATES_BLOCKED."""
+
+CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+"""Pola `correlation_id` sesuai kontrak K-07."""
+
 DEFAULT_SCORE_VALIDITY_DAYS: int = 30
 """Masa berlaku skor AI dalam hari. Skor kadaluarsa diabaikan (dianggap 0.0)."""
 
@@ -63,7 +100,6 @@ DEFAULT_SCORE_VALIDITY_DAYS: int = 30
 # ---------------------------------------------------------------------------
 # Data Classes — Input
 # ---------------------------------------------------------------------------
-
 
 @dataclass
 class AIScores:
@@ -82,7 +118,6 @@ class AIScores:
         score_generated_at: Waktu skor diterbitkan (untuk cek valid_until).
         reason_codes: Minimal 3 reason codes churn.
     """
-
     customer_id: str
     churn_score: float
     churn_risk_band: str
@@ -108,7 +143,6 @@ class EligibilityProfile:
         purchased_categories: Kategori produk yang sudah pernah dibeli.
         has_active_win_back_offer: Apakah sudah ada penawaran win-back aktif.
     """
-
     customer_id: str
     tenure_days: int
     membership_days_remaining: int
@@ -126,7 +160,6 @@ class ProductSuitability:
         available_action_ids: Daftar action_id yang produk/layanannya tersedia.
         unsuitable_action_ids: Daftar action_id yang tidak sesuai untuk pelanggan ini.
     """
-
     available_action_ids: List[str] = field(default_factory=list)
     unsuitable_action_ids: List[str] = field(default_factory=list)
 
@@ -135,11 +168,9 @@ class ProductSuitability:
 # Data Classes — Output
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class ActionCandidate:
     """Sebuah aksi kandidat dengan Expected Value yang telah dihitung."""
-
     action: Action
     propensity: float
     expected_revenue: float
@@ -147,6 +178,8 @@ class ActionCandidate:
     expected_value: float
     blocked_reason: Optional[str] = None
     is_eligible: bool = True
+    blocked_gate: Optional[str] = None
+    """Gerbang yang memblokir kandidat (BUSINESS_ELIGIBILITY / PRODUCT_SUITABILITY)."""
 
 
 @dataclass
@@ -165,7 +198,6 @@ class NBAResult:
         candidates_evaluated: Semua kandidat yang dievaluasi beserta EV-nya.
         decision_rationale: Penjelasan singkat keputusan dalam bahasa bisnis.
     """
-
     customer_id: str
     selected_action: Action
     expected_value: float
@@ -177,10 +209,55 @@ class NBAResult:
     decision_rationale: str = ""
 
 
+@dataclass
+class DecisionRecord:
+    """
+    Rekaman keputusan NBA bentuk kontrak K-07 (`contracts/K-07_decision_record.json`).
+
+    Gunakan `to_dict()` untuk mendapatkan dict yang JSON-serializable dan sesuai skema.
+    `result` menyimpan `NBAResult` mentah (tidak ikut diserialisasi).
+    """
+
+    decision_id: str
+    customer_id: str
+    selected_action_id: str
+    expected_value: float
+    candidates: List[Dict[str, Any]]
+    checks: List[Dict[str, Any]]
+    rationale_text: str
+    correlation_id: str
+    evaluation_timestamp: datetime
+    engine_version: str
+    channel_selected: Optional[str]
+    degraded_input: bool
+    scores_snapshot: Dict[str, Any]
+    no_action_reason: Optional[str] = None
+    """Diisi hanya untuk alasan yang disebut Requirement_Capstone Bab 4; selain itu None."""
+    result: Optional[NBAResult] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Dict sesuai K-07 (+ `degraded_input`; K-07 mengizinkan properti tambahan)."""
+        return {
+            "decision_id": self.decision_id,
+            "customer_id": self.customer_id,
+            "selected_action_id": self.selected_action_id,
+            "expected_value": self.expected_value,
+            "candidates": self.candidates,
+            "checks": self.checks,
+            "rationale_text": self.rationale_text,
+            "correlation_id": self.correlation_id,
+            "evaluation_timestamp": self.evaluation_timestamp.isoformat(),
+            "engine_version": self.engine_version,
+            "channel_selected": self.channel_selected,
+            "degraded_input": self.degraded_input,
+            "no_action_reason": self.no_action_reason,
+            "scores_snapshot": self.scores_snapshot,
+        }
+
+
 # ---------------------------------------------------------------------------
 # Kelas Utama: NBAEngine
 # ---------------------------------------------------------------------------
-
 
 class NBAEngine:
     """
@@ -210,6 +287,8 @@ class NBAEngine:
         self,
         min_ev_threshold: float = DEFAULT_MIN_EV_THRESHOLD,
         score_validity_days: int = DEFAULT_SCORE_VALIDITY_DAYS,
+        *,
+        ev_min_threshold: Optional[float] = None,
     ) -> None:
         """
         Inisialisasi NBAEngine.
@@ -217,13 +296,14 @@ class NBAEngine:
         Args:
             min_ev_threshold: Nilai EV minimum agar aksi dapat dipilih.
             score_validity_days: Masa berlaku skor AI dalam hari.
+            ev_min_threshold: Alias `min_ev_threshold` (nama di roadmap Minggu 7).
+                Jika diisi, nilainya dipakai menggantikan `min_ev_threshold`.
         """
+        if ev_min_threshold is not None:
+            min_ev_threshold = ev_min_threshold
         self.min_ev_threshold = min_ev_threshold
         self.score_validity_days = score_validity_days
-        no_action = get_action("NO_ACTION")
-        if no_action is None:
-            raise RuntimeError("Konfigurasi NBA tidak memiliki aksi NO_ACTION.")
-        self._no_action = no_action
+        self._no_action = get_action("NO_ACTION")
 
     # ------------------------------------------------------------------
     # Public Method: evaluate
@@ -290,17 +370,10 @@ class NBAEngine:
                     f"[NBAEngine] {customer_id} memiliki OPEN_SEVERE_COMPLAINT. "
                     f"Memilih COMPLAINT_RESOLUTION."
                 )
-                complaint_action = get_action("COMPLAINT_RESOLUTION")
-                if complaint_action is None:
-                    raise RuntimeError(
-                        "Konfigurasi NBA tidak memiliki aksi COMPLAINT_RESOLUTION."
-                    )
-                fatigue_result = check_frequency_cap(
-                    customer_id, contact_history, evaluation_date
-                )
+                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
                 return self._build_result(
                     customer_id=customer_id,
-                    selected_action=complaint_action,
+                    selected_action=get_action("COMPLAINT_RESOLUTION"),
                     expected_value=0.0,
                     evaluation_timestamp=evaluation_date,
                     suppression_result=suppression_result,
@@ -314,9 +387,7 @@ class NBAEngine:
                 logger.info(
                     f"[NBAEngine] {customer_id} berstatus OPT_OUT. Memilih NO_ACTION."
                 )
-                fatigue_result = check_frequency_cap(
-                    customer_id, contact_history, evaluation_date
-                )
+                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
                 return self._build_result(
                     customer_id=customer_id,
                     selected_action=self._no_action,
@@ -370,10 +441,7 @@ class NBAEngine:
         # Pilih kandidat dengan EV tertinggi yang memenuhi threshold
         best_candidate = self._select_best_candidate(eligible_candidates)
 
-        if (
-            best_candidate is None
-            or best_candidate.expected_value < self.min_ev_threshold
-        ):
+        if best_candidate is None or best_candidate.expected_value < self.min_ev_threshold:
             logger.info(
                 f"[NBAEngine] Tidak ada kandidat dengan EV >= {self.min_ev_threshold}. "
                 f"Memilih NO_ACTION."
@@ -413,16 +481,120 @@ class NBAEngine:
         )
 
     # ------------------------------------------------------------------
+    # Public Method: decide (keluaran bentuk K-07)
+    # ------------------------------------------------------------------
+
+    def decide(
+        self,
+        customer_id: str,
+        ai_scores: Optional[AIScores],
+        consent: CustomerConsent,
+        complaint_tickets: List[ComplaintTicket],
+        contact_history: List[ContactRecord],
+        eligibility: EligibilityProfile,
+        product_suitability: ProductSuitability,
+        evaluation_date: Optional[datetime] = None,
+        correlation_id: Optional[str] = None,
+        decision_id: Optional[str] = None,
+    ) -> DecisionRecord:
+        """
+        Mengambil keputusan NBA dan mengembalikannya sebagai `DecisionRecord` (K-07).
+
+        Perbedaan dengan `evaluate()`:
+          - `ai_scores` boleh `None` (skor belum dihitung) -> default konservatif
+            dan `degraded_input = True`.
+          - Skor kedaluwarsa juga menandai `degraded_input = True`.
+          - Keputusan aksi IDENTIK dengan `evaluate()`; `decide()` hanya menambahkan
+            penanda `degraded_input`, alasan NO_ACTION, dan bentuk K-07.
+          - Menyertakan `checks[]` (5 gerbang), `candidates[]` berperingkat,
+            `rationale_text`, `correlation_id`, dan `decision_id`.
+
+        Args:
+            customer_id: ID pelanggan (harus sama dengan `ai_scores.customer_id` jika ada).
+            correlation_id: Jika None dibuat otomatis; jika diisi harus cocok
+                `^[A-Za-z0-9._:-]{1,128}$` (K-07), selain itu ValueError.
+            decision_id: Jika None dibuat otomatis (`DEC-<uuid4 hex>`).
+
+        Raises:
+            ValueError: customer_id tidak konsisten atau correlation_id tidak valid.
+        """
+        if evaluation_date is None:
+            evaluation_date = datetime.utcnow()
+
+        if correlation_id is None:
+            correlation_id = f"corr-{uuid.uuid4().hex}"
+        elif not CORRELATION_ID_PATTERN.match(correlation_id):
+            raise ValueError(
+                "correlation_id tidak valid (pola K-07: ^[A-Za-z0-9._:-]{1,128}$): "
+                f"{correlation_id!r}"
+            )
+        if decision_id is None:
+            decision_id = f"DEC-{uuid.uuid4().hex}"
+
+        scores_missing = ai_scores is None
+        if ai_scores is None:
+            scores = self._conservative_scores(customer_id, evaluation_date)
+        else:
+            if ai_scores.customer_id != customer_id:
+                raise ValueError(
+                    f"Mismatch customer_id: skor milik '{ai_scores.customer_id}' "
+                    f"tetapi keputusan untuk '{customer_id}'"
+                )
+            scores = ai_scores
+
+        result = self.evaluate(
+            ai_scores=scores,
+            consent=consent,
+            complaint_tickets=complaint_tickets,
+            contact_history=contact_history,
+            eligibility=eligibility,
+            product_suitability=product_suitability,
+            evaluation_date=evaluation_date,
+        )
+
+        degraded = scores_missing or result.scores_expired
+        rationale = result.decision_rationale
+
+        selected = result.selected_action
+        no_action_reason = self._no_action_reason(result)
+        if no_action_reason == NO_ACTION_REASON_ALL_BLOCKED:
+            rationale = (
+                "NO_ACTION dipilih. ALL_CANDIDATES_BLOCKED: seluruh kandidat aksi "
+                "diblokir oleh aturan kelayakan atau kesesuaian produk."
+            )
+        if degraded:
+            rationale += (
+                " [degraded_input=True: skor AI kedaluwarsa atau belum dihitung; "
+                "nilai default dipakai.]"
+            )
+
+        return DecisionRecord(
+            decision_id=decision_id,
+            customer_id=customer_id,
+            selected_action_id=selected.action_id,
+            expected_value=result.expected_value,
+            candidates=self._candidates_to_k07(result.candidates_evaluated),
+            checks=self._checks_to_k07(result, scores_missing),
+            rationale_text=rationale,
+            correlation_id=correlation_id,
+            evaluation_timestamp=evaluation_date,
+            engine_version=ENGINE_VERSION,
+            channel_selected=self._select_channel(selected, consent),
+            degraded_input=degraded,
+            no_action_reason=no_action_reason,
+            scores_snapshot=self._scores_snapshot(scores),
+            result=result,
+        )
+
+    # ------------------------------------------------------------------
     # Private Methods
     # ------------------------------------------------------------------
 
-    def _is_score_expired(self, ai_scores: AIScores, evaluation_date: datetime) -> bool:
+    def _is_score_expired(
+        self, ai_scores: AIScores, evaluation_date: datetime
+    ) -> bool:
         """Memeriksa apakah skor AI sudah melampaui masa berlaku (valid_until)."""
-        from datetime import timedelta
-
-        valid_until = ai_scores.score_generated_at + timedelta(
-            days=self.score_validity_days
-        )
+        valid_until = ai_scores.score_generated_at + timedelta(days=self.score_validity_days)
         return evaluation_date > valid_until
 
     def _evaluate_candidates(
@@ -443,63 +615,42 @@ class NBAEngine:
             if action_id == "NO_ACTION":
                 continue  # NO_ACTION adalah fallback, bukan kandidat
 
-            # Masukan 5: Cek ketersediaan produk
-            if (
-                product_suitability.available_action_ids
-                and action_id not in product_suitability.available_action_ids
-            ):
+            # Masukan 5: ketersediaan & kesesuaian produk (evaluator.py)
+            suitability_reason = check_product_suitability(
+                action_id, product_suitability
+            )
+            if suitability_reason is not None:
                 candidates.append(
-                    ActionCandidate(
-                        action=action,
-                        propensity=0.0,
-                        expected_revenue=0.0,
-                        incentive_cost=0.0,
-                        expected_value=0.0,
-                        blocked_reason="Produk/layanan tidak tersedia (Masukan 5)",
-                        is_eligible=False,
+                    self._blocked_candidate(
+                        action, suitability_reason, GATE_PRODUCT_SUITABILITY
                     )
                 )
                 continue
 
-            if action_id in product_suitability.unsuitable_action_ids:
-                candidates.append(
-                    ActionCandidate(
-                        action=action,
-                        propensity=0.0,
-                        expected_revenue=0.0,
-                        incentive_cost=0.0,
-                        expected_value=0.0,
-                        blocked_reason="Produk tidak sesuai untuk pelanggan ini (Masukan 5)",
-                        is_eligible=False,
-                    )
-                )
-                continue
-
-            # Masukan 2: Cek kelayakan bisnis (eligibility rules)
-            eligibility_check = self._check_business_eligibility(
+            # Masukan 2: kelayakan bisnis (evaluator.py)
+            eligibility_reason = check_business_eligibility(
                 action_id, ai_scores, eligibility
             )
-            if eligibility_check is not None:
+            if eligibility_reason is not None:
                 candidates.append(
-                    ActionCandidate(
-                        action=action,
-                        propensity=0.0,
-                        expected_revenue=0.0,
-                        incentive_cost=0.0,
-                        expected_value=0.0,
-                        blocked_reason=eligibility_check,
-                        is_eligible=False,
+                    self._blocked_candidate(
+                        action, eligibility_reason, GATE_BUSINESS_ELIGIBILITY
                     )
                 )
                 continue
 
-            # Hitung Expected Value
-            propensity = self._get_propensity(action_id, ai_scores, scores_expired)
-            expected_revenue = self._estimate_expected_revenue(ai_scores, action_id)
-            incentive_cost = self._estimate_incentive_cost(action, ai_scores)
-
-            # Formula EV: Propensity * Expected_Revenue * Action_Weight - Incentive_Cost
-            ev = (propensity * expected_revenue * action.action_weight) - incentive_cost
+            # Hitung Expected Value (ev_calculator.py)
+            propensity = get_propensity(action_id, ai_scores, scores_expired)
+            expected_revenue = estimate_expected_revenue(ai_scores.clv_amount, action_id)
+            incentive_cost = estimate_incentive_cost(
+                action.incentive_band, ai_scores.clv_amount
+            )
+            ev = calculate_expected_value(
+                propensity=propensity,
+                expected_revenue=expected_revenue,
+                action_weight=action.action_weight,
+                incentive_cost=incentive_cost,
+            )
 
             candidates.append(
                 ActionCandidate(
@@ -514,137 +665,220 @@ class NBAEngine:
 
         return candidates
 
+    @staticmethod
+    def _blocked_candidate(action: Action, reason: str, gate: str) -> ActionCandidate:
+        """Membangun kandidat yang diblokir oleh sebuah gerbang (EV = 0)."""
+        return ActionCandidate(
+            action=action,
+            propensity=0.0,
+            expected_revenue=0.0,
+            incentive_cost=0.0,
+            expected_value=0.0,
+            blocked_reason=reason,
+            is_eligible=False,
+            blocked_gate=gate,
+        )
+
     def _check_business_eligibility(
         self,
         action_id: str,
         ai_scores: AIScores,
         eligibility: EligibilityProfile,
     ) -> Optional[str]:
-        """
-        Memeriksa kelayakan bisnis untuk aksi tertentu (Masukan 2).
-        Mengembalikan None jika eligible, atau string alasan jika tidak eligible.
-        """
-        lifecycle = ai_scores.lifecycle_stage
-        clv_tier = ai_scores.clv_tier
-        churn_band = ai_scores.churn_risk_band
-
-        eligibility_rules: Dict[str, Callable[[], Optional[str]]] = {
-            "RELATIONSHIP_MANAGER_CONTACT": lambda: (
-                None
-                if (clv_tier == "PLATINUM" and churn_band in ("HIGH", "VERY_HIGH"))
-                else "CLV bukan PLATINUM atau Churn Risk tidak HIGH/VERY_HIGH"
-            ),
-            "RETENTION_OUTREACH": lambda: (
-                None
-                if (
-                    churn_band in ("HIGH", "VERY_HIGH")
-                    and clv_tier in ("GOLD", "PLATINUM")
-                    and lifecycle in ("AT_RISK", "DORMANT")
-                )
-                else "Tidak memenuhi syarat RETENTION_OUTREACH (churn/CLV/lifecycle)"
-            ),
-            "CROSS_SELL": lambda: (
-                None
-                if lifecycle in ("ACTIVE", "LOYAL")
-                else "Lifecycle bukan ACTIVE/LOYAL untuk CROSS_SELL"
-            ),
-            "UPSELL": lambda: (
-                None
-                if (lifecycle in ("ACTIVE", "LOYAL") and eligibility.tenure_days >= 60)
-                else "Lifecycle atau tenure tidak memenuhi syarat UPSELL"
-            ),
-            "RENEWAL_REMINDER": lambda: (
-                None
-                if (
-                    eligibility.has_active_membership
-                    and eligibility.membership_days_remaining <= 15
-                )
-                else "Membership tidak akan kadaluarsa dalam 15 hari"
-            ),
-            "LOYALTY_REWARD": lambda: (
-                None
-                if (lifecycle == "LOYAL" and clv_tier in ("GOLD", "PLATINUM"))
-                else "Lifecycle bukan LOYAL atau CLV tidak memenuhi syarat"
-            ),
-            "WIN_BACK_OFFER": lambda: (
-                None
-                if (
-                    lifecycle == "DORMANT"
-                    and clv_tier in ("GOLD", "PLATINUM")
-                    and not eligibility.has_active_win_back_offer
-                )
-                else "Tidak memenuhi syarat WIN_BACK_OFFER"
-            ),
-            "EDUCATION": lambda: (
-                None
-                if (lifecycle == "NEW" and churn_band == "LOW")
-                else "Lifecycle bukan NEW atau Churn Risk bukan LOW untuk EDUCATION"
-            ),
-        }
-
-        rule = eligibility_rules.get(action_id)
-        if rule:
-            return rule()
-        return None  # Tidak ada aturan khusus → eligible
+        """Delegasi ke `evaluator.check_business_eligibility` (kompatibilitas)."""
+        return check_business_eligibility(action_id, ai_scores, eligibility)
 
     def _get_propensity(
         self, action_id: str, ai_scores: AIScores, scores_expired: bool
     ) -> float:
-        """Mengambil propensity yang relevan untuk aksi. Jika skor kadaluarsa, return 0.0."""
-        if scores_expired:
-            return 0.0
-
-        propensity_map: Dict[str, float] = {
-            "RETENTION_OUTREACH": ai_scores.churn_score,
-            "RELATIONSHIP_MANAGER_CONTACT": ai_scores.churn_score,
-            "WIN_BACK_OFFER": ai_scores.churn_score,
-            "RENEWAL_REMINDER": ai_scores.propensity_renew,
-            "UPSELL": ai_scores.propensity_renew,
-            "CROSS_SELL": ai_scores.propensity_purchase,
-            "LOYALTY_REWARD": ai_scores.propensity_purchase,
-            "EDUCATION": 1.0 - ai_scores.churn_score,  # Rendah churn = tinggi edukasi
-            "SERVICE_REMINDER": 0.9,  # Service reminder hampir selalu relevan
-            "COMPLAINT_RESOLUTION": 1.0,  # Selalu relevan jika ada keluhan
-        }
-        return propensity_map.get(action_id, ai_scores.propensity_purchase)
+        """Delegasi ke `ev_calculator.get_propensity` (kompatibilitas)."""
+        return get_propensity(action_id, ai_scores, scores_expired)
 
     def _estimate_expected_revenue(self, ai_scores: AIScores, action_id: str) -> float:
-        """
-        Estimasi kontribusi pendapatan dari aksi berdasarkan CLV pelanggan.
-        Nilai ini adalah proxy; implementasi lengkap akan menggunakan data produk nyata.
-        """
-        clv = ai_scores.clv_amount
-        revenue_factor_map: Dict[str, float] = {
-            "RETENTION_OUTREACH": clv * 0.5,  # Retensi mencegah kehilangan 50% CLV
-            "RELATIONSHIP_MANAGER_CONTACT": clv * 0.6,
-            "WIN_BACK_OFFER": clv * 0.4,
-            "CROSS_SELL": clv * 0.3,
-            "UPSELL": clv * 0.35,
-            "RENEWAL_REMINDER": clv * 0.25,
-            "LOYALTY_REWARD": clv * 0.2,
-            "EDUCATION": clv * 0.15,
-            "SERVICE_REMINDER": clv * 0.1,
-            "COMPLAINT_RESOLUTION": 0.0,  # Non-revenue, tapi protektif
-        }
-        return revenue_factor_map.get(action_id, clv * 0.1)
+        """Delegasi ke `ev_calculator.estimate_expected_revenue` (kompatibilitas)."""
+        return estimate_expected_revenue(ai_scores.clv_amount, action_id)
 
     def _estimate_incentive_cost(self, action: Action, ai_scores: AIScores) -> float:
-        """
-        Estimasi biaya insentif berdasarkan incentive_band aksi dan CLV pelanggan.
-        """
-        from services.decision.nba.catalogue import IncentiveBand
+        """Delegasi ke `ev_calculator.estimate_incentive_cost` (kompatibilitas)."""
+        return estimate_incentive_cost(action.incentive_band, ai_scores.clv_amount)
 
-        clv = ai_scores.clv_amount
+    def _conservative_scores(
+        self, customer_id: str, evaluation_date: datetime
+    ) -> AIScores:
+        """
+        Skor default konservatif saat skor ML belum tersedia: semua propensity 0,
+        CLV 0, lifecycle/band tidak dikenal, dan ditandai kedaluwarsa.
+        """
+        return AIScores(
+            customer_id=customer_id,
+            churn_score=0.0,
+            churn_risk_band="UNKNOWN",
+            propensity_purchase=0.0,
+            propensity_renew=0.0,
+            clv_amount=0.0,
+            clv_tier="INSUFFICIENT_HISTORY",
+            lifecycle_stage="UNKNOWN",
+            score_generated_at=evaluation_date
+            - timedelta(days=self.score_validity_days + 1),
+            reason_codes=[],
+        )
 
-        cost_map: Dict[str, float] = {
-            IncentiveBand.NONE.value: 0.0,
-            IncentiveBand.LOW.value: min(clv * 0.05, 25_000),
-            IncentiveBand.MEDIUM.value: min(clv * 0.10, 75_000),
-            IncentiveBand.HIGH.value: min(clv * 0.15, 150_000),
-            IncentiveBand.DISCOUNT_LIMITED.value: min(clv * 0.08, 50_000),
-            IncentiveBand.LOYALTY_POINTS.value: min(clv * 0.05, 30_000),
+    @staticmethod
+    def _scores_snapshot(scores: AIScores) -> Dict[str, Any]:
+        """Snapshot skor untuk `scores_snapshot` K-07."""
+        return {
+            "churn_score": scores.churn_score,
+            "churn_risk_band": scores.churn_risk_band,
+            "propensity_purchase": scores.propensity_purchase,
+            "propensity_renew": scores.propensity_renew,
+            "clv_amount": scores.clv_amount,
+            "clv_tier": scores.clv_tier,
+            "lifecycle_stage": scores.lifecycle_stage,
+            "reason_codes": list(scores.reason_codes),
         }
-        return cost_map.get(action.incentive_band.value, 0.0)
+
+    @staticmethod
+    def _select_channel(action: Action, consent: CustomerConsent) -> Optional[str]:
+        """Kanal pertama dari aksi yang tidak diblokir opt-out; None untuk NO_ACTION."""
+        if action.action_id == "NO_ACTION":
+            return None
+        for channel in action.allowed_channels:
+            if not is_opted_out(consent, channel):
+                return channel
+        return None
+
+    @staticmethod
+    def _candidates_to_k07(candidates: List[ActionCandidate]) -> List[Dict[str, Any]]:
+        """Kandidat -> daftar dict K-07; kandidat eligible diberi `rank` berdasarkan EV."""
+        ranked = sorted(
+            (c for c in candidates if c.is_eligible),
+            key=lambda c: c.expected_value,
+            reverse=True,
+        )
+        rank_by_id = {c.action.action_id: i + 1 for i, c in enumerate(ranked)}
+
+        out: List[Dict[str, Any]] = []
+        for c in candidates:
+            item: Dict[str, Any] = {
+                "action_id": c.action.action_id,
+                "expected_value": c.expected_value,
+                "propensity": c.propensity,
+                "action_weight": c.action.action_weight,
+                "incentive_cost": c.incentive_cost,
+                "is_eligible": c.is_eligible,
+                "rejection_reason": c.blocked_reason,
+            }
+            if c.is_eligible:
+                item["rank"] = rank_by_id[c.action.action_id]
+            out.append(item)
+        return out
+
+    @staticmethod
+    def _gate_to_check(name: str, gate: GateResult) -> Dict[str, Any]:
+        return {
+            "check_name": name,
+            "check_category": gate.k07_category,
+            "passed": gate.passed,
+            "status": gate.status,
+            "reason": gate.reason,
+            "details": dict(gate.details),
+        }
+
+    @staticmethod
+    def _no_action_reason(result: NBAResult) -> Optional[str]:
+        """
+        Alasan NO_ACTION yang disebut Requirement_Capstone Bab 4:
+        Opt-Out, Frequency Cap tercapai, atau ALL_CANDIDATES_BLOCKED.
+        Untuk alasan lain (mis. EV < threshold) dokumen tidak memberi kode -> None.
+        """
+        if result.selected_action.action_id != "NO_ACTION":
+            return None
+        if result.suppression_result.reason_code == "OPT_OUT_SUPPRESSED":
+            return NO_ACTION_REASON_OPT_OUT
+        if result.fatigue_result.is_suppressed:
+            return NO_ACTION_REASON_FREQ_CAP
+        cands = result.candidates_evaluated
+        if cands and not any(c.is_eligible for c in cands):
+            return NO_ACTION_REASON_ALL_BLOCKED
+        return None
+
+    def _checks_to_k07(
+        self, result: NBAResult, scores_missing: bool
+    ) -> List[Dict[str, Any]]:
+        """
+        Menyusun `checks[]` K-07 sesuai pembagian 5 masukan Requirement_Capstone Bab 3:
+
+        - ML_SCORE_CHECK       (masukan 1) selalu ada
+        - ELIGIBILITY_CHECK    (masukan 2) komplain aktif -> gagal; selain itu agregat
+                               kandidat (hanya ada bila kandidat sempat dievaluasi)
+        - CONSENT_CHECK        (masukan 3) selalu ada
+        - CONTACT_POLICY_CHECK (masukan 4) frequency cap, selalu ada
+        - SUITABILITY_CHECK    (masukan 5) agregat kandidat (bila kandidat dievaluasi)
+        """
+        checks = [
+            self._gate_to_check(
+                "ML_SCORE_CHECK",
+                evaluate_ml_score_gate(result.scores_expired, scores_missing),
+            ),
+            self._gate_to_check(
+                "CONSENT_CHECK", evaluate_consent_gate(result.suppression_result)
+            ),
+            self._gate_to_check(
+                "CONTACT_POLICY_CHECK",
+                evaluate_contact_policy_gate(result.fatigue_result),
+            ),
+        ]
+
+        cands = result.candidates_evaluated
+        complaint_gate = evaluate_complaint_block(result.suppression_result)
+
+        if not complaint_gate.passed:
+            checks.append(self._gate_to_check("ELIGIBILITY_CHECK", complaint_gate))
+        elif cands:
+            total = len(cands)
+            eligible = sum(1 for c in cands if c.is_eligible)
+            eligibility_blocked = sum(
+                1 for c in cands if c.blocked_gate == GATE_BUSINESS_ELIGIBILITY
+            )
+            checks.append(
+                {
+                    "check_name": "ELIGIBILITY_CHECK",
+                    "check_category": "ELIGIBILITY",
+                    "passed": eligible > 0,
+                    "status": "PASSED" if eligible > 0 else "NOT_ELIGIBLE",
+                    "reason": None
+                    if eligible > 0
+                    else "Tidak ada kandidat aksi yang lolos kelayakan bisnis.",
+                    "details": {
+                        "candidates_total": total,
+                        "candidates_eligible": eligible,
+                        "blocked_by_eligibility": eligibility_blocked,
+                    },
+                }
+            )
+
+        if cands:
+            total = len(cands)
+            suitability_blocked = sum(
+                1 for c in cands if c.blocked_gate == GATE_PRODUCT_SUITABILITY
+            )
+            suitable = total - suitability_blocked
+            checks.append(
+                {
+                    "check_name": "SUITABILITY_CHECK",
+                    "check_category": "SUITABILITY",
+                    "passed": suitable > 0,
+                    "status": "PASSED" if suitable > 0 else "PRODUCT_UNSUITABLE",
+                    "reason": None
+                    if suitable > 0
+                    else "Seluruh kandidat gagal ketersediaan/kesesuaian produk.",
+                    "details": {
+                        "candidates_total": total,
+                        "blocked_by_suitability": suitability_blocked,
+                    },
+                }
+            )
+        return checks
 
     def _select_best_candidate(
         self, eligible_candidates: List[ActionCandidate]

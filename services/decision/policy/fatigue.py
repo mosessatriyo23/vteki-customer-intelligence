@@ -7,6 +7,7 @@ sebelum sebuah penawaran didistribusikan kepada pelanggan.
 Aturan Bisnis (dari target_definitions.md §4.1):
 - Batas maksimum: 2 kontak pemasaran per 14 hari (rolling window)
 - Jika batas terlampaui: status FREQ_CAP_SUPPRESSED dikembalikan
+- Field aditif `reason_code` (Minggu 5): "FREQ_CAP_SUPPRESSED" bila terblokir, "" bila lolos
 - Pengecualian: COMPLAINT_RESOLUTION dan SERVICE_REMINDER tidak dihitung
 
 Referensi: Requirement_Capstone.md Bab 3 (FRD §9.6 / TRD §10.1)
@@ -29,23 +30,19 @@ FREQ_CAP_WINDOW_DAYS: int = 14
 """Panjang rolling window dalam hari."""
 
 # Aksi yang dikecualikan dari perhitungan frekuensi (non-commercial)
-EXCLUDED_ACTIONS: frozenset[str] = frozenset(
-    {
-        "COMPLAINT_RESOLUTION",
-        "SERVICE_REMINDER",
-    }
-)
+EXCLUDED_ACTIONS: frozenset[str] = frozenset({
+    "COMPLAINT_RESOLUTION",
+    "SERVICE_REMINDER",
+})
 
 
 # ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------
 
-
 @dataclass
 class ContactRecord:
     """Representasi satu catatan kontak yang dikirimkan kepada pelanggan."""
-
     customer_id: str
     action_id: str
     channel: str
@@ -56,7 +53,6 @@ class ContactRecord:
 @dataclass
 class FatigueCheckResult:
     """Hasil pemeriksaan fatigue untuk seorang pelanggan."""
-
     customer_id: str
     is_suppressed: bool
     status: str
@@ -65,12 +61,13 @@ class FatigueCheckResult:
     window_end: datetime
     message: str
     contacts_in_window: List[ContactRecord] = field(default_factory=list)
+    reason_code: str = ""
+    """Kode alasan penekanan (aditif). Kosong jika tidak terblokir."""
 
 
 # ---------------------------------------------------------------------------
 # Fungsi Utama
 # ---------------------------------------------------------------------------
-
 
 def check_frequency_cap(
     customer_id: str,
@@ -127,6 +124,7 @@ def check_frequency_cap(
 
     if is_suppressed:
         status = "FREQ_CAP_SUPPRESSED"
+        reason_code = "FREQ_CAP_SUPPRESSED"
         message = (
             f"Pelanggan {customer_id} telah menerima {contact_count} kontak komersial "
             f"dalam {window_days} hari terakhir (batas: {max_contacts}). "
@@ -134,6 +132,7 @@ def check_frequency_cap(
         )
     else:
         status = "FREQ_CAP_OK"
+        reason_code = ""
         message = (
             f"Pelanggan {customer_id} baru menerima {contact_count}/{max_contacts} "
             f"kontak komersial dalam {window_days} hari terakhir. Aksi dapat dilanjutkan."
@@ -148,6 +147,7 @@ def check_frequency_cap(
         window_end=window_end,
         message=message,
         contacts_in_window=contacts_in_window,
+        reason_code=reason_code,
     )
 
 
