@@ -25,9 +25,9 @@ Referensi: Requirement_Capstone.md Bab 2 & 3 (FRD §9.6 / TRD §10.1)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional
 
 # ---------------------------------------------------------------------------
 # Enums & Konstanta
@@ -76,7 +76,15 @@ class ComplaintTicket:
 
 @dataclass
 class CustomerConsent:
-    """Status consent/persetujuan komunikasi pelanggan."""
+    """
+    Status consent/persetujuan komunikasi pelanggan.
+
+    PENTING (kontrak K-10, Panduan Minggu 3): status consent yang UNKNOWN / EXPIRED /
+    tidak tercantum = BLOCKED. Nilai default `True` pada dataclass ini hanya kemudahan
+    saat membangun objek secara langsung (mis. di test). Untuk data nyata berformat K-10
+    WAJIB memakai `CustomerConsent.from_k10(...)` yang menerapkan aturan tersebut.
+    """
+
     customer_id: str
     email_opt_in: bool = True
     push_opt_in: bool = True
@@ -84,6 +92,75 @@ class CustomerConsent:
     whatsapp_opt_in: bool = True
     global_opt_out: bool = False  # Jika True, semua kanal diblokir
     updated_at: Optional[datetime] = None
+    phone_opt_in: bool = True
+
+    @classmethod
+    def from_k10(
+        cls, doc: Mapping[str, Any], now: Optional[datetime] = None
+    ) -> "CustomerConsent":
+        """
+        Membangun CustomerConsent dari dokumen kontrak K-10 (`contracts/K-10_consent_contract.json`).
+
+        Aturan (K-10 / Panduan Minggu 3):
+        - Sebuah kanal DIIZINKAN hanya jika `status == OPT_IN`, `effective_permission == ALLOWED`,
+          dan `valid_until` (jika ada) belum terlewati. Selain itu (OPT_OUT, UNKNOWN, EXPIRED,
+          BLOCKED, `valid_until` terlewati, atau kanal tidak tercantum) = BLOCKED.
+        - Global `OPT_OUT` atau `is_global_opt_out = true` -> `global_opt_out = True`.
+        - Global `UNKNOWN` / `EXPIRED` / `BLOCKED` -> seluruh kanal diblokir.
+
+        Args:
+            doc: dokumen K-10 (dict hasil parse JSON).
+            now: waktu acuan pengecekan `valid_until` (default: sekarang, UTC).
+        """
+        now = now or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+
+        global_consent = doc.get("global_consent") or {}
+        global_status = global_consent.get("status")
+        global_opt_out = bool(global_consent.get("is_global_opt_out")) or (
+            global_status == "OPT_OUT"
+        )
+        global_blocked = global_status in ("UNKNOWN", "EXPIRED", "BLOCKED")
+
+        channels = doc.get("channels") or {}
+
+        def allowed(channel: str) -> bool:
+            if global_blocked:
+                return False
+            detail = channels.get(channel)
+            if not isinstance(detail, Mapping):
+                return False  # kanal tidak tercantum = unknown = blocked
+            if detail.get("status") != "OPT_IN":
+                return False
+            if detail.get("effective_permission") != "ALLOWED":
+                return False
+            valid_until = detail.get("valid_until")
+            if valid_until:
+                expiry = datetime.fromisoformat(str(valid_until).replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone.utc)
+                if expiry <= now:
+                    return False  # masa berlaku terlewati = EXPIRED = blocked
+            return True
+
+        updated_raw = doc.get("last_updated_at") or global_consent.get("updated_at")
+        updated_at = (
+            datetime.fromisoformat(str(updated_raw).replace("Z", "+00:00"))
+            if updated_raw
+            else None
+        )
+
+        return cls(
+            customer_id=str(doc["customer_id"]),
+            email_opt_in=allowed("email"),
+            push_opt_in=allowed("push"),
+            sms_opt_in=allowed("sms"),
+            whatsapp_opt_in=allowed("whatsapp"),
+            phone_opt_in=allowed("phone"),
+            global_opt_out=global_opt_out,
+            updated_at=updated_at,
+        )
 
 
 @dataclass
@@ -227,7 +304,8 @@ def is_opted_out(consent: CustomerConsent, channel: Optional[str] = None) -> boo
 
     Args:
         consent: Objek CustomerConsent pelanggan.
-        channel: Nama kanal spesifik ('email', 'push', 'sms', 'whatsapp').
+        channel: Nama kanal spesifik ('email', 'push', 'sms', 'whatsapp', 'phone').
+                 Kanal internal ('task_rm', 'branch') tidak diatur consent pemasaran.
                  Jika None, memeriksa global_opt_out.
 
     Returns:
@@ -241,6 +319,7 @@ def is_opted_out(consent: CustomerConsent, channel: Optional[str] = None) -> boo
         "push": not consent.push_opt_in,
         "sms": not consent.sms_opt_in,
         "whatsapp": not consent.whatsapp_opt_in,
+        "phone": not consent.phone_opt_in,
     }
 
     if channel and channel.lower() in channel_map:

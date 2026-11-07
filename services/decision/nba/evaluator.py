@@ -23,8 +23,10 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from services.decision.policy.fatigue import FatigueCheckResult
 from services.decision.policy.suppression import (
+    CustomerConsent,
     SuppressionCheckResult,
     SuppressionReason,
+    is_opted_out,
 )
 
 if TYPE_CHECKING:  # hindari import melingkar dengan engine.py
@@ -191,6 +193,25 @@ def check_product_suitability(
     if action_id in product_suitability.unsuitable_action_ids:
         return "Produk tidak sesuai untuk pelanggan ini (Masukan 5)"
     return None
+
+
+def check_channel_availability(
+    allowed_channels: List[str], consent: CustomerConsent
+) -> Optional[str]:
+    """
+    Masukan 3 per kanal (Requirement Bab 3: "mengizinkan kontak pada kanal ini?"; K-10).
+
+    Aksi tidak dapat dieksekusi bila SELURUH kanalnya diblokir consent. Kanal internal
+    (`task_rm`, `branch`) tidak diatur consent pemasaran sehingga tidak pernah terblokir.
+
+    Returns:
+        None jika minimal satu kanal tersedia (atau aksi tanpa kanal), selain itu alasan.
+    """
+    if not allowed_channels:
+        return None
+    if any(not is_opted_out(consent, c) for c in allowed_channels):
+        return None
+    return "Seluruh kanal aksi diblokir consent pelanggan (Masukan 3)"
 
 
 # ---------------------------------------------------------------------------
