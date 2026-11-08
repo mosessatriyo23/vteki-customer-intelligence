@@ -319,26 +319,6 @@ def test_doc_has_matrix_for_all_nine_segments():
 # --------------------------- Catalogue.py vs K-06 -----------------------------
 
 
-def _catalogue_as_k06_docs():
-    from services.decision.nba.catalogue import ACTION_CATALOGUE
-
-    return [
-        {
-            "action_id": a.action_id,
-            "name": a.name,
-            "category": a.category.value,
-            "description": a.description,
-            "allowed_channels": list(a.allowed_channels),
-            "incentive_band": a.incentive_band.value,
-            "action_weight": a.action_weight,
-            "is_commercial": a.is_commercial,
-            "blocks_all_commercial": a.blocks_all_commercial,
-            "trigger_conditions": list(a.trigger_conditions),
-        }
-        for a in ACTION_CATALOGUE.values()
-    ]
-
-
 def test_catalogue_ids_match_k06_enum():
     from services.decision.nba.catalogue import ACTION_CATALOGUE
 
@@ -348,23 +328,31 @@ def test_catalogue_ids_match_k06_enum():
     assert set(ACTION_CATALOGUE) == set(enum)
 
 
-def test_catalogue_values_are_within_k06_enums():
-    """Nilai category/incentive_band/channels di catalogue.py harus ada di enum K-06."""
-    props = load("K-06_action_catalogue")["definitions"]["ActionDefinition"][
-        "properties"
+def test_exported_catalogue_validates_against_k06():
+    """Seluruh 11 aksi di catalogue.py menghasilkan dokumen K-06 yang valid."""
+    from services.decision.nba.catalogue import export_k06_catalogue
+
+    doc = export_k06_catalogue()
+    errors = [
+        e.message
+        for e in Draft7Validator(load("K-06_action_catalogue")).iter_errors(doc)
     ]
-    for d in _catalogue_as_k06_docs():
-        assert d["category"] in props["category"]["enum"], d["action_id"]
-        assert d["incentive_band"] in props["incentive_band"]["enum"], d["action_id"]
-        for ch in d["allowed_channels"]:
-            assert ch in props["allowed_channels"]["items"]["enum"], d["action_id"]
+    assert errors == []
+    assert doc["total_actions"] == 11 and doc["contract_version"] == "INTG-v1.0"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="catalogue.py belum memiliki field required_fact_package (wajib di K-06). "
-    "Diperbaiki pada tahap koreksi Fase 2; hapus xfail setelah field ditambahkan.",
-)
-def test_catalogue_documents_validate_against_k06():
+def test_each_exported_action_validates_individually():
+    from services.decision.nba.catalogue import export_k06_catalogue
+
     v = k06_action_validator()
-    assert all(v.is_valid(d) for d in _catalogue_as_k06_docs())
+    for action in export_k06_catalogue()["actions"]:
+        assert v.is_valid(action), action["action_id"]
+
+
+def test_no_action_exported_without_channels_incentive_or_facts():
+    from services.decision.nba.catalogue import ACTION_CATALOGUE
+
+    na = ACTION_CATALOGUE["NO_ACTION"]
+    assert na.allowed_channels == []
+    assert na.incentive_band.value == "Tanpa Insentif"
+    assert na.required_fact_package == []

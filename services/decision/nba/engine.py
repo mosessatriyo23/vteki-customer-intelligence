@@ -103,6 +103,7 @@ DEFAULT_SCORE_VALIDITY_DAYS: int = 30
 # Data Classes — Input
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class AIScores:
     """
@@ -123,6 +124,7 @@ class AIScores:
         score_generated_at: Waktu skor diterbitkan (untuk cek valid_until).
         reason_codes: Minimal 3 reason codes churn.
     """
+
     customer_id: str
     churn_score: float
     churn_risk_band: str
@@ -148,6 +150,7 @@ class EligibilityProfile:
         purchased_categories: Kategori produk yang sudah pernah dibeli.
         has_active_win_back_offer: Apakah sudah ada penawaran win-back aktif.
     """
+
     customer_id: str
     tenure_days: int
     membership_days_remaining: int
@@ -165,6 +168,7 @@ class ProductSuitability:
         available_action_ids: Daftar action_id yang produk/layanannya tersedia.
         unsuitable_action_ids: Daftar action_id yang tidak sesuai untuk pelanggan ini.
     """
+
     available_action_ids: List[str] = field(default_factory=list)
     unsuitable_action_ids: List[str] = field(default_factory=list)
 
@@ -173,9 +177,11 @@ class ProductSuitability:
 # Data Classes — Output
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ActionCandidate:
     """Sebuah aksi kandidat dengan Expected Value yang telah dihitung."""
+
     action: Action
     propensity: float
     expected_revenue: float
@@ -203,6 +209,7 @@ class NBAResult:
         candidates_evaluated: Semua kandidat yang dievaluasi beserta EV-nya.
         decision_rationale: Penjelasan singkat keputusan dalam bahasa bisnis.
     """
+
     customer_id: str
     selected_action: Action
     expected_value: float
@@ -263,6 +270,7 @@ class DecisionRecord:
 # ---------------------------------------------------------------------------
 # Kelas Utama: NBAEngine
 # ---------------------------------------------------------------------------
+
 
 class NBAEngine:
     """
@@ -375,7 +383,9 @@ class NBAEngine:
                     f"[NBAEngine] {customer_id} memiliki OPEN_SEVERE_COMPLAINT. "
                     f"Memilih COMPLAINT_RESOLUTION."
                 )
-                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
+                fatigue_result = check_frequency_cap(
+                    customer_id, contact_history, evaluation_date
+                )
                 return self._build_result(
                     customer_id=customer_id,
                     selected_action=require_action("COMPLAINT_RESOLUTION"),
@@ -392,7 +402,9 @@ class NBAEngine:
                 logger.info(
                     f"[NBAEngine] {customer_id} berstatus OPT_OUT. Memilih NO_ACTION."
                 )
-                fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
+                fatigue_result = check_frequency_cap(
+                    customer_id, contact_history, evaluation_date
+                )
                 return self._build_result(
                     customer_id=customer_id,
                     selected_action=self._no_action,
@@ -447,7 +459,10 @@ class NBAEngine:
         # Pilih kandidat dengan EV tertinggi yang memenuhi threshold
         best_candidate = self._select_best_candidate(eligible_candidates)
 
-        if best_candidate is None or best_candidate.expected_value < self.min_ev_threshold:
+        if (
+            best_candidate is None
+            or best_candidate.expected_value < self.min_ev_threshold
+        ):
             logger.info(
                 f"[NBAEngine] Tidak ada kandidat dengan EV >= {self.min_ev_threshold}. "
                 f"Memilih NO_ACTION."
@@ -596,11 +611,11 @@ class NBAEngine:
     # Private Methods
     # ------------------------------------------------------------------
 
-    def _is_score_expired(
-        self, ai_scores: AIScores, evaluation_date: datetime
-    ) -> bool:
+    def _is_score_expired(self, ai_scores: AIScores, evaluation_date: datetime) -> bool:
         """Memeriksa apakah skor AI sudah melampaui masa berlaku (valid_until)."""
-        valid_until = ai_scores.score_generated_at + timedelta(days=self.score_validity_days)
+        valid_until = ai_scores.score_generated_at + timedelta(
+            days=self.score_validity_days
+        )
         return evaluation_date > valid_until
 
     def _evaluate_candidates(
@@ -662,7 +677,9 @@ class NBAEngine:
 
             # Hitung Expected Value (ev_calculator.py)
             propensity = get_propensity(action_id, ai_scores, scores_expired)
-            expected_revenue = estimate_expected_revenue(ai_scores.clv_amount, action_id)
+            expected_revenue = estimate_expected_revenue(
+                ai_scores.clv_amount, action_id
+            )
             incentive_cost = estimate_incentive_cost(
                 action.incentive_band, ai_scores.clv_amount
             )
@@ -854,16 +871,26 @@ class NBAEngine:
         complaint_gate = evaluate_complaint_block(result.suppression_result)
 
         total = len(cands)
-        suit_blocked = sum(1 for c in cands if c.blocked_gate == GATE_PRODUCT_SUITABILITY)
-        elig_blocked = sum(1 for c in cands if c.blocked_gate == GATE_BUSINESS_ELIGIBILITY)
-        consent_blocked = sum(1 for c in cands if c.blocked_gate == GATE_CUSTOMER_CONSENT)
+        suit_blocked = sum(
+            1 for c in cands if c.blocked_gate == GATE_PRODUCT_SUITABILITY
+        )
+        elig_blocked = sum(
+            1 for c in cands if c.blocked_gate == GATE_BUSINESS_ELIGIBILITY
+        )
+        consent_blocked = sum(
+            1 for c in cands if c.blocked_gate == GATE_CUSTOMER_CONSENT
+        )
         passed_eligibility = total - suit_blocked - elig_blocked  # lolos masukan 5 & 2
 
         if cands:
             consent_check = checks[1]
-            consent_check["details"]["candidates_blocked_by_channel_consent"] = consent_blocked
-            if consent_check["passed"] and passed_eligibility > 0 and (
-                consent_blocked == passed_eligibility
+            consent_check["details"][
+                "candidates_blocked_by_channel_consent"
+            ] = consent_blocked
+            if (
+                consent_check["passed"]
+                and passed_eligibility > 0
+                and (consent_blocked == passed_eligibility)
             ):
                 consent_check["passed"] = False
                 consent_check["status"] = "CHANNEL_CONSENT_BLOCKED"
@@ -879,12 +906,16 @@ class NBAEngine:
                     "check_name": "ELIGIBILITY_CHECK",
                     "check_category": "ELIGIBILITY",
                     "passed": (total - suit_blocked - elig_blocked) > 0,
-                    "status": "PASSED"
-                    if (total - suit_blocked - elig_blocked) > 0
-                    else "NOT_ELIGIBLE",
-                    "reason": None
-                    if (total - suit_blocked - elig_blocked) > 0
-                    else "Tidak ada kandidat aksi yang lolos kelayakan bisnis.",
+                    "status": (
+                        "PASSED"
+                        if (total - suit_blocked - elig_blocked) > 0
+                        else "NOT_ELIGIBLE"
+                    ),
+                    "reason": (
+                        None
+                        if (total - suit_blocked - elig_blocked) > 0
+                        else "Tidak ada kandidat aksi yang lolos kelayakan bisnis."
+                    ),
                     "details": {
                         "candidates_total": total,
                         "candidates_eligible": sum(1 for c in cands if c.is_eligible),
@@ -901,9 +932,11 @@ class NBAEngine:
                     "check_category": "SUITABILITY",
                     "passed": suitable > 0,
                     "status": "PASSED" if suitable > 0 else "PRODUCT_UNSUITABLE",
-                    "reason": None
-                    if suitable > 0
-                    else "Seluruh kandidat gagal ketersediaan/kesesuaian produk.",
+                    "reason": (
+                        None
+                        if suitable > 0
+                        else "Seluruh kandidat gagal ketersediaan/kesesuaian produk."
+                    ),
                     "details": {
                         "candidates_total": total,
                         "blocked_by_suitability": suit_blocked,

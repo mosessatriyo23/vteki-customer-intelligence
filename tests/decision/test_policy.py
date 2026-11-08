@@ -15,6 +15,7 @@ from services.decision.policy.suppression import (
     ComplaintTicket,
     CustomerConsent,
     check_suppression,
+    is_opted_out,
 )
 
 CID = "CUST-POLICY-001"
@@ -150,3 +151,89 @@ class TestSuppressionReasonCode:
     def test_consent_customer_mismatch_raises(self):
         with pytest.raises(ValueError):
             check_suppression(CID, CustomerConsent("OTHER"), [])
+
+
+# --------------------------- K-10: unknown / expired = BLOCKED ----------------------
+
+
+def _k10(channels, global_consent=None, **extra):
+    return {
+        "customer_id": CID,
+        "global_consent": global_consent
+        or {"status": "OPT_IN", "is_global_opt_out": False},
+        "channels": channels,
+        "unknown_expired_policy": "BLOCKED",
+        "identity_merge_policy": "MOST_RESTRICTIVE_WINS",
+        "most_restrictive_wins": True,
+        **extra,
+    }
+
+
+def _ch(status="OPT_IN", permission="ALLOWED", **extra):
+    return {
+        "status": status,
+        "opt_in": status == "OPT_IN",
+        "effective_permission": permission,
+        **extra,
+    }
+
+
+class TestConsentFromK10:
+    def test_opt_in_channel_allowed(self):
+        c = CustomerConsent.from_k10(_k10({"email": _ch()}), now=NOW)
+        assert c.email_opt_in is True
+        assert is_opted_out(c, "email") is False
+
+    def test_channel_missing_from_document_is_blocked(self):
+        c = CustomerConsent.from_k10(_k10({"email": _ch()}), now=NOW)
+        for channel in ("push", "sms", "whatsapp", "phone"):
+            assert is_opted_out(c, channel) is True, channel
+
+    @pytest.mark.parametrize("status", ["UNKNOWN", "EXPIRED", "OPT_OUT", "BLOCKED"])
+    def test_non_opt_in_status_is_blocked(self, status):
+        c = CustomerConsent.from_k10(_k10({"email": _ch(status, "BLOCKED")}), now=NOW)
+        assert is_opted_out(c, "email") is True
+
+    def test_effective_permission_blocked_overrides_opt_in_status(self):
+        c = CustomerConsent.from_k10(_k10({"email": _ch("OPT_IN", "BLOCKED")}), now=NOW)
+        assert is_opted_out(c, "email") is True
+
+    def test_valid_until_in_the_past_is_expired_and_blocked(self):
+        past = (NOW - timedelta(days=1)).isoformat()
+        c = CustomerConsent.from_k10(_k10({"email": _ch(valid_until=past)}), now=NOW)
+        assert is_opted_out(c, "email") is True
+
+    def test_valid_until_in_the_future_is_allowed(self):
+        future = (NOW + timedelta(days=30)).isoformat() + "Z"
+        c = CustomerConsent.from_k10(_k10({"email": _ch(valid_until=future)}), now=NOW)
+        assert is_opted_out(c, "email") is False
+
+    def test_global_opt_out_flag(self):
+        doc = _k10({"email": _ch()}, {"status": "OPT_OUT", "is_global_opt_out": True})
+        c = CustomerConsent.from_k10(doc, now=NOW)
+        assert c.global_opt_out is True
+        assert check_suppression(CID, c, []).reason_code == "OPT_OUT_SUPPRESSED"
+
+    @pytest.mark.parametrize("status", ["UNKNOWN", "EXPIRED", "BLOCKED"])
+    def test_global_unknown_expired_blocks_every_channel(self, status):
+        doc = _k10(
+            {"email": _ch(), "push": _ch()},
+            {"status": status, "is_global_opt_out": False},
+        )
+        c = CustomerConsent.from_k10(doc, now=NOW)
+        assert is_opted_out(c, "email") and is_opted_out(c, "push")
+
+    def test_integer_customer_id_is_accepted(self):
+        doc = _k10({"email": _ch()})
+        doc["customer_id"] = 123
+        assert CustomerConsent.from_k10(doc, now=NOW).customer_id == "123"
+
+    def test_internal_channels_are_not_subject_to_marketing_consent(self):
+        c = CustomerConsent.from_k10(_k10({}), now=NOW)
+        assert (
+            is_opted_out(c, "task_rm") is False and is_opted_out(c, "branch") is False
+        )
+
+    def test_phone_channel_supported(self):
+        assert is_opted_out(CustomerConsent(CID, phone_opt_in=False), "phone") is True
+        assert is_opted_out(CustomerConsent(CID), "phone") is False
