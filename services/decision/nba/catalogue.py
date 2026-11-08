@@ -359,6 +359,22 @@ def get_action(action_id: str) -> Optional[Action]:
     return ACTION_CATALOGUE.get(action_id)
 
 
+def require_action(action_id: str) -> Action:
+    """
+    Seperti `get_action`, tetapi aksi WAJIB ada di katalog.
+
+    Dipakai untuk aksi inti sistem (mis. `NO_ACTION`, `COMPLAINT_RESOLUTION`) yang tidak
+    boleh hilang; mengembalikan `Action` non-Optional sehingga aman bagi type checker.
+
+    Raises:
+        KeyError: jika `action_id` tidak ada di `ACTION_CATALOGUE` (kesalahan konfigurasi katalog).
+    """
+    try:
+        return ACTION_CATALOGUE[action_id]
+    except KeyError:
+        raise KeyError(f"Aksi inti '{action_id}' tidak ada di ACTION_CATALOGUE") from None
+
+
 def get_actions_by_category(category: ActionCategory) -> List[Action]:
     """
     Mengambil daftar semua aksi dalam kategori tertentu.

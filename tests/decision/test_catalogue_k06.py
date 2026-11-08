@@ -109,3 +109,29 @@ def test_special_actions(action_id):
 def test_only_no_action_has_empty_fact_package():
     empty = [a for a, v in ACTION_CATALOGUE.items() if not v.required_fact_package]
     assert empty == ["NO_ACTION"]
+
+
+# --------------------------- require_action (type-safety) ---------------------
+
+
+def test_require_action_returns_non_optional_action_for_core_actions():
+    from services.decision.nba.catalogue import Action, require_action
+
+    for action_id in ("NO_ACTION", "COMPLAINT_RESOLUTION"):
+        action = require_action(action_id)
+        assert isinstance(action, Action) and action.action_id == action_id
+
+
+def test_require_action_raises_key_error_for_unknown_action():
+    from services.decision.nba.catalogue import require_action
+
+    with pytest.raises(KeyError, match="NOPE"):
+        require_action("NOPE")
+
+
+def test_engine_core_actions_are_never_none():
+    """Regresi CI mypy: NBAEngine tidak boleh memegang `Action | None`."""
+    from services.decision.nba.catalogue import Action
+    from services.decision.nba.engine import NBAEngine
+
+    assert isinstance(NBAEngine()._no_action, Action)

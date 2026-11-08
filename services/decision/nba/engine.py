@@ -39,7 +39,7 @@ from typing import Any, Dict, List, Optional
 from services.decision.nba.catalogue import (
     ACTION_CATALOGUE,
     Action,
-    get_action,
+    require_action,
 )
 from services.decision.nba.ev_calculator import (
     calculate_expected_value,
@@ -308,7 +308,7 @@ class NBAEngine:
             min_ev_threshold = ev_min_threshold
         self.min_ev_threshold = min_ev_threshold
         self.score_validity_days = score_validity_days
-        self._no_action = get_action("NO_ACTION")
+        self._no_action: Action = require_action("NO_ACTION")
 
     # ------------------------------------------------------------------
     # Public Method: evaluate
@@ -378,7 +378,7 @@ class NBAEngine:
                 fatigue_result = check_frequency_cap(customer_id, contact_history, evaluation_date)
                 return self._build_result(
                     customer_id=customer_id,
-                    selected_action=get_action("COMPLAINT_RESOLUTION"),
+                    selected_action=require_action("COMPLAINT_RESOLUTION"),
                     expected_value=0.0,
                     evaluation_timestamp=evaluation_date,
                     suppression_result=suppression_result,
