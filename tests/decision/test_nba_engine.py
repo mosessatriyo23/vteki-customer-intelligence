@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from services.decision.nba.catalogue import ACTION_CATALOGUE
 from services.decision.nba.engine import (
     ENGINE_VERSION,
     AIScores,
@@ -27,6 +28,7 @@ from services.decision.policy.suppression import (
     CustomerConsent,
 )
 
+ACTION_CHANNELS = {k: v.allowed_channels for k, v in ACTION_CATALOGUE.items()}
 CID = "CUST-NBA-001"
 NOW = datetime(2026, 11, 5, 10, 0, 0)
 K07_PATH = (
@@ -157,6 +159,89 @@ class TestDecideNormal:
 
 
 # --------------------------- Skor tinggi bukan izin ---------------------------
+
+
+class TestChannelConsent:
+    """Masukan 3 per kanal (Requirement Bab 3, K-10): aksi tanpa kanal yang diizinkan tidak dipilih."""
+
+    ALL_BLOCKED = dict(
+        email_opt_in=False,
+        push_opt_in=False,
+        sms_opt_in=False,
+        whatsapp_opt_in=False,
+        phone_opt_in=False,
+    )
+
+    def test_all_marketing_channels_blocked_leaves_only_internal_task_actions(self):
+        rec = _decide(consent=CustomerConsent(CID, **self.ALL_BLOCKED))
+        chosen = rec.selected_action_id
+        # aksi yang masih mungkin hanya yang kanalnya internal (task_rm / branch) atau NO_ACTION
+        assert chosen == "NO_ACTION" or all(
+            c in ("task_rm", "branch") for c in ACTION_CHANNELS[chosen]
+        )
+        assert rec.channel_selected in (None, "task_rm", "branch")
+
+    def test_candidates_blocked_by_channel_consent_have_reason(self):
+        rec = _decide(consent=CustomerConsent(CID, **self.ALL_BLOCKED))
+        blocked = [
+            c for c in rec.candidates if "kanal" in (c["rejection_reason"] or "")
+        ]
+        assert blocked and all(c["is_eligible"] is False for c in blocked)
+
+    def test_all_candidates_blocked_by_consent_gives_no_action_with_reason(self):
+        rec = _decide(
+            ai_scores=_scores(lifecycle_stage="ACTIVE"),
+            consent=CustomerConsent(CID, **self.ALL_BLOCKED),
+            product_suitability=ProductSuitability(
+                available_action_ids=["CROSS_SELL", "UPSELL"]
+            ),
+        )
+        assert rec.selected_action_id == "NO_ACTION"
+        assert rec.channel_selected is None
+        assert rec.no_action_reason == "ALL_CANDIDATES_BLOCKED"
+        consent = next(c for c in rec.checks if c["check_name"] == "CONSENT_CHECK")
+        assert consent["passed"] is False
+        assert consent["status"] == "CHANNEL_CONSENT_BLOCKED"
+        assert consent["details"]["candidates_blocked_by_channel_consent"] >= 1
+
+    def test_one_open_channel_keeps_action_available(self):
+        rec = _decide(consent=CustomerConsent(CID, email_opt_in=False))
+        assert rec.selected_action_id != "NO_ACTION"
+        assert rec.channel_selected == "push"
+
+    def test_selected_action_always_has_a_usable_channel(self):
+        for kwargs in (
+            {},
+            {"email_opt_in": False},
+            {"push_opt_in": False},
+            self.ALL_BLOCKED,
+        ):
+            rec = _decide(consent=CustomerConsent(CID, **kwargs))
+            if rec.selected_action_id != "NO_ACTION":
+                assert rec.channel_selected is not None, kwargs
+
+    def test_decision_from_k10_document_unknown_channel_is_blocked(self):
+        doc = {
+            "customer_id": CID,
+            "global_consent": {"status": "OPT_IN", "is_global_opt_out": False},
+            "channels": {
+                "email": {
+                    "status": "UNKNOWN",
+                    "opt_in": False,
+                    "effective_permission": "BLOCKED",
+                },
+                "push": {
+                    "status": "OPT_IN",
+                    "opt_in": True,
+                    "effective_permission": "ALLOWED",
+                },
+            },
+            "unknown_expired_policy": "BLOCKED",
+            "most_restrictive_wins": True,
+        }
+        rec = _decide(consent=CustomerConsent.from_k10(doc, now=NOW))
+        assert rec.selected_action_id != "NO_ACTION"
+        assert rec.channel_selected == "push"
 
 
 class TestHighScoreIsNotPermission:

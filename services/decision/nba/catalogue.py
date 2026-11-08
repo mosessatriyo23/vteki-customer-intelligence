@@ -24,8 +24,10 @@ from typing import Dict, List, Optional
 # Enums
 # ---------------------------------------------------------------------------
 
+
 class ActionCategory(str, Enum):
     """Kategori bisnis untuk setiap aksi NBA."""
+
     PROTECTION = "Proteksi / System"
     SERVICE = "Layanan"
     RETENTION_SPECIAL = "Retensi Khusus"
@@ -40,6 +42,7 @@ class ActionCategory(str, Enum):
 
 class IncentiveBand(str, Enum):
     """Band insentif / biaya yang diasosiasikan dengan aksi."""
+
     NONE = "Tanpa Insentif"
     LOW = "Band Rendah"
     MEDIUM = "Band Sedang"
@@ -51,6 +54,7 @@ class IncentiveBand(str, Enum):
 # ---------------------------------------------------------------------------
 # Data Class
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class Action:
@@ -73,6 +77,7 @@ class Action:
             Daftar ini diverifikasi terhadap perilaku kode oleh test
             `tests/decision/test_catalogue_k06.py` (uji sensitivitas).
     """
+
     action_id: str
     name: str
     category: ActionCategory
@@ -91,7 +96,6 @@ class Action:
 # ---------------------------------------------------------------------------
 
 ACTION_CATALOGUE: Dict[str, Action] = {
-
     # 1. NO_ACTION — Aksi Protektif Default
     "NO_ACTION": Action(
         action_id="NO_ACTION",
@@ -116,7 +120,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         blocks_all_commercial=False,
         required_fact_package=[],
     ),
-
     # 2. COMPLAINT_RESOLUTION — Prioritas Layanan Tertinggi
     "COMPLAINT_RESOLUTION": Action(
         action_id="COMPLAINT_RESOLUTION",
@@ -138,7 +141,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         blocks_all_commercial=True,
         required_fact_package=["complaint_ticket_status"],
     ),
-
     # 3. RELATIONSHIP_MANAGER_CONTACT — Retensi Pelanggan Premium
     "RELATIONSHIP_MANAGER_CONTACT": Action(
         action_id="RELATIONSHIP_MANAGER_CONTACT",
@@ -158,9 +160,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.MEDIUM,
         action_weight=1.8,
         is_commercial=True,
-        required_fact_package=["churn_risk_band", "churn_score", "clv_amount", "clv_tier"],
+        required_fact_package=[
+            "churn_risk_band",
+            "churn_score",
+            "clv_amount",
+            "clv_tier",
+        ],
     ),
-
     # 4. RETENTION_OUTREACH — Upaya Retensi Standar
     "RETENTION_OUTREACH": Action(
         action_id="RETENTION_OUTREACH",
@@ -181,9 +187,14 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.DISCOUNT_LIMITED,
         action_weight=1.6,
         is_commercial=True,
-        required_fact_package=["churn_risk_band", "churn_score", "clv_amount", "clv_tier", "lifecycle_stage"],
+        required_fact_package=[
+            "churn_risk_band",
+            "churn_score",
+            "clv_amount",
+            "clv_tier",
+            "lifecycle_stage",
+        ],
     ),
-
     # 5. CROSS_SELL — Penawaran Lintas Kategori
     "CROSS_SELL": Action(
         action_id="CROSS_SELL",
@@ -206,7 +217,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         is_commercial=True,
         required_fact_package=["clv_amount", "lifecycle_stage", "propensity_purchase"],
     ),
-
     # 6. UPSELL — Upgrade Keanggotaan / Paket Premium
     "UPSELL": Action(
         action_id="UPSELL",
@@ -227,9 +237,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.MEDIUM,
         action_weight=1.4,
         is_commercial=True,
-        required_fact_package=["clv_amount", "lifecycle_stage", "propensity_renew", "tenure_days"],
+        required_fact_package=[
+            "clv_amount",
+            "lifecycle_stage",
+            "propensity_renew",
+            "tenure_days",
+        ],
     ),
-
     # 7. RENEWAL_REMINDER — Pengingat Perpanjangan Membership
     "RENEWAL_REMINDER": Action(
         action_id="RENEWAL_REMINDER",
@@ -249,9 +263,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.NONE,
         action_weight=1.5,
         is_commercial=True,
-        required_fact_package=["clv_amount", "has_active_membership", "membership_days_remaining", "propensity_renew"],
+        required_fact_package=[
+            "clv_amount",
+            "has_active_membership",
+            "membership_days_remaining",
+            "propensity_renew",
+        ],
     ),
-
     # 8. SERVICE_REMINDER — Pengingat Jadwal Layanan
     "SERVICE_REMINDER": Action(
         action_id="SERVICE_REMINDER",
@@ -272,7 +290,6 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         is_commercial=False,  # Non-komersial, dikecualikan dari fatigue cap
         required_fact_package=["clv_amount"],
     ),
-
     # 9. EDUCATION — Edukasi Pelanggan Baru
     "EDUCATION": Action(
         action_id="EDUCATION",
@@ -292,9 +309,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.NONE,
         action_weight=0.8,
         is_commercial=True,
-        required_fact_package=["churn_risk_band", "churn_score", "clv_amount", "lifecycle_stage"],
+        required_fact_package=[
+            "churn_risk_band",
+            "churn_score",
+            "clv_amount",
+            "lifecycle_stage",
+        ],
     ),
-
     # 10. LOYALTY_REWARD — Apresiasi Pelanggan Setia
     "LOYALTY_REWARD": Action(
         action_id="LOYALTY_REWARD",
@@ -314,9 +335,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.LOYALTY_POINTS,
         action_weight=1.3,
         is_commercial=True,
-        required_fact_package=["clv_amount", "clv_tier", "lifecycle_stage", "propensity_purchase"],
+        required_fact_package=[
+            "clv_amount",
+            "clv_tier",
+            "lifecycle_stage",
+            "propensity_purchase",
+        ],
     ),
-
     # 11. WIN_BACK_OFFER — Penawaran Reaktivasi
     "WIN_BACK_OFFER": Action(
         action_id="WIN_BACK_OFFER",
@@ -337,7 +362,13 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.MEDIUM,
         action_weight=1.5,
         is_commercial=True,
-        required_fact_package=["churn_score", "clv_amount", "clv_tier", "has_active_win_back_offer", "lifecycle_stage"],
+        required_fact_package=[
+            "churn_score",
+            "clv_amount",
+            "clv_tier",
+            "has_active_win_back_offer",
+            "lifecycle_stage",
+        ],
     ),
 }
 
@@ -345,6 +376,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
 # ---------------------------------------------------------------------------
 # Fungsi Utilitas Katalog
 # ---------------------------------------------------------------------------
+
 
 def get_action(action_id: str) -> Optional[Action]:
     """
@@ -372,7 +404,9 @@ def require_action(action_id: str) -> Action:
     try:
         return ACTION_CATALOGUE[action_id]
     except KeyError:
-        raise KeyError(f"Aksi inti '{action_id}' tidak ada di ACTION_CATALOGUE") from None
+        raise KeyError(
+            f"Aksi inti '{action_id}' tidak ada di ACTION_CATALOGUE"
+        ) from None
 
 
 def get_actions_by_category(category: ActionCategory) -> List[Action]:
@@ -386,9 +420,7 @@ def get_actions_by_category(category: ActionCategory) -> List[Action]:
         List of Action yang termasuk dalam kategori tersebut.
     """
     return [
-        action
-        for action in ACTION_CATALOGUE.values()
-        if action.category == category
+        action for action in ACTION_CATALOGUE.values() if action.category == category
     ]
 
 

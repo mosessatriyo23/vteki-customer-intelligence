@@ -30,19 +30,23 @@ FREQ_CAP_WINDOW_DAYS: int = 14
 """Panjang rolling window dalam hari."""
 
 # Aksi yang dikecualikan dari perhitungan frekuensi (non-commercial)
-EXCLUDED_ACTIONS: frozenset[str] = frozenset({
-    "COMPLAINT_RESOLUTION",
-    "SERVICE_REMINDER",
-})
+EXCLUDED_ACTIONS: frozenset[str] = frozenset(
+    {
+        "COMPLAINT_RESOLUTION",
+        "SERVICE_REMINDER",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
 # Data Classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class ContactRecord:
     """Representasi satu catatan kontak yang dikirimkan kepada pelanggan."""
+
     customer_id: str
     action_id: str
     channel: str
@@ -53,6 +57,7 @@ class ContactRecord:
 @dataclass
 class FatigueCheckResult:
     """Hasil pemeriksaan fatigue untuk seorang pelanggan."""
+
     customer_id: str
     is_suppressed: bool
     status: str
@@ -68,6 +73,7 @@ class FatigueCheckResult:
 # ---------------------------------------------------------------------------
 # Fungsi Utama
 # ---------------------------------------------------------------------------
+
 
 def check_frequency_cap(
     customer_id: str,
