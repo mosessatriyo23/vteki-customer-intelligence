@@ -147,10 +147,56 @@ class TestBusinessEligibilityGate:
             "WIN_BACK_OFFER", s, _elig(has_active_win_back_offer=True)
         )
 
-    def test_action_without_rule_is_eligible(self):
+    def test_unknown_action_without_rule_is_eligible(self):
         assert (
-            check_business_eligibility("SERVICE_REMINDER", _scores(), _elig()) is None
+            check_business_eligibility("ACTION_TANPA_ATURAN", _scores(), _elig())
+            is None
         )
+
+
+class TestServiceReminderRule:
+    """Keputusan tim: ACTIVE/LOYAL + jadwal habis pakai <= 7 hari; data kosong = tidak eligible."""
+
+    @pytest.mark.parametrize("days", [-3, 0, 1, 7])
+    def test_within_window_is_eligible(self, days):
+        e = _elig(days_until_replenishment=days)
+        assert check_business_eligibility("SERVICE_REMINDER", _scores(), e) is None
+
+    @pytest.mark.parametrize("days", [8, 30, 365])
+    def test_beyond_window_is_not_eligible(self, days):
+        e = _elig(days_until_replenishment=days)
+        assert check_business_eligibility("SERVICE_REMINDER", _scores(), e)
+
+    def test_missing_schedule_data_is_not_eligible_fail_closed(self):
+        assert check_business_eligibility("SERVICE_REMINDER", _scores(), _elig())
+
+    @pytest.mark.parametrize("lifecycle", ["ACTIVE", "LOYAL"])
+    def test_active_and_loyal_allowed(self, lifecycle):
+        s = _scores(lifecycle_stage=lifecycle)
+        e = _elig(days_until_replenishment=3)
+        assert check_business_eligibility("SERVICE_REMINDER", s, e) is None
+
+    @pytest.mark.parametrize(
+        "lifecycle",
+        [
+            "CHURNED",
+            "DORMANT",
+            "AT_RISK",
+            "NEW",
+            "REACTIVATED",
+            "OCCASIONAL",
+            "NEVER_TRANSACTED",
+        ],
+    )
+    def test_other_lifecycles_excluded(self, lifecycle):
+        s = _scores(lifecycle_stage=lifecycle)
+        e = _elig(days_until_replenishment=3)
+        assert check_business_eligibility("SERVICE_REMINDER", s, e)
+
+    def test_window_constant_is_seven_days(self):
+        from services.decision.nba.evaluator import SERVICE_REMINDER_WINDOW_DAYS
+
+        assert SERVICE_REMINDER_WINDOW_DAYS == 7
 
 
 class TestConsentGate:

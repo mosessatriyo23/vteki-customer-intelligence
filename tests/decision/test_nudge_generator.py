@@ -140,9 +140,67 @@ class TestGuardrailIntegration:
         d = _gen(facts={**FACTS, "first_name": "{offer_validity}"})
         assert "{" not in d.body and "}" not in d.body
 
-    def test_discount_in_fact_blocked_when_cap_undefined(self):
+    def test_discount_in_fact_within_global_cap_for_unrestricted_band(self):
+        """LOYALTY_REWARD (band poin loyalitas) memakai pagu global 30%."""
+        assert (
+            _gen(facts={**FACTS, "first_name": "Diskon 30%"}).status
+            == STATUS_GENERATED_DRAFT
+        )
+        d = _gen(facts={**FACTS, "first_name": "Diskon 31%"})
+        assert d.status == STATUS_BLOCKED_BY_GUARDRAIL
+
+    @pytest.mark.parametrize(
+        "action,channel,allowed,blocked",
+        [
+            ("RENEWAL_REMINDER", "email", None, 5),  # Tanpa Insentif: 0%
+            ("CROSS_SELL", "email", 10, 11),  # Band Rendah: <= 10%
+            ("UPSELL", "email", 20, 21),  # Band Sedang: <= 20%
+        ],
+    )
+    def test_per_band_discount_limits(self, action, channel, allowed, blocked):
+        if allowed is not None:
+            ok = _gen(
+                action, channel, facts={**FACTS, "first_name": f"Diskon {allowed}%"}
+            )
+            assert ok.status == STATUS_GENERATED_DRAFT, (action, allowed)
+        bad = _gen(action, channel, facts={**FACTS, "first_name": f"Diskon {blocked}%"})
+        assert bad.status == STATUS_BLOCKED_BY_GUARDRAIL, (action, blocked)
+
+    def test_discount_violation_is_marked_for_escalation(self):
+        d = _gen("CROSS_SELL", "email", facts={**FACTS, "first_name": "Diskon 50%"})
+        assert d.status == "MESSAGE_BLOCKED_BY_GUARDRAIL"
+        assert d.escalation == "INCENTIVE_ESCALATED"
+        with pytest.raises(ValueError):
+            approve_draft(d, "christ")
+
+    def test_non_discount_violation_is_not_escalated(self):
+        d = _gen(facts={**FACTS, "first_name": "Pasti sembuh"})
+        assert d.status == STATUS_BLOCKED_BY_GUARDRAIL and d.escalation is None
+
+    def test_forbidden_term_in_fact_is_blocked(self):
+        d = _gen(
+            "CROSS_SELL", "email", facts={**FACTS, "preferred_branch": "Klinik medis"}
+        )
+        assert d.status == STATUS_BLOCKED_BY_GUARDRAIL
+
+    def test_explicit_override_replaces_band_limits(self):
+        d = _gen(
+            "CROSS_SELL",
+            "email",
+            facts={**FACTS, "first_name": "Diskon 40%"},
+            max_discount_percent=50,
+        )
+        assert d.status == STATUS_GENERATED_DRAFT
+
+    def test_fail_closed_when_global_cap_is_none(self, monkeypatch):
+        from services.decision.nudge import safety
+
+        monkeypatch.setattr(safety, "MAX_DISCOUNT_PERCENT", None)
         d = _gen(facts={**FACTS, "first_name": "Diskon 5%"})
         assert d.status == STATUS_BLOCKED_BY_GUARDRAIL
+
+    def test_clean_draft_has_no_escalation(self):
+        assert _gen().escalation is None
 
     def test_templates_contain_no_numeric_discount(self):
         """Template bawaan tidak boleh memuat klaim diskon persentase."""

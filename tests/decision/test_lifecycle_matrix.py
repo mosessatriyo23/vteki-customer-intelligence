@@ -28,6 +28,7 @@ NOW = datetime(2026, 11, 5)
 
 # Aksi yang dibatasi segmen lifecycle (aksi lintas segmen tidak termasuk matriks per-segmen)
 SEGMENT_ACTIONS = {
+    "SERVICE_REMINDER",
     "EDUCATION",
     "CROSS_SELL",
     "UPSELL",
@@ -84,6 +85,7 @@ def _engine_actions(segment):
             tenure_days=300,
             membership_days_remaining=100,
             has_active_membership=False,
+            days_until_replenishment=3,
         )
         for action_id in SEGMENT_ACTIONS:
             if check_business_eligibility(action_id, scores, elig) is None:

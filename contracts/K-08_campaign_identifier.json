@@ -78,8 +78,19 @@
       "type": "integer",
       "minimum": 0,
       "maximum": 100,
-      "default": 50,
-      "description": "Rasio persentase kelompok perlakuan dalam A/B testing (0 - 100)"
+      "default": 90,
+      "description": "Rasio persentase kelompok perlakuan (0 - 100). Default 90 selaras dengan holdout 10%. Jika `control_holdout_ratio` diisi, nilai yang berlaku adalah (1 - control_holdout_ratio) x 100 dan field ini diabaikan oleh konsumen."
+    },
+    "control_holdout_ratio": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "exclusiveMaximum": 1,
+      "default": 0.1,
+      "description": "Proporsi Holdout Control Group (default 0.10 = 10%) yang dialokasikan acak-deterministik dan TIDAK menerima paparan kampanye (Panduan Minggu 9). Porsi treatment = 1 - control_holdout_ratio (tidak disimpan terpisah agar tidak bisa saling bertentangan)."
+    },
+    "random_seed": {
+      "type": "integer",
+      "description": "Seed deterministik untuk pembagian Treatment vs Control (hash customer_id + random_seed). Wajib jika `control_holdout_ratio` diisi, agar pembagian dapat direproduksi."
     },
     "status": {
       "type": "string",
@@ -128,6 +139,9 @@
     "conversion_window_days",
     "adjustment_window_days"
   ],
+  "dependencies": {
+    "control_holdout_ratio": ["random_seed"]
+  },
   "additionalProperties": true
 }
 

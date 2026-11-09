@@ -12,21 +12,24 @@ Draf yang melanggar mendapat status `MESSAGE_BLOCKED_BY_GUARDRAIL`.
 
 Modul ini 100% offline (tanpa jaringan / LLM) dan deterministik.
 
-CATATAN PENTING — PAGU DISKON BELUM DITETAPKAN:
-Panduan_Kerja_Christ (Minggu 8) menyebut "diskon melebihi pagu", tetapi nilai pagu TIDAK
-tertulis di Requirement_Capstone.md, target_definitions.md, maupun kontrak K-06...K-11
-(Requirement hanya menyebut "Diskon Berbatas Waktu" / "Band Rendah" tanpa angka).
-Karena itu `MAX_DISCOUNT_PERCENT = None` (tidak ada angka karangan) dan scanner bersifat
-FAIL-CLOSED: selama pagu belum ditetapkan, SETIAP klaim diskon berbentuk persentase
-diblokir. Setelah pagu resmi diputuskan, isi `MAX_DISCOUNT_PERCENT` atau berikan
-`max_discount_percent` saat memanggil `scan_message()`.
+PAGU DISKON & BLACKLIST (keputusan tim, BUKAN tertulis di Requirement_Capstone / K-06..K-11):
+- `MAX_DISCOUNT_PERCENT = 30.0` (pagu global).
+- Batas per band insentif (`BAND_MAX_DISCOUNT_PERCENT`): Tanpa Insentif 0%, Rendah <= 10%,
+  Sedang <= 20%, Tinggi <= 30%. Band tanpa batas persentase (Diskon Berbatas Waktu, Hadiah / Poin
+  Loyalitas) memakai pagu global.
+- Diskon di atas batas -> draf diblokir (`MESSAGE_BLOCKED_BY_GUARDRAIL`) DAN ditandai
+  `INCENTIVE_ESCALATED`: tidak boleh disetujui otomatis, wajib dieskalasi ke Business Approver.
+- `FORBIDDEN_TERMS`: daftar kata terlarang dari tim (garansi 100%, pasti sembuh, bebas komedo selamanya,
+  medis, terapeutik, klinis, klaim obat). Pencocokan kata utuh, tidak peka huruf besar/kecil.
+  PERHATIAN: "medis" juga mengenai "non-medis" (false positive yang diketahui).
+- Jika `MAX_DISCOUNT_PERCENT` diset `None`, scanner kembali ke mode FAIL-CLOSED (semua diskon persentase diblokir).
 """
 
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional, Pattern, Tuple
+from typing import Dict, List, Optional, Pattern, Tuple
 
 # ---------------------------------------------------------------------------
 # Konstanta
@@ -35,8 +38,32 @@ from typing import List, Optional, Pattern, Tuple
 STATUS_SAFE = "SAFE"
 STATUS_BLOCKED = "MESSAGE_BLOCKED_BY_GUARDRAIL"
 
-MAX_DISCOUNT_PERCENT: Optional[float] = None
-"""Pagu diskon maksimum (%). None = belum ditetapkan -> semua diskon persentase diblokir."""
+MAX_DISCOUNT_PERCENT: Optional[float] = 30.0
+"""Pagu diskon global (%). None = tidak ditetapkan -> semua diskon persentase diblokir (fail-closed)."""
+
+BAND_MAX_DISCOUNT_PERCENT: Dict[str, float] = {
+    "NONE": 0.0,  # Tanpa Insentif
+    "LOW": 10.0,  # Band Rendah
+    "MEDIUM": 20.0,  # Band Sedang
+    "HIGH": 30.0,  # Band Tinggi
+}
+"""Batas diskon (%) per band insentif (nama anggota IncentiveBand). Band lain -> pagu global."""
+
+ESCALATION_CODE = "INCENTIVE_ESCALATED"
+"""Penanda: pelanggaran pagu diskon harus dieskalasi ke Business Approver."""
+
+FORBIDDEN_TERMS: List[str] = [
+    "garansi 100%",
+    "pasti sembuh",
+    "bebas komedo selamanya",
+    "medis",
+    "terapeutik",
+    "klinis",
+    "klaim obat",
+]
+"""Kata/frasa terlarang dari tim. Dicocokkan sebagai kata utuh, tidak peka huruf besar/kecil."""
+
+RULE_FORBIDDEN_TERM = "FORBIDDEN_TERM"
 
 RULE_MEDICAL = "MEDICAL_CLAIM"
 RULE_GUARANTEE = "ABSOLUTE_GUARANTEE"
@@ -114,6 +141,11 @@ class SafetyScanResult:
     violations: List[SafetyViolation] = field(default_factory=list)
 
     @property
+    def requires_escalation(self) -> bool:
+        """True jika ada pelanggaran pagu diskon (-> INCENTIVE_ESCALATED)."""
+        return any(v.rule_id == RULE_DISCOUNT for v in self.violations)
+
+    @property
     def rule_ids(self) -> List[str]:
         """Daftar rule_id unik (urutan kemunculan) yang dilanggar."""
         seen: List[str] = []
@@ -145,6 +177,12 @@ def _to_percent(raw: str) -> Optional[float]:
         return float(raw.replace(",", "."))
     except ValueError:
         return None
+
+
+def _term_pattern(term: str) -> Pattern[str]:
+    """Regex kata utuh untuk satu istilah terlarang (spasi fleksibel, tidak peka huruf besar/kecil)."""
+    body = r"\s+".join(re.escape(part) for part in term.split())
+    return re.compile(rf"(?<!\w){body}(?!\w)", re.IGNORECASE)
 
 
 def scan_message(
@@ -180,6 +218,16 @@ def scan_message(
     for rule_id, pattern, description in _BLACKLIST:
         for match in pattern.finditer(normalized):
             violations.append(SafetyViolation(rule_id, match.group(0), description))
+
+    for term in FORBIDDEN_TERMS:
+        for match in _term_pattern(term).finditer(normalized):
+            violations.append(
+                SafetyViolation(
+                    RULE_FORBIDDEN_TERM,
+                    match.group(0),
+                    f"Kata/frasa terlarang: '{term}'.",
+                )
+            )
 
     for pattern in _DISCOUNT_PATTERNS:
         for match in pattern.finditer(normalized):

@@ -64,6 +64,9 @@ GATE_TO_K07_CATEGORY: Dict[str, str] = {
     GATE_PRODUCT_SUITABILITY: "SUITABILITY",
 }
 
+SERVICE_REMINDER_WINDOW_DAYS: int = 7
+"""SERVICE_REMINDER eligible jika produk habis pakai dalam <= 7 hari (keputusan tim)."""
+
 STATUS_PASSED = "PASSED"
 STATUS_SCORE_EXPIRED = "SCORE_EXPIRED"
 STATUS_NOT_ELIGIBLE = "NOT_ELIGIBLE"
@@ -158,6 +161,17 @@ def check_business_eligibility(
                 and not eligibility.has_active_win_back_offer
             )
             else "Tidak memenuhi syarat WIN_BACK_OFFER"
+        ),
+        # SERVICE_REMINDER: lifecycle ACTIVE/LOYAL dan jadwal habis pakai <= 7 hari (keputusan tim).
+        # Data jadwal tidak tersedia (None) -> TIDAK eligible (fail-closed).
+        "SERVICE_REMINDER": lambda: (
+            None
+            if (
+                lifecycle in ("ACTIVE", "LOYAL")
+                and eligibility.days_until_replenishment is not None
+                and eligibility.days_until_replenishment <= SERVICE_REMINDER_WINDOW_DAYS
+            )
+            else "Bukan ACTIVE/LOYAL atau jadwal habis pakai tidak diketahui / > 7 hari"
         ),
         # COMPLAINT_RESOLUTION hanya dipilih lewat jalur suppression (tiket
         # OPEN_SEVERE_COMPLAINT aktif), BUKAN sebagai kandidat EV biasa.

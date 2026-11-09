@@ -356,3 +356,85 @@ def test_no_action_exported_without_channels_incentive_or_facts():
     assert na.allowed_channels == []
     assert na.incentive_band.value == "Tanpa Insentif"
     assert na.required_fact_package == []
+
+
+# --------------------------- K-08: holdout (Panduan Minggu 9) -----------------
+
+
+class TestK08Holdout:
+    BASE = {
+        "campaign_id": "CMP-1",
+        "exposure_window": {
+            "start_time": "2026-11-01T00:00:00Z",
+            "end_time": "2026-11-30T00:00:00Z",
+        },
+        "conversion_window_days": 30,
+        "adjustment_window_days": 14,
+    }
+
+    def validator(self):
+        return Draft7Validator(load("K-08_campaign_identifier"))
+
+    def test_existing_documents_stay_valid_backward_compatible(self):
+        assert self.validator().is_valid(self.BASE)
+
+    def test_exposure_window_field_is_not_renamed_and_still_required(self):
+        k08 = load("K-08_campaign_identifier")
+        assert "exposure_window" in k08["required"]
+        assert "exposure_start_window" not in k08["properties"]
+
+    def test_default_holdout_ratio_is_ten_percent(self):
+        props = load("K-08_campaign_identifier")["properties"]
+        assert props["control_holdout_ratio"]["default"] == 0.1
+        assert props["ab_test_ratio"]["default"] == 90  # 100 - 10
+
+    def test_holdout_requires_random_seed(self):
+        v = self.validator()
+        assert v.is_valid(
+            {**self.BASE, "control_holdout_ratio": 0.1, "random_seed": 42}
+        )
+        assert not v.is_valid({**self.BASE, "control_holdout_ratio": 0.1})
+
+    @pytest.mark.parametrize("ratio", [0, 1, -0.1, 1.5])
+    def test_holdout_ratio_must_be_strictly_between_zero_and_one(self, ratio):
+        assert not self.validator().is_valid(
+            {**self.BASE, "control_holdout_ratio": ratio, "random_seed": 1}
+        )
+
+    def test_random_seed_must_be_integer(self):
+        assert not self.validator().is_valid(
+            {**self.BASE, "control_holdout_ratio": 0.1, "random_seed": "abc"}
+        )
+
+    def test_treatment_share_is_not_stored_separately(self):
+        """Porsi treatment = 1 - holdout; tidak disimpan agar tidak bisa saling bertentangan."""
+        assert "treatment_share" not in load("K-08_campaign_identifier")["properties"]
+
+    def test_existing_status_field_kept(self):
+        status = load("K-08_campaign_identifier")["properties"]["status"]["enum"]
+        assert {"DRAFT", "APPROVED", "ACTIVE", "COMPLETED", "CANCELLED"} <= set(status)
+
+
+def test_k07_no_action_reason_includes_below_min_ev():
+    enum = load("K-07_decision_record")["properties"]["no_action_reason"]["enum"]
+    assert set(enum) == {
+        "OPT_OUT_SUPPRESSED",
+        "FREQ_CAP_SUPPRESSED",
+        "ALL_CANDIDATES_BLOCKED",
+        "BELOW_MIN_EV",
+        None,
+    }
+
+
+def test_team_decision_constants_match_code():
+    """Keputusan tim di target_definitions v1.2 harus sama dengan konstanta di kode/kontrak."""
+    from services.decision.nba.engine import DEFAULT_MIN_EV_THRESHOLD
+    from services.decision.nba.evaluator import SERVICE_REMINDER_WINDOW_DAYS
+    from services.decision.nudge.safety import MAX_DISCOUNT_PERCENT
+
+    c = _doc_constants()
+    assert c["MIN_EV_THRESHOLD_IDR"] == DEFAULT_MIN_EV_THRESHOLD == 1000.0
+    assert c["MAX_DISCOUNT_PERCENT"] == MAX_DISCOUNT_PERCENT == 30.0
+    assert c["SERVICE_REMINDER_WINDOW_DAYS"] == SERVICE_REMINDER_WINDOW_DAYS == 7
+    k08 = load("K-08_campaign_identifier")["properties"]
+    assert c["CONTROL_HOLDOUT_RATIO"] == k08["control_holdout_ratio"]["default"] == 0.1

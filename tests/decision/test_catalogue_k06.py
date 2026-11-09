@@ -45,6 +45,7 @@ ELIG_DOMAIN = {
     "membership_days_remaining": [-5, 5, 15, 16, 100],
     "has_active_membership": [True, False],
     "has_active_win_back_offer": [True, False],
+    "days_until_replenishment": [None, -3, 0, 7, 8, 30],
 }
 DOMAIN = {**SCORE_DOMAIN, **ELIG_DOMAIN}
 

@@ -165,8 +165,8 @@
     },
     "no_action_reason": {
       "type": ["string", "null"],
-      "enum": ["OPT_OUT_SUPPRESSED", "FREQ_CAP_SUPPRESSED", "ALL_CANDIDATES_BLOCKED", null],
-      "description": "Alasan NO_ACTION yang disebut Requirement_Capstone Bab 4 (baris NO_ACTION). Null untuk alasan lain atau jika aksi bukan NO_ACTION."
+      "enum": ["OPT_OUT_SUPPRESSED", "FREQ_CAP_SUPPRESSED", "ALL_CANDIDATES_BLOCKED", "BELOW_MIN_EV", null],
+      "description": "Alasan NO_ACTION: Opt-Out, Frequency Cap tercapai, ALL_CANDIDATES_BLOCKED (Requirement_Capstone Bab 4), atau BELOW_MIN_EV (semua kandidat layak ber-EV di bawah min_ev_threshold, Bab 5). Null jika aksi bukan NO_ACTION."
     },
     "scores_snapshot": {
       "type": "object",
