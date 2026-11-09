@@ -383,6 +383,42 @@ class TestDegradedInput:
         assert _decide().degraded_input is False
 
 
+class TestMinEvThreshold:
+    """Keputusan tim: min_ev_threshold default Rp 1.000 agar EV 0.0 tidak mengalahkan NO_ACTION."""
+
+    def test_default_is_one_thousand_idr(self):
+        assert NBAEngine().min_ev_threshold == 1000.0
+
+    def test_override_via_both_parameter_names(self):
+        assert NBAEngine(min_ev_threshold=0.0).min_ev_threshold == 0.0
+        assert NBAEngine(ev_min_threshold=5.0).min_ev_threshold == 5.0
+
+    def test_zero_ev_candidate_no_longer_beats_no_action(self):
+        """Skor kedaluwarsa -> EV 0.0 -> NO_ACTION (sebelumnya SERVICE_REMINDER terpilih)."""
+        rec = _decide(ai_scores=_scores(score_generated_at=NOW - timedelta(days=60)))
+        assert rec.selected_action_id == "NO_ACTION"
+        assert rec.degraded_input is True
+        assert rec.no_action_reason == "BELOW_MIN_EV"
+        assert rec.channel_selected is None
+
+    def test_missing_scores_give_no_action(self):
+        rec = _decide(ai_scores=None)
+        assert rec.selected_action_id == "NO_ACTION" and rec.degraded_input is True
+
+    def test_ev_exactly_at_threshold_is_still_selected(self):
+        """Aturan Bab 5: EV < threshold -> NO_ACTION (EV == threshold lolos)."""
+        base = _decide(engine=NBAEngine(ev_min_threshold=0.0))
+        assert base.selected_action_id != "NO_ACTION"
+        at = _decide(engine=NBAEngine(ev_min_threshold=base.expected_value))
+        assert at.selected_action_id == base.selected_action_id
+        above = _decide(engine=NBAEngine(ev_min_threshold=base.expected_value + 0.01))
+        assert above.selected_action_id == "NO_ACTION"
+
+    def test_normal_customer_unaffected_by_default_threshold(self):
+        rec = _decide()
+        assert rec.selected_action_id != "NO_ACTION" and rec.expected_value >= 1000.0
+
+
 class TestNoActionReason:
     """Bab 4 baris NO_ACTION: Opt-Out, Frequency Cap tercapai, ALL_CANDIDATES_BLOCKED."""
 
@@ -401,11 +437,17 @@ class TestNoActionReason:
         )
         assert rec.no_action_reason == "ALL_CANDIDATES_BLOCKED"
 
-    def test_ev_below_threshold_has_no_documented_code(self):
-        """Dokumen tidak memberi kode untuk EV < threshold -> tidak dikarang."""
+    def test_ev_below_threshold_gives_below_min_ev(self):
+        """Ada kandidat layak tetapi semuanya EV < threshold -> BELOW_MIN_EV (Bab 5)."""
         rec = _decide(engine=NBAEngine(ev_min_threshold=1e12))
         assert rec.selected_action_id == "NO_ACTION"
-        assert rec.no_action_reason is None
+        assert rec.no_action_reason == "BELOW_MIN_EV"
+
+    def test_below_min_ev_not_used_when_nothing_eligible(self):
+        rec = _decide(
+            product_suitability=ProductSuitability(available_action_ids=["NOPE"])
+        )
+        assert rec.no_action_reason == "ALL_CANDIDATES_BLOCKED"
 
     def test_not_set_when_action_selected(self):
         assert _decide().no_action_reason is None

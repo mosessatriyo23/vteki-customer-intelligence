@@ -80,8 +80,12 @@ logger = logging.getLogger(__name__)
 # Konstanta Engine
 # ---------------------------------------------------------------------------
 
-DEFAULT_MIN_EV_THRESHOLD: float = 0.0
-"""EV minimum agar aksi dapat dipilih. Jika EV < threshold, pilih NO_ACTION."""
+DEFAULT_MIN_EV_THRESHOLD: float = 1000.0
+"""
+EV minimum (IDR) agar aksi dapat dipilih. Jika EV < threshold, pilih NO_ACTION (Requirement Bab 5).
+Nilai Rp 1.000 ditetapkan oleh keputusan tim (bukan tertulis di Requirement_Capstone) agar aksi ber-EV 0.0
+(mis. saat skor kedaluwarsa / degraded_input) tidak mengalahkan NO_ACTION. Dapat diubah lewat parameter engine.
+"""
 
 ENGINE_VERSION: str = "nba-engine-1.1.0"
 """Versi NBAEngine yang dicatat pada rekaman keputusan K-07 (`engine_version`)."""
@@ -89,8 +93,10 @@ ENGINE_VERSION: str = "nba-engine-1.1.0"
 NO_ACTION_REASON_OPT_OUT = "OPT_OUT_SUPPRESSED"
 NO_ACTION_REASON_FREQ_CAP = "FREQ_CAP_SUPPRESSED"
 NO_ACTION_REASON_ALL_BLOCKED = "ALL_CANDIDATES_BLOCKED"
-"""Alasan NO_ACTION menurut Requirement_Capstone Bab 4 (baris NO_ACTION): Consent = Opt-Out,
-Frequency Cap tercapai, atau ALL_CANDIDATES_BLOCKED."""
+NO_ACTION_REASON_BELOW_MIN_EV = "BELOW_MIN_EV"
+"""Alasan NO_ACTION. Bab 4 (baris NO_ACTION): Consent = Opt-Out, Frequency Cap tercapai,
+ALL_CANDIDATES_BLOCKED. Bab 5: BELOW_MIN_EV = ada kandidat layak, tetapi seluruhnya ber-EV
+di bawah min_ev_threshold."""
 
 CORRELATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 """Pola `correlation_id` sesuai kontrak K-07."""
@@ -149,6 +155,10 @@ class EligibilityProfile:
         has_active_membership: Apakah pelanggan memiliki membership aktif.
         purchased_categories: Kategori produk yang sudah pernah dibeli.
         has_active_win_back_offer: Apakah sudah ada penawaran win-back aktif.
+        days_until_replenishment: Sisa hari hingga produk habis pakai / jadwal pembelian ulang
+            (= last_purchase_date + replenishment_cycle_days - hari ini; negatif = sudah lewat).
+            None = data tidak tersedia -> SERVICE_REMINDER tidak eligible (fail-closed).
+            CATATAN: field sumber ini belum ada di data sintetis; harus disediakan Moses.
     """
 
     customer_id: str
@@ -157,6 +167,7 @@ class EligibilityProfile:
     has_active_membership: bool
     purchased_categories: List[str] = field(default_factory=list)
     has_active_win_back_offer: bool = False
+    days_until_replenishment: Optional[int] = None
 
 
 @dataclass
@@ -827,7 +838,7 @@ class NBAEngine:
         """
         Alasan NO_ACTION yang disebut Requirement_Capstone Bab 4:
         Opt-Out, Frequency Cap tercapai, atau ALL_CANDIDATES_BLOCKED.
-        Untuk alasan lain (mis. EV < threshold) dokumen tidak memberi kode -> None.
+        Bab 5: ada kandidat layak tetapi semuanya EV < min_ev_threshold -> BELOW_MIN_EV.
         """
         if result.selected_action.action_id != "NO_ACTION":
             return None
@@ -838,6 +849,8 @@ class NBAEngine:
         cands = result.candidates_evaluated
         if cands and not any(c.is_eligible for c in cands):
             return NO_ACTION_REASON_ALL_BLOCKED
+        if any(c.is_eligible for c in cands):
+            return NO_ACTION_REASON_BELOW_MIN_EV
         return None
 
     def _checks_to_k07(

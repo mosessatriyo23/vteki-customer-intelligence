@@ -25,7 +25,9 @@ from datetime import date, datetime
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional
 
 from services.decision.nba.catalogue import get_action
+from services.decision.nudge import safety
 from services.decision.nudge.safety import (
+    ESCALATION_CODE,
     STATUS_BLOCKED,
     SafetyViolation,
     scan_message,
@@ -119,6 +121,8 @@ class NudgeDraft:
     missing_facts: List[str] = field(default_factory=list)
     violations: List[SafetyViolation] = field(default_factory=list)
     reason: str = ""
+    escalation: Optional[str] = None
+    """`INCENTIVE_ESCALATED` jika diblokir karena pagu diskon: wajib dieskalasi ke Business Approver."""
 
     @property
     def is_releasable(self) -> bool:
@@ -154,6 +158,28 @@ def _clean_fact(value: Any) -> str:
     text = re.sub(r"[\x00-\x1f\x7f{}]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text[:MAX_FACT_LENGTH]
+
+
+def _effective_discount_cap(
+    action: object, override: Optional[float]
+) -> Optional[float]:
+    """
+    Batas diskon yang berlaku untuk sebuah aksi.
+
+    - `override` (parameter pemanggil) dipakai apa adanya bila diberikan.
+    - Selain itu: pagu global `safety.MAX_DISCOUNT_PERCENT`; jika None -> None (fail-closed).
+    - Bila band insentif aksi punya batas sendiri (`BAND_MAX_DISCOUNT_PERCENT`), dipakai nilai
+      yang LEBIH KECIL antara pagu global dan batas band.
+    """
+    if override is not None:
+        return override
+    global_cap = safety.MAX_DISCOUNT_PERCENT
+    if global_cap is None:
+        return None
+    band_cap = safety.BAND_MAX_DISCOUNT_PERCENT.get(
+        getattr(getattr(action, "incentive_band", None), "name", "")
+    )
+    return global_cap if band_cap is None else min(global_cap, band_cap)
 
 
 def generate_nudge(
@@ -220,7 +246,10 @@ def generate_nudge(
     # Substitusi aman: hanya variabel whitelist, tanpa str.format (tanpa akses atribut).
     body = _PLACEHOLDER_RE.sub(lambda m: values[m.group(1)], template)
 
-    scan = scan_message(body, max_discount_percent=max_discount_percent)
+    scan = scan_message(
+        body,
+        max_discount_percent=_effective_discount_cap(action, max_discount_percent),
+    )
     if not scan.is_safe:
         return NudgeDraft(
             customer_id=customer_id,
@@ -231,6 +260,7 @@ def generate_nudge(
             variables_used=values,
             violations=list(scan.violations),
             reason="Draf diblokir Safety Scanner: " + ", ".join(scan.rule_ids),
+            escalation=ESCALATION_CODE if scan.requires_escalation else None,
         )
 
     return NudgeDraft(

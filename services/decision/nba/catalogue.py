@@ -280,7 +280,8 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "tanpa unsur promosi komersial."
         ),
         trigger_conditions=[
-            "Jadwal kunjungan / produk habis pakai mendekati (berdasarkan pola historis)",
+            "Lifecycle = ACTIVE atau LOYAL",
+            "Produk habis pakai / jadwal pembelian ulang <= 7 hari (days_until_replenishment)",
             "Tidak ada keluhan aktif",
             "Consent = Opt-In pada kanal yang relevan",
         ],
@@ -288,7 +289,11 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         incentive_band=IncentiveBand.NONE,
         action_weight=1.0,
         is_commercial=False,  # Non-komersial, dikecualikan dari fatigue cap
-        required_fact_package=["clv_amount"],
+        required_fact_package=[
+            "clv_amount",
+            "days_until_replenishment",
+            "lifecycle_stage",
+        ],
     ),
     # 9. EDUCATION — Edukasi Pelanggan Baru
     "EDUCATION": Action(

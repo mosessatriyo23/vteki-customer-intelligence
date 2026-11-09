@@ -1,10 +1,10 @@
 # Kontrak Definisi Bisnis: Target & Standar Sistem
 **Dokumen:** `target_definitions.md`
-**Status:** v1.1 — REVISI (v1.0 berstatus APPROVED). Perubahan v1.1 menunggu persetujuan ulang.
+**Status:** v1.2 — REVISI (v1.0 berstatus APPROVED). Perubahan v1.1 dan v1.2 menunggu persetujuan ulang.
 **Penyusun:** Christ (Decisioning, Activation & Measurement Engineer)
 **Disetujui oleh:** [ISI_SENDIRI: nama penyetuju (Dosen Pembimbing / Mentor V-TEKI) dan tanggal persetujuan v1.1]
-**Versi:** v1.1
-**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07
+**Versi:** v1.2
+**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07; v1.2 = 2026-11-09
 **Klasifikasi:** 100% Data Sintetis — Hanya untuk keperluan akademik Capstone Project UKDW
 
 ---
@@ -140,15 +140,22 @@ Sumber: kolom *Syarat Pemicu* pada Requirement_Capstone Bab 4. Sel **"Belum dite
 | Segmen | Aksi proaktif yang diizinkan menurut Requirement Bab 4 | Catatan |
 |---|---|---|
 | `NEW` | `EDUCATION` (syarat: Churn Risk LOW) | |
-| `ACTIVE` | `CROSS_SELL`, `UPSELL` | |
-| `LOYAL` | `CROSS_SELL`, `UPSELL`, `LOYALTY_REWARD` (syarat CLV Tinggi/Sangat Tinggi) | |
+| `ACTIVE` | `CROSS_SELL`, `UPSELL`, `SERVICE_REMINDER` (jadwal habis pakai <= 7 hari) | Lihat catatan SERVICE_REMINDER di bawah |
+| `LOYAL` | `CROSS_SELL`, `UPSELL`, `LOYALTY_REWARD` (syarat CLV Tinggi/Sangat Tinggi), `SERVICE_REMINDER` (jadwal habis pakai <= 7 hari) | Lihat catatan SERVICE_REMINDER di bawah |
 | `AT_RISK` | `RETENTION_OUTREACH` (Churn Risk HIGH, CLV Tinggi/Sangat Tinggi) | |
 | `DORMANT` | `WIN_BACK_OFFER` (CLV historis Tinggi, belum ada tawaran aktif), `RETENTION_OUTREACH` ("At_Risk/Lapsed") | Bab 4 menulis WIN_BACK untuk "91-180 hari pasif" tetapi Bab 1 menetapkan Dormant = 181-365 hari. Definisi Bab 1 yang dipakai (sesuai §3 dan implementasi). |
 | `CHURNED` | **Belum ditetapkan** | |
 | `REACTIVATED` | **Belum ditetapkan** | |
 | `OCCASIONAL` | **Belum ditetapkan** | |
 | `NEVER_TRANSACTED` | **Belum ditetapkan** | |
-| *Lintas segmen* | `COMPLAINT_RESOLUTION` (keluhan `OPEN_SEVERE` aktif, prioritas #1); `RENEWAL_REMINDER` (sisa membership <= 15 hari); `SERVICE_REMINDER`; `RELATIONSHIP_MANAGER_CONTACT` (CLV >= Rp 1 juta dengan Churn Risk HIGH/VERY_HIGH) | Tidak dibatasi segmen lifecycle |
+| *Lintas segmen* | `COMPLAINT_RESOLUTION` (keluhan `OPEN_SEVERE` aktif, prioritas #1); `RENEWAL_REMINDER` (sisa membership <= 15 hari); `RELATIONSHIP_MANAGER_CONTACT` (CLV >= Rp 1 juta dengan Churn Risk HIGH/VERY_HIGH) | Tidak dibatasi segmen lifecycle |
+
+> **Catatan `SERVICE_REMINDER` (keputusan tim, v1.2):** eligible hanya untuk lifecycle `ACTIVE`/`LOYAL` dengan `days_until_replenishment <= 7`
+> (`last_purchase_date + replenishment_cycle_days - hari ini`; nilai negatif = sudah lewat), tanpa keluhan aktif, dengan consent Push/Email.
+> `CHURNED`/`DORMANT` dikecualikan. Jika data jadwal tidak tersedia (`None`) aksi **tidak eligible** (fail-closed).
+> **Perbedaan dengan Requirement_Capstone Bab 4:** Bab 4 tidak membatasi lifecycle untuk aksi ini. Pembatasan ACTIVE/LOYAL dan ambang 7 hari berasal dari keputusan tim.
+> **Ketergantungan data:** field `replenishment_cycle_days` / `last_purchase_date` **belum ada** di data sintetis (`generator/`, `fixtures/`, `services/data/`); Moses perlu menyediakannya.
+> Sampai data tersedia, `SERVICE_REMINDER` tidak akan terpilih.
 
 ---
 
@@ -213,6 +220,12 @@ LIFECYCLE_AT_RISK_END = 180
 LIFECYCLE_DORMANT_START = 181
 LIFECYCLE_DORMANT_END = 365
 LIFECYCLE_CHURNED_THRESHOLD = 365
+
+# Keputusan tim (v1.2) -- bukan dari Requirement_Capstone
+MIN_EV_THRESHOLD_IDR = 1000.0         # EV < nilai ini -> NO_ACTION (alasan BELOW_MIN_EV)
+MAX_DISCOUNT_PERCENT = 30.0           # pagu diskon global pada pesan
+SERVICE_REMINDER_WINDOW_DAYS = 7      # SERVICE_REMINDER eligible jika habis pakai <= 7 hari
+CONTROL_HOLDOUT_RATIO = 0.10          # Holdout Control Group default (K-08)
 MEMBERSHIP_CHURN_THRESHOLD = 180
 ```
 
@@ -224,3 +237,4 @@ MEMBERSHIP_CHURN_THRESHOLD = 180
 |---|---|---|
 | v1.0 | 2026-10-28 | Versi awal (APPROVED). |
 | v1.1 | 2026-11-07 | (1) §1.1 definisi churn diubah ke jendela 90 hari **ke depan** + 3 churn negation events, menggantikan definisi 180 hari ke belakang; (2) §2.1 nilai default Retention_Factor 0.7 dicabut (tanpa sumber); (3) §3 ditambah label `OCCASIONAL` & `NEVER_TRANSACTED` (usulan) dan catatan kelengkapan aturan; (4) §3.1 matriks alokasi perlakuan per segmen (9 segmen); (5) §4.2 reason code `EXCL_OPEN_SEVERE_COMPLAINT`, penempatan pada 5 masukan, dan butir konfirmasi cakupan opt-out; (6) konstanta `CHURN_DEFINITION_DAYS = 180` dihapus (tidak dipakai di kode mana pun). |
+| v1.2 | 2026-11-09 | Keputusan tim: (1) `min_ev_threshold` = Rp 1.000 (`BELOW_MIN_EV`); (2) pagu diskon global 30% dan batas per band (Tanpa Insentif 0%, Rendah <= 10%, Sedang <= 20%, Tinggi <= 30%) dengan eskalasi `INCENTIVE_ESCALATED`; (3) daftar kata terlarang; (4) aturan `SERVICE_REMINDER` (ACTIVE/LOYAL, <= 7 hari) dan penyesuaian matriks §3.1; (5) K-08: `control_holdout_ratio` (default 0.10) dan `random_seed`. |
