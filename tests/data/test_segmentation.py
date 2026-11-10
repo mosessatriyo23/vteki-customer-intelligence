@@ -22,7 +22,10 @@ class SegmentationTests(unittest.TestCase):
             (365, "DORMANT"),
             (366, "CHURNED"),
         ):
-            self.assertEqual(lifecycle(400, recency, 0, 0, 0, False), label)
+            expected = "UNCLASSIFIED" if label == "CHURNED" else label
+            self.assertEqual(lifecycle(400, recency, 0, 0, 0, False), expected)
+        self.assertEqual(lifecycle(400, 366, 0, 0, 0, False, 181), "CHURNED")
+        self.assertEqual(lifecycle(400, 366, 0, 0, 0, False, 180), "UNCLASSIFIED")
         self.assertEqual(lifecycle(60, 1, 5, 5, 500000, False), "LOYAL")
         self.assertEqual(lifecycle(59, 1, 3, 5, 500000, False), "ACTIVE")
         self.assertEqual(lifecycle(400, 1, 5, 5, 500000, True), "REACTIVATED")

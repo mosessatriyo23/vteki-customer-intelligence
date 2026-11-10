@@ -9,6 +9,7 @@ from services.data.features.snapshot import FIELDS as FEATURE_FIELDS
 from services.data.features.snapshot import validate_cutoffs
 
 VERSION = "future-outcomes-proposed-dev-1.0"
+CHRIST_VERSION = "christ-churn90-three-events-dev-1.1"
 FIELDS = (
     "golden_customer_id",
     "cutoff_at",
@@ -25,11 +26,18 @@ TRAINING_FIELDS = (*FEATURE_FIELDS, *(f for f in FIELDS if f not in FEATURE_FIEL
 
 
 def build_labels(
-    inbound: Path, resolution: Path, cutoffs: list[datetime], horizon_days: int = 90
+    inbound: Path,
+    resolution: Path,
+    cutoffs: list[datetime],
+    horizon_days: int = 90,
+    *,
+    christ_events: bool = False,
 ) -> list[dict]:
-    """Windows are (cutoff-365d, cutoff] and (cutoff, cutoff+horizon].
+    """Build separate legacy-proxy or Christ-event development labels.
 
-    churn90/clv90 are nominal target names; horizon_days is always published.
+    Windows are (cutoff-365d, cutoff] and (cutoff, cutoff+horizon]. When
+    christ_events is true, churn is negated by qualifying POS transactions,
+    completed physical visits, and membership renewals. CLV remains clv90.
     Incomplete targets are null, never observed partial-window negatives.
     """
     cutoffs = validate_cutoffs(cutoffs)
@@ -39,6 +47,8 @@ def build_labels(
         or horizon_days < 1
     ):
         raise ValueError("horizon_days must be a positive integer")
+    if christ_events and horizon_days != 90:
+        raise ValueError("Christ churn contract requires horizon_days=90")
     manifest = json.loads(
         (inbound / "generation_manifest.json").read_text(encoding="utf-8")
     )
@@ -54,6 +64,7 @@ def build_labels(
         for r in read(resolution / "mapping.csv")
     }
     events: dict[str, list[tuple[datetime, int]]] = {}
+    activity_events: dict[str, list[datetime]] = {}
     seen = set()
     for row in read(inbound / "transactions.csv"):
         ref = row["source_customer_ref"]
@@ -81,12 +92,35 @@ def build_labels(
         if fingerprint in seen:
             continue
         seen.add(fingerprint)
+        occurred_at = datetime.fromisoformat(row["transaction_datetime"])
         events.setdefault(mapping[ref], []).append(
-            (
-                datetime.fromisoformat(row["transaction_datetime"]),
-                int(row["actual_revenue"]),
-            )
+            (occurred_at, int(row["actual_revenue"]))
         )
+        activity_events.setdefault(mapping[ref], []).append(occurred_at)
+
+    if christ_events:
+        for filename, timestamp_field, accepted in (
+            ("customer_visits.csv", "visit_datetime", {"COMPLETED"}),
+            ("membership_events.csv", "occurred_at", {"RENEWAL"}),
+        ):
+            for row in read(inbound / filename):
+                ref = row["source_customer_ref"]
+                if not ref:
+                    continue
+                if ref not in mapping:
+                    raise ValueError(f"Unknown customer reference in {filename}")
+                kind = row[
+                    "status" if filename == "customer_visits.csv" else "event_type"
+                ]
+                if kind not in accepted:
+                    continue
+                occurred_at = datetime.fromisoformat(row[timestamp_field])
+                activity_events.setdefault(mapping[ref], []).append(occurred_at)
+    else:
+        activity_events = {
+            customer: [moment for moment, _ in customer_events]
+            for customer, customer_events in events.items()
+        }
     output = []
     for cutoff in cutoffs:
         end = cutoff + timedelta(days=horizon_days)
@@ -97,17 +131,27 @@ def build_labels(
             eligible = any(
                 cutoff - timedelta(days=365) < t <= cutoff for t, _ in history
             )
-            future = [amount for t, amount in history if cutoff < t <= end]
+            future = [
+                amount
+                for t, amount in history
+                if cutoff < t <= end
+            ]
+            future_activity = any(
+                cutoff < t <= end
+                for t in activity_events.get(golden, [])
+            )
             output.append(
                 dict(
                     golden_customer_id=golden,
                     cutoff_at=cutoff.isoformat(),
-                    label_version=VERSION,
+                    label_version=(
+                        CHRIST_VERSION if christ_events else VERSION
+                    ),
                     horizon_days=horizon_days,
                     outcome_end_at=end.isoformat(),
                     outcome_complete=complete,
                     eligible=eligible,
-                    churn90=int(not future) if complete and eligible else None,
+                    churn90=int(not future_activity) if complete and eligible else None,
                     clv90=sum(future) if complete else None,
                     experiment_ready=False,
                 )

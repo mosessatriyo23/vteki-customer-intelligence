@@ -7,7 +7,7 @@ from pathlib import Path
 
 from services.data.customer360.profile import build_profiles, read
 
-RULE_VERSION = "lifecycle-proposed-1.0"
+RULE_VERSION = "lifecycle-proposed-1.1-christ-churned-guard"
 FIELDS = (
     "golden_customer_id",
     "cutoff_at",
@@ -41,6 +41,7 @@ def lifecycle(
     count90: int,
     revenue90: int,
     reactivated: bool,
+    membership_expired_days: int | None = None,
 ) -> str:
     """Mutually exclusive PROPOSED priority, with explicit never-transacted fallback."""
     if reactivated:
@@ -52,7 +53,12 @@ def lifecycle(
     if recency is None:
         return "NEVER_TRANSACTED"
     if recency > 365:
-        return "CHURNED"
+        if (
+            membership_expired_days is not None
+            and membership_expired_days > 180
+        ):
+            return "CHURNED"
+        return "UNCLASSIFIED"  # No approved fallback for this membership state.
     if recency > 180:
         return "DORMANT"
     if recency > 90:
@@ -75,6 +81,10 @@ def build_segments(
     events: dict[str, list[tuple[datetime, int]]] = {
         p["golden_customer_id"]: [] for p in profiles
     }
+    activity: dict[str, list[datetime]] = {
+        p["golden_customer_id"]: [] for p in profiles
+    }
+    membership_expiry: dict[str, list[tuple[datetime, datetime]]] = {}
     seen = set()
     for row in read(inbound / "transactions.csv"):
         ref = row["source_customer_ref"]
@@ -103,13 +113,60 @@ def build_segments(
             continue
         seen.add(fingerprint)
         events[mapping[ref]].append((moment, int(row["actual_revenue"])))
+        activity[mapping[ref]].append(moment)
+    for filename, timestamp in (
+        ("customer_visits.csv", "visit_datetime"),
+        ("membership_events.csv", "occurred_at"),
+    ):
+        path = inbound / filename
+        if not path.exists():
+            continue  # Missing expiry cannot establish CHURNED.
+        for row in read(path):
+            ref = row["source_customer_ref"]
+            if not ref:
+                continue
+            if ref not in mapping:
+                raise ValueError(f"Unknown customer reference in {filename}")
+            moment = datetime.fromisoformat(row[timestamp])
+            if moment > cutoff:
+                continue
+            golden = mapping[ref]
+            if filename == "customer_visits.csv":
+                if row["status"] == "COMPLETED":
+                    activity[golden].append(moment)
+            elif row["event_type"] in {"JOIN", "RENEWAL"}:
+                membership_expiry.setdefault(golden, []).append(
+                    (moment, datetime.fromisoformat(row["expires_at"]))
+                )
+                if row["event_type"] == "RENEWAL":
+                    activity[golden].append(moment)
     output = []
     for profile in profiles:
         history = sorted(events[profile["golden_customer_id"]])
         tenure = (
             cutoff.date() - datetime.fromisoformat(profile["first_join_date"]).date()
         ).days
-        recency = (cutoff.date() - history[-1][0].date()).days if history else None
+        all_activity = sorted(activity.get(profile["golden_customer_id"], []))
+        recency = (
+            (cutoff.date() - all_activity[-1].date()).days
+            if all_activity
+            else None
+        )
+        latest_expiry = (
+            max(
+                expiry
+                for _, expiry in membership_expiry[
+                    profile["golden_customer_id"]
+                ]
+            )
+            if membership_expiry.get(profile["golden_customer_id"])
+            else None
+        )
+        membership_expired_days = (
+            (cutoff.date() - latest_expiry.date()).days
+            if latest_expiry is not None and latest_expiry.date() < cutoff.date()
+            else None
+        )
         in_window = [
             (t, amount)
             for t, amount in history
@@ -166,6 +223,7 @@ def build_segments(
                     len(recent90),
                     revenue90,
                     reactivated,
+                    membership_expired_days,
                 ),
                 rule_version=RULE_VERSION,
             )
