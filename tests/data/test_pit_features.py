@@ -12,6 +12,7 @@ from services.data.features.cli import run
 from services.data.features.snapshot import build_features, validate_cutoffs
 from services.data.identity.cli import run as resolve
 from services.data.ingestion.validator import sha256
+from services.data.models.clv_features import build_clv_aggregates
 
 
 class HistoricalFeatureTests(unittest.TestCase):
@@ -65,6 +66,36 @@ class HistoricalFeatureTests(unittest.TestCase):
         self.assertEqual(row["purchase_count_365d"], 3)
         self.assertEqual(row["retained_revenue_365d"], 300)
         self.assertEqual(row["recency_days"], 0)
+
+    def test_clv_aggregate_matches_gross_transaction_window(self):
+        cutoff = datetime.fromisoformat("2026-06-01T12:00:00+07:00")
+        transactions = [
+            {
+                "source_transaction_id": "past",
+                "source_customer_ref": "a",
+                "source_system": "POS",
+                "transaction_datetime": (cutoff - timedelta(days=20)).isoformat(),
+                "gross_amount": "1000",
+                "discount_amount": "100",
+                "net_amount": "900",
+                "status": "COMPLETED",
+            },
+            {
+                "source_transaction_id": "future",
+                "source_customer_ref": "a",
+                "source_system": "POS",
+                "transaction_datetime": (cutoff + timedelta(seconds=1)).isoformat(),
+                "gross_amount": "999999",
+                "discount_amount": "0",
+                "net_amount": "999999",
+                "status": "COMPLETED",
+            },
+        ]
+        row = build_clv_aggregates(transactions, {"a": "golden-a"}, cutoff)[0]
+        self.assertEqual(row["historical_spend_12m_gross"], 1000)
+        self.assertEqual(row["transaction_count_12m"], 1)
+        self.assertFalse(row["history_sufficient_12m"])
+        self.assertFalse(row["training_ready"])
 
     def test_cli_manifest_and_future_mutation(self):
         with tempfile.TemporaryDirectory() as temp:
