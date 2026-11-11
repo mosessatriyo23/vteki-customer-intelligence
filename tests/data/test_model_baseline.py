@@ -80,6 +80,87 @@ class ModelBaselineTests(unittest.TestCase):
             self.assertIsNone(incomplete[0]["clv90"])
             self.assertIsNone(incomplete[0]["churn90"])
 
+    def test_christ_churn_events_include_visit_and_renewal(self):
+        cutoff = datetime.fromisoformat("2026-01-01T12:00:00+07:00")
+        profiles = [
+            dict(golden_customer_id=value) for value in ("visit", "renew", "none")
+        ]
+        mapping = [
+            dict(source_customer_id=value, golden_customer_id=value)
+            for value in ("visit", "renew", "none")
+        ]
+        transactions = [
+            dict(
+                source_customer_ref=value,
+                source_system="POS",
+                branch_code="BR-01",
+                channel_code="POS_STORE",
+                transaction_datetime=(cutoff - timedelta(days=1)).isoformat(),
+                gross_amount="100",
+                discount_amount="0",
+                net_amount="100",
+                actual_revenue="100",
+                status="COMPLETED",
+            )
+            for value in ("visit", "renew", "none")
+        ]
+        visits = [
+            dict(
+                source_customer_ref="visit",
+                source_transaction_id="",
+                visit_datetime=(cutoff + timedelta(days=90)).isoformat(),
+                status="COMPLETED",
+            )
+        ]
+        memberships = [
+            dict(
+                source_customer_ref="renew",
+                event_id="renew-1",
+                event_type="RENEWAL",
+                occurred_at=(cutoff + timedelta(days=1)).isoformat(),
+            )
+        ]
+
+        def read_fixture(path):
+            return {
+                "mapping.csv": mapping,
+                "transactions.csv": transactions,
+                "customer_visits.csv": visits,
+                "membership_events.csv": memberships,
+            }[path.name]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = Path(tmp)
+            (inbound / "generation_manifest.json").write_text(
+                json.dumps({"as_of_date": "2026-04-01"}), encoding="utf-8"
+            )
+            with (
+                patch(
+                    "services.data.models.labels.build_profiles", return_value=profiles
+                ),
+                patch("services.data.models.labels.read", side_effect=read_fixture),
+            ):
+                rows = build_labels(
+                    inbound, Path("resolution"), [cutoff], christ_events=True
+                )
+        by_id = {row["golden_customer_id"]: row for row in rows}
+        self.assertEqual(by_id["visit"]["churn90"], 0)
+        self.assertEqual(by_id["renew"]["churn90"], 0)
+        self.assertEqual(by_id["none"]["churn90"], 1)
+        self.assertEqual(by_id["visit"]["clv90"], 0)
+        self.assertEqual(by_id["renew"]["clv90"], 0)
+        self.assertEqual(
+            by_id["visit"]["label_version"], "christ-churn90-three-events-dev-1.1"
+        )
+        with self.assertRaisesRegex(ValueError, "requires horizon_days=90"):
+            build_labels(
+                inbound,
+                Path("resolution"),
+                [cutoff],
+                180,
+                christ_events=True,
+            )
+
     def test_temporal_holdout_is_deterministic_not_customer_random(self):
         cutoffs = ["2026-01-01T00:00:00+07:00", "2026-02-01T00:00:00+07:00"]
         rows = [

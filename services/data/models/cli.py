@@ -12,8 +12,14 @@ from services.data.ingestion.contracts import TABLES
 from services.data.ingestion.validator import BatchValidator, sha256
 
 from .baseline import evaluate
+from .labels import (
+    CHRIST_VERSION,
+    TRAINING_FIELDS,
+    VERSION,
+    build_labels,
+    join_training_rows,
+)
 from .labels import FIELDS as LABEL_FIELDS
-from .labels import TRAINING_FIELDS, VERSION, build_labels, join_training_rows
 
 
 def _write_csv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
@@ -29,6 +35,8 @@ def run(
     output_dir: Path,
     cutoffs: list[datetime],
     horizon_days: int = 90,
+    *,
+    christ_events: bool = False,
 ) -> dict:
     cutoffs = validate_cutoffs(cutoffs)
     if output_dir.exists():
@@ -59,7 +67,13 @@ def run(
         raise ValueError(
             "Inbound validation failed: " + json.dumps(report.errors, sort_keys=True)
         )
-    labels = build_labels(inbound, resolution, cutoffs, horizon_days)
+    labels = build_labels(
+        inbound,
+        resolution,
+        cutoffs,
+        horizon_days,
+        christ_events=christ_events,
+    )
     features = build_features(inbound, resolution, cutoffs)
     training_rows = join_training_rows(features, labels)
     metrics = evaluate(training_rows)
@@ -76,7 +90,7 @@ def run(
         for name in ("labels.csv", "training_rows.csv", "metrics.json")
     }
     manifest = dict(
-        label_version=VERSION,
+        label_version=CHRIST_VERSION if christ_events else VERSION,
         feature_fields=list(FEATURE_FIELDS),
         horizon_days=horizon_days,
         experiment_ready=False,
@@ -114,6 +128,11 @@ def main() -> None:
         "--cutoff-at", type=datetime.fromisoformat, action="append", required=True
     )
     parser.add_argument("--horizon-days", type=int, default=90)
+    parser.add_argument(
+        "--christ-churn-events",
+        action="store_true",
+        help="Use Christ's 90-day churn definition with POS, completed visits, and renewals",
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     print(
@@ -124,6 +143,7 @@ def main() -> None:
                 args.output_dir,
                 args.cutoff_at,
                 args.horizon_days,
+                christ_events=args.christ_churn_events,
             )
         )
     )
