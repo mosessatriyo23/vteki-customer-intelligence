@@ -23,7 +23,9 @@ def calculate_business_clv(
     This pure function performs no ingestion, fitting, or ground-truth access.
     """
     historical = _finite_nonnegative("historical_spend_12m", historical_spend_12m)
-    average = _finite_nonnegative("average_transaction_value", average_transaction_value)
+    average = _finite_nonnegative(
+        "average_transaction_value", average_transaction_value
+    )
     frequency = _finite_nonnegative("frequency_per_month", frequency_per_month)
     retention = _finite_nonnegative("retention_factor", retention_factor)
     if retention > 1:

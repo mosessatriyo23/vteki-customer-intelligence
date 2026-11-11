@@ -53,10 +53,7 @@ def lifecycle(
     if recency is None:
         return "NEVER_TRANSACTED"
     if recency > 365:
-        if (
-            membership_expired_days is not None
-            and membership_expired_days > 180
-        ):
+        if membership_expired_days is not None and membership_expired_days > 180:
             return "CHURNED"
         return "UNCLASSIFIED"  # No approved fallback for this membership state.
     if recency > 180:
@@ -148,16 +145,11 @@ def build_segments(
         ).days
         all_activity = sorted(activity.get(profile["golden_customer_id"], []))
         recency = (
-            (cutoff.date() - all_activity[-1].date()).days
-            if all_activity
-            else None
+            (cutoff.date() - all_activity[-1].date()).days if all_activity else None
         )
         latest_expiry = (
             max(
-                expiry
-                for _, expiry in membership_expiry[
-                    profile["golden_customer_id"]
-                ]
+                expiry for _, expiry in membership_expiry[profile["golden_customer_id"]]
             )
             if membership_expiry.get(profile["golden_customer_id"])
             else None

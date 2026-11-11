@@ -82,7 +82,9 @@ class ModelBaselineTests(unittest.TestCase):
 
     def test_christ_churn_events_include_visit_and_renewal(self):
         cutoff = datetime.fromisoformat("2026-01-01T12:00:00+07:00")
-        profiles = [dict(golden_customer_id=value) for value in ("visit", "renew", "none")]
+        profiles = [
+            dict(golden_customer_id=value) for value in ("visit", "renew", "none")
+        ]
         mapping = [
             dict(source_customer_id=value, golden_customer_id=value)
             for value in ("visit", "renew", "none")
@@ -133,7 +135,9 @@ class ModelBaselineTests(unittest.TestCase):
                 json.dumps({"as_of_date": "2026-04-01"}), encoding="utf-8"
             )
             with (
-                patch("services.data.models.labels.build_profiles", return_value=profiles),
+                patch(
+                    "services.data.models.labels.build_profiles", return_value=profiles
+                ),
                 patch("services.data.models.labels.read", side_effect=read_fixture),
             ):
                 rows = build_labels(

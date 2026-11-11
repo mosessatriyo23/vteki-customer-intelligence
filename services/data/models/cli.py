@@ -12,7 +12,6 @@ from services.data.ingestion.contracts import TABLES
 from services.data.ingestion.validator import BatchValidator, sha256
 
 from .baseline import evaluate
-from .labels import FIELDS as LABEL_FIELDS
 from .labels import (
     CHRIST_VERSION,
     TRAINING_FIELDS,
@@ -20,6 +19,7 @@ from .labels import (
     build_labels,
     join_training_rows,
 )
+from .labels import FIELDS as LABEL_FIELDS
 
 
 def _write_csv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:

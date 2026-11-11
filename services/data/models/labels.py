@@ -131,22 +131,15 @@ def build_labels(
             eligible = any(
                 cutoff - timedelta(days=365) < t <= cutoff for t, _ in history
             )
-            future = [
-                amount
-                for t, amount in history
-                if cutoff < t <= end
-            ]
+            future = [amount for t, amount in history if cutoff < t <= end]
             future_activity = any(
-                cutoff < t <= end
-                for t in activity_events.get(golden, [])
+                cutoff < t <= end for t in activity_events.get(golden, [])
             )
             output.append(
                 dict(
                     golden_customer_id=golden,
                     cutoff_at=cutoff.isoformat(),
-                    label_version=(
-                        CHRIST_VERSION if christ_events else VERSION
-                    ),
+                    label_version=(CHRIST_VERSION if christ_events else VERSION),
                     horizon_days=horizon_days,
                     outcome_end_at=end.isoformat(),
                     outcome_complete=complete,
