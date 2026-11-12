@@ -47,6 +47,64 @@ class ClvFeatureTests(unittest.TestCase):
         self.assertFalse(row["training_ready"])
         self.assertEqual(row["availability_time_status"], "UNPROVEN")
 
+    def test_out_of_window_conflicting_versions_do_not_shadow_valid_row(self):
+        cutoff = datetime.fromisoformat("2026-06-01T00:00:00+07:00")
+        base = {
+            "source_transaction_id": "same-id",
+            "source_customer_ref": "source-a",
+            "source_system": "POS",
+            "discount_amount": "0",
+            "net_amount": "100",
+        }
+        future = {
+            **base,
+            "transaction_datetime": (cutoff + timedelta(days=1)).isoformat(),
+            "gross_amount": "999",
+            "status": "COMPLETED",
+        }
+        valid = {
+            **base,
+            "transaction_datetime": (cutoff - timedelta(days=1)).isoformat(),
+            "gross_amount": "100",
+            "status": "COMPLETED",
+        }
+        cancelled = {**base, "status": "CANCELLED"}
+        self.assertEqual(
+            build_clv_aggregates([future, valid], {"source-a": "golden-a"}, cutoff)[0][
+                "historical_spend_12m_gross"
+            ],
+            100,
+        )
+        self.assertEqual(
+            build_clv_aggregates([cancelled, valid], {"source-a": "golden-a"}, cutoff)[
+                0
+            ]["historical_spend_12m_gross"],
+            100,
+        )
+
+    def test_conflicting_eligible_records_are_rejected_order_independently(self):
+        cutoff = datetime.fromisoformat("2026-06-01T00:00:00+07:00")
+        base = {
+            "source_transaction_id": "same-id",
+            "source_customer_ref": "source-a",
+            "source_system": "POS",
+            "discount_amount": "0",
+            "net_amount": "100",
+            "status": "COMPLETED",
+        }
+        first = {
+            **base,
+            "transaction_datetime": (cutoff - timedelta(days=1)).isoformat(),
+            "gross_amount": "100",
+        }
+        conflicting = {**first, "gross_amount": "200"}
+        for rows in ([first, conflicting], [conflicting, first]):
+            with self.subTest(rows=rows):
+                with self.assertRaisesRegex(
+                    ValueError, "Conflicting in-window records"
+                ):
+                    build_clv_aggregates(rows, {"source-a": "golden-a"}, cutoff)
+
     def test_future_mutation_does_not_change_as_of_aggregate(self):
         cutoff = datetime.fromisoformat("2026-06-01T00:00:00+07:00")
         rows = [
