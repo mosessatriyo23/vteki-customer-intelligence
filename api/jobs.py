@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from api.database import get_db
@@ -16,7 +16,16 @@ JobKind = str
 class JobCreate(BaseModel):
     kind: JobKind = Field(min_length=1, max_length=64, pattern=r"^[^\x00]*$")
     payload: dict = Field(default_factory=dict)
-    max_attempts: int = Field(default=3, ge=1, le=10)
+    max_attempts: int = Field(default=3, ge=1, le=10, strict=True)
+
+    @field_validator("max_attempts", mode="before")
+    @classmethod
+    def normalize_max_attempts(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("max_attempts must be an integer, not a boolean")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 class JobResponse(BaseModel):
