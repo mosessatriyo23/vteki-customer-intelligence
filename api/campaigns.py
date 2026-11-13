@@ -35,7 +35,7 @@ class CampaignCreate(BaseModel):
     channel: str = Field(
         min_length=2, max_length=32, pattern=r"^[^\x00]*$"
     )  # email_sim, sms_sim, push_sim
-    ab_test_ratio: int = Field(default=50, ge=0, le=100)
+    ab_test_ratio: int = Field(default=50, ge=0, le=100, strict=True)
     message_draft: str | None = Field(
         default=None, max_length=2000, pattern=r"^[^\x00]*$"
     )
