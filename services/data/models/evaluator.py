@@ -71,11 +71,11 @@ def _validate_rows(rows: list[dict]) -> None:
         seen.add(key)
         if row.get("label_version") != CHRIST_VERSION:
             raise ValueError("Each row must use the Christ label version")
-        try:
-            horizon = int(row.get("horizon_days"))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Each row must have horizon_days=90") from exc
-        if isinstance(row.get("horizon_days"), bool) or horizon != _HORIZON_DAYS:
+        horizon = row.get("horizon_days")
+        if not (
+            (type(horizon) is int and horizon == _HORIZON_DAYS)
+            or (isinstance(horizon, str) and horizon == str(_HORIZON_DAYS))
+        ):
             raise ValueError("Each row must have horizon_days=90")
         outcome_end = _aware_timestamp(row.get("outcome_end_at"), "outcome_end_at")
         if outcome_end != cutoff + timedelta(days=_HORIZON_DAYS):
