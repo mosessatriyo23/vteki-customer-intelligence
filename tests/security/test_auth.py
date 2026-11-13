@@ -396,6 +396,27 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
     assert len(reconstructed.json()["audit_events"]) >= 7
 
 
+def test_job_create_rejects_boolean_max_attempts(client: TestClient):
+    token = token_for(client, "admin@example.com")
+    response = client.post(
+        "/jobs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"kind": "test", "max_attempts": True},
+    )
+    assert response.status_code == 422
+
+
+def test_job_create_accepts_integral_float_max_attempts(client: TestClient):
+    token = token_for(client, "admin@example.com")
+    response = client.post(
+        "/jobs",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"kind": "test", "max_attempts": 2.0},
+    )
+    assert response.status_code == 202
+    assert response.json()["max_attempts"] == 2
+
+
 def test_identity_manual_review_requires_reviewer_role(client: TestClient):
     operator = Role(name="operator")
     with app.state.audit_session_factory() as db:
