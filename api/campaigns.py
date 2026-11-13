@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -39,6 +39,15 @@ class CampaignCreate(BaseModel):
     message_draft: str | None = Field(
         default=None, max_length=2000, pattern=r"^[^\x00]*$"
     )
+
+    @field_validator("ab_test_ratio", mode="before")
+    @classmethod
+    def normalize_ab_test_ratio(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("ab_test_ratio must be an integer, not a boolean")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 @router.get("", response_model=list[CampaignResponse])

@@ -411,6 +411,22 @@ def test_campaign_create_rejects_boolean_ab_test_ratio(client: TestClient):
     assert response.status_code == 422
 
 
+def test_campaign_create_accepts_integral_float_ab_test_ratio(client: TestClient):
+    token = token_for(client, "campaign@example.com")
+    response = client.post(
+        "/campaigns",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Integral ratio campaign",
+            "target_segment": "ACTIVE",
+            "channel": "email_sim",
+            "ab_test_ratio": 9.0,
+        },
+    )
+    assert response.status_code == 201
+    assert response.json()["ab_test_ratio"] == 9
+
+
 def test_identity_manual_review_requires_reviewer_role(client: TestClient):
     operator = Role(name="operator")
     with app.state.audit_session_factory() as db:
