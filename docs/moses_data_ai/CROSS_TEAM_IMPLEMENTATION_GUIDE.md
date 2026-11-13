@@ -1,8 +1,11 @@
 # Panduan Implementasi Lintas Tim — membuka fase model Moses
 
-**Status:** Panduan kerja / belum merupakan approval bisnis  
-**Pemilik koordinasi:** Moses  
-**Tim:** Christ (Business & Decisioning), James (Platform & Data), Moses (Data & ML)  
+**Status:** Panduan kerja / belum merupakan approval bisnis
+
+**Pemilik koordinasi:** Moses
+
+**Tim:** Christ (Business & Decisioning), James (Platform & Data), Moses (Data & ML)
+
 **Terakhir diperbarui:** 2026-11-14
 
 Dokumen ini mengubah follow-up dan readiness gate menjadi daftar kerja yang dapat diimplementasikan dan diverifikasi. Ini **tidak menggantikan** kontrak Christ, kontrak platform James, atau proses approval mentor. Jangan menganggap contoh teknis sebagai keputusan bisnis.
