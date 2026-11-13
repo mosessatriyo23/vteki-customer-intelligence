@@ -161,6 +161,111 @@ class ModelBaselineTests(unittest.TestCase):
                 christ_events=True,
             )
 
+    def test_christ_churn_event_window_boundaries_and_future_isolation(self):
+        cutoff = datetime.fromisoformat("2026-01-01T00:00:00+07:00")
+        customer_ids = ("at_cutoff", "at_90", "after_90", "duplicate_visit")
+        profiles = [dict(golden_customer_id=value) for value in customer_ids]
+        mapping = [
+            dict(source_customer_id=value, golden_customer_id=value)
+            for value in customer_ids
+        ]
+        transactions = [
+            dict(
+                source_customer_ref=value,
+                source_system="POS",
+                branch_code="BR-01",
+                channel_code="POS_STORE",
+                transaction_datetime=(cutoff - timedelta(days=1)).isoformat(),
+                gross_amount="100",
+                discount_amount="0",
+                net_amount="100",
+                actual_revenue="100",
+                status="COMPLETED",
+            )
+            for value in customer_ids
+        ]
+        visits = [
+            dict(
+                source_customer_ref="at_cutoff",
+                visit_datetime=cutoff.isoformat(),
+                status="COMPLETED",
+            ),
+            dict(
+                source_customer_ref="at_90",
+                visit_datetime=(cutoff + timedelta(days=90)).isoformat(),
+                status="COMPLETED",
+            ),
+            dict(
+                source_customer_ref="after_90",
+                visit_datetime=(
+                    cutoff + timedelta(days=90, microseconds=1)
+                ).isoformat(),
+                status="COMPLETED",
+            ),
+            dict(
+                source_customer_ref="duplicate_visit",
+                visit_datetime=(cutoff + timedelta(days=30)).isoformat(),
+                status="COMPLETED",
+            ),
+            dict(
+                source_customer_ref="duplicate_visit",
+                visit_datetime=(cutoff + timedelta(days=30)).isoformat(),
+                status="COMPLETED",
+            ),
+        ]
+
+        def read_fixture(path):
+            return {
+                "mapping.csv": mapping,
+                "transactions.csv": transactions,
+                "customer_visits.csv": visits,
+                "membership_events.csv": [],
+            }[path.name]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = Path(tmp)
+            (inbound / "generation_manifest.json").write_text(
+                json.dumps({"as_of_date": "2026-04-02"}), encoding="utf-8"
+            )
+            with (
+                patch(
+                    "services.data.models.labels.build_profiles", return_value=profiles
+                ),
+                patch("services.data.models.labels.read", side_effect=read_fixture),
+            ):
+                rows = build_labels(
+                    inbound, Path("resolution"), [cutoff], christ_events=True
+                )
+                mutated_visits = [
+                    (
+                        {**row, "visit_datetime": "2026-04-02T00:00:00+07:00"}
+                        if row["source_customer_ref"] == "after_90"
+                        else row
+                    )
+                    for row in visits
+                ]
+                with patch(
+                    "services.data.models.labels.read",
+                    side_effect=lambda path: {
+                        "mapping.csv": mapping,
+                        "transactions.csv": transactions,
+                        "customer_visits.csv": mutated_visits,
+                        "membership_events.csv": [],
+                    }[path.name],
+                ):
+                    mutated_rows = build_labels(
+                        inbound, Path("resolution"), [cutoff], christ_events=True
+                    )
+        by_id = {row["golden_customer_id"]: row for row in rows}
+        mutated_by_id = {row["golden_customer_id"]: row for row in mutated_rows}
+        self.assertEqual(by_id["at_cutoff"]["churn90"], 1)
+        self.assertEqual(by_id["at_90"]["churn90"], 0)
+        self.assertEqual(by_id["after_90"]["churn90"], 1)
+        self.assertEqual(by_id["duplicate_visit"]["churn90"], 0)
+        self.assertEqual(
+            by_id["after_90"]["churn90"], mutated_by_id["after_90"]["churn90"]
+        )
+
     def test_temporal_holdout_is_deterministic_not_customer_random(self):
         cutoffs = ["2026-01-01T00:00:00+07:00", "2026-02-01T00:00:00+07:00"]
         rows = [
