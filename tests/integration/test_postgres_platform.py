@@ -771,6 +771,25 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
                     )
                     assert refund.event_id not in {item.event_id for item in old_view}
 
+                    # Both cutoffs are inclusive; future business events remain
+                    # excluded even if the platform already knows about them.
+                    at_boundary = get_transaction_events_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=refund_occurred_at,
+                        known_at=refund.available_at,
+                    )
+                    assert refund.event_id in {item.event_id for item in at_boundary}
+                    before_effective = get_transaction_events_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=refund_occurred_at - timedelta(microseconds=1),
+                        known_at=refund.available_at,
+                    )
+                    assert refund.event_id not in {
+                        item.event_id for item in before_effective
+                    }
+
                     replay = append_transaction_event(
                         session,
                         source_transaction_id=transaction_id,
@@ -825,6 +844,89 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
 
                     assert refund.payload["refund_amount"] == 100
 
+            finally:
+                if outer.is_active:
+                    outer.rollback()
+
+
+def test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time(
+    pg_engine: Engine,
+):
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        inbound = root / "inbound"
+        generate(
+            argparse.Namespace(
+                seed=int(uuid4().hex[:8], 16) % 2_147_483_647,
+                customers=10,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound,
+                ground_truth_dir=root / "truth",
+            )
+        )
+
+        with pg_engine.connect() as connection:
+            outer = connection.begin()
+            try:
+                loader = PostgresIngestionLoader(sessionmaker(bind=connection))
+                result = loader.ingest(inbound)
+                assert result["status"] == "LOADED"
+                batch_id = result["batch_id"]
+                transaction_id = connection.execute(
+                    text(
+                        """
+                        SELECT source_transaction_id
+                        FROM source.transactions
+                        WHERE source_batch_id = :batch_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"batch_id": batch_id},
+                ).scalar_one()
+
+                factory = sessionmaker(bind=connection, expire_on_commit=False)
+                with factory() as session:
+                    occurred_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+                    event = append_transaction_event(
+                        session,
+                        source_transaction_id=transaction_id,
+                        event_type="STATUS_CHANGED",
+                        occurred_at=occurred_at,
+                        source_batch_id=batch_id,
+                        idempotency_key=f"ci-conflict-{uuid4().hex}",
+                        payload={"status": "COMPLETED"},
+                        actor_type="SYSTEM",
+                    )
+                    with pytest.raises(ValueError, match="different event"):
+                        append_transaction_event(
+                            session,
+                            source_transaction_id=transaction_id,
+                            event_type="STATUS_CHANGED",
+                            occurred_at=occurred_at,
+                            source_batch_id=batch_id,
+                            idempotency_key=event.idempotency_key,
+                            payload={"status": "CANCELLED"},
+                            actor_type="SYSTEM",
+                        )
+                    with pytest.raises(ValueError, match="timezone-aware"):
+                        append_transaction_event(
+                            session,
+                            source_transaction_id=transaction_id,
+                            event_type="STATUS_CHANGED",
+                            occurred_at=occurred_at.replace(tzinfo=None),
+                            source_batch_id=batch_id,
+                            idempotency_key=f"ci-naive-{uuid4().hex}",
+                            payload={"status": "COMPLETED"},
+                            actor_type="SYSTEM",
+                        )
+                    with pytest.raises(ValueError, match="timezone-aware"):
+                        get_transaction_events_as_of(
+                            session,
+                            source_transaction_id=transaction_id,
+                            effective_at=occurred_at.replace(tzinfo=None),
+                            known_at=occurred_at,
+                        )
+                    assert event.event_id is not None
             finally:
                 if outer.is_active:
                     outer.rollback()
