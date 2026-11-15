@@ -143,7 +143,6 @@ def _validate_existing_branches(
     return new_rows
 
 
-
 def _insert_branch_rows(
     session: Session,
     table: sa.Table,
@@ -178,7 +177,6 @@ def _insert_branch_rows(
     # Verify after insertion as well. This catches an existing branch whose
     # code matched but whose business attributes differ from the incoming row.
     _validate_existing_branches(session, table, rows)
-
 
 
 def _insert_typed_rows(
