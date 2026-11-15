@@ -168,15 +168,14 @@ Implemented test coverage in the follow-up:
 - Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
 - A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
 
-CI run [43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934)
-on implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451` passed all jobs. The later
-documentation-only update was also checked in
-[run 43752947824](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752947824).
-The implementation run's
-PostgreSQL acceptance job passed all 15 `test_postgres_platform.py` tests,
-the populated-database migration fixture upgraded rows from revision 0014
-through head, and the E2E job passed all 7 browser tests. Local PostgreSQL is
-unavailable; these database/E2E results are from CI, not local execution.
+CI run [43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746)
+on the latest verified PR head passed all jobs. Its
+[PostgreSQL acceptance job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619)
+passed all 15 `test_postgres_platform.py` tests; the populated-database
+migration fixture upgraded rows from revision 0014 through head. The
+[frontend E2E job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351)
+also passed. Local verification then ran the same 15 PostgreSQL tests and
+the full suite with zero skips against a disposable PostgreSQL 15 database.
 
 Still required before Gate C:
 
@@ -206,10 +205,9 @@ not implemented without an approved design.
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
 | Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), OPEN / DRAFT; implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`. |
-| Follow-up CI | [Workflow run 43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934): backend, frontend build, and frontend E2E jobs all passed. |
-| Documentation-update CI | [Workflow run 43752947824](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752947824): backend, frontend build, and frontend E2E jobs all passed. |
-| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495610): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
-| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495799): passed, including campaign approval/audit trace and identity review. |
+| Latest PR-head CI | [Workflow run 43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746): backend, frontend build, and frontend E2E jobs all passed. |
+| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
+| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351): passed, including campaign approval/audit trace and identity review. |
 | Local full test suite | Latest full run against a fresh isolated PostgreSQL 15 database: 852 passed, 0 skipped, including all 15 PostgreSQL acceptance tests. |
 | Local PostgreSQL acceptance | `tests/integration/test_postgres_platform.py`: 15 passed against a newly migrated disposable PostgreSQL database with project permission scripts applied. |
 | Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
