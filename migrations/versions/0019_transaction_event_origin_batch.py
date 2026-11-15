@@ -19,6 +19,10 @@ def upgrade() -> None:
         schema="source",
     )
     op.execute(
+        "ALTER TABLE source.transaction_event_history "
+        "DISABLE TRIGGER enforce_append_only"
+    )
+    op.execute(
         """
         UPDATE source.transaction_event_history AS e
         SET source_transaction_batch_id = tx.source_batch_id
@@ -46,6 +50,10 @@ def upgrade() -> None:
             f"{missing_origin} event(s) have no source transaction."
         )
 
+    op.execute(
+        "ALTER TABLE source.transaction_event_history "
+        "ENABLE TRIGGER enforce_append_only"
+    )
     op.alter_column(
         "transaction_event_history",
         "source_transaction_batch_id",
