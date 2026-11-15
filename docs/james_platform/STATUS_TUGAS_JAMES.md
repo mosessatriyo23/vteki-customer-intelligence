@@ -78,3 +78,117 @@ Pemeriksaan yang berhasil meliputi Ruff, MyPy, Black, tes Python, migrasi Postgr
 **Catatan:** Fase Coverage Schemathesis sementara dilewati karena masalah timeout. Keberhasilan CI ini tidak berarti seluruh fase pengujian kontrak API sudah selesai.
 
 Implementasi inti telah melewati pemeriksaan CI yang dikonfigurasi. Namun, penyelesaian keseluruhan masih memerlukan pembuktian SLA audit trace, pengujian operasional worker, isolasi akun database runtime, serta pengujian frontend end-to-end untuk setiap role.
+
+## Pembaruan status - 15 November 2026
+
+Branch yang diperiksa: `fix/schemathesis-coverage-diagnostic`.
+
+### Bukti validasi lokal terbaru
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Seluruh test suite | 831 passed |
+| PostgreSQL integration | 8 passed |
+| Ruff | All checks passed |
+| Black | 160 files unchanged |
+| Alembic heads | Satu head: `0016_transaction_event_provenance` |
+| Alembic current pada database scratch | `0016_transaction_event_provenance (head)` |
+| Database migrasi scratch | `vteki_migration_scratch` |
+
+Pengujian PostgreSQL menggunakan database scratch, bukan database utama.
+Hasil ini merupakan validasi lokal dan bukan bukti CI GitHub terbaru atau
+production readiness.
+
+### J-PLAT-01 - Transaction event availability dan lineage
+
+Implementasi yang tersedia:
+
+- Migration `0015_transaction_event_history` membuat tabel event history.
+- Migration `0016_transaction_event_provenance` menambahkan actor/source
+  provenance dan pengamanan timestamp penerimaan database.
+- Loader PostgreSQL membuat baseline `TRANSACTION_RECORDED`.
+- Service event mendukung pencatatan event, idempotency, dan referensi
+  correction.
+- Query as-of menerapkan batas `occurred_at` dan `available_at`.
+- Tes PostgreSQL bitemporal correction telah berhasil dijalankan.
+
+Dokumen kontrak telah dibuat di:
+`docs/james_platform/approved/historical_data_contract_v1.x.md`.
+
+Status: **IN PROGRESS**.
+
+Pekerjaan yang masih diperlukan:
+
+- Integrasi feed historis refund dan perubahan status dari sumber.
+- Final-state projection yang menangani correction secara deterministik.
+- Tes correction chain, beberapa refund, status change, replay konflik,
+  concurrency, dan stabilitas snapshot historis.
+- Review serta persetujuan kontrak oleh pemilik data dan lintas tim.
+
+Event baseline tidak membuktikan histori refund/status sebelum ingestion.
+Jangan mengklaim histori transaksi lama telah lengkap.
+
+### J-PLAT-02 - Identity as-of
+
+Implementasi yang tersedia:
+
+- Migration `0013_identity_mapping_history`.
+- Migration `0014_identity_batch_assignment_unique`.
+- `get_mapping_as_of()` untuk pembacaan identity mapping berdasarkan waktu.
+- `build_profiles_as_of()` untuk Customer360 menggunakan mapping historis.
+- Pengujian unit dan integrasi PostgreSQL telah dijalankan.
+
+Status: **IMPLEMENTED PARTIALLY - VERIFICATION PENDING**.
+
+Skenario split identity, unresolved identity, dan rekonstruksi dampak
+downstream masih perlu diverifikasi.
+
+### J-PLAT-03 - Multi-batch semantics
+
+Status: **PENDING VERIFICATION**.
+
+Masih diperlukan bukti PostgreSQL untuk:
+
+- Semantik data yang berasal dari beberapa batch.
+- Concurrency dan duplicate/replay.
+- Retry dan recovery.
+- Rollback serta partial failure.
+- Konsistensi snapshot ketika batch baru diterbitkan.
+
+### J-PLAT-04 - Runtime, security, dan interface evidence
+
+Status: **PENDING VERIFICATION**.
+
+Masih diperlukan:
+
+- Pengujian worker pada PostgreSQL nyata, termasuk timeout, retry,
+  cancellation, advisory lock, dan batas waktu pipeline.
+- Pembuktian isolasi akun login database untuk API dan worker.
+- Benchmark audit trace dengan target SLA maksimal 300 detik serta
+  penanganan pagination/truncation.
+- Browser E2E untuk persona dan workflow utama.
+
+### Status Gate C
+
+| Area | Status |
+|---|---|
+| J-PLAT-01 - Event availability dan lineage | IN PROGRESS |
+| J-PLAT-02 - Identity as-of | IMPLEMENTED PARTIALLY |
+| J-PLAT-03 - Multi-batch semantics | PENDING VERIFICATION |
+| J-PLAT-04 - Runtime evidence | PENDING VERIFICATION |
+| Gate C keseluruhan | NOT CLOSED |
+
+### Catatan repository
+
+Perubahan implementasi, migration, service, dan tes masih berada pada
+branch lokal. File backup lokal tidak termasuk file implementasi yang
+perlu dimasukkan ke commit.
+
+Belum ada klaim bahwa perubahan terbaru telah lulus CI GitHub. Jangan
+menutup Gate C sebelum acceptance criteria, bukti pengujian, dan review
+lintas tim terpenuhi.
+
+**Kesimpulan:** validasi lokal terbaru berhasil dengan 831 tes lulus.
+Fondasi transaction event history dan identity as-of telah berkembang,
+tetapi masih ada pekerjaan integrasi sumber, rekonstruksi histori,
+multi-batch, dan runtime yang harus diselesaikan.

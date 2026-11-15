@@ -5,7 +5,7 @@ import json
 import tempfile
 import unittest
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import create_engine, select
@@ -15,9 +15,11 @@ from sqlalchemy.pool import StaticPool
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.models import (
     GoldenCustomer,
+    IdentityMappingHistory,
     IngestionBatch,
     IngestionRawRow,
     ProfileSnapshot,
+    RegistryVersion,
     ReviewAuditLog,
     ReviewQueueItem,
     RFMLifecycleSnapshot,
@@ -103,6 +105,13 @@ class PersistenceTests(unittest.TestCase):
                 (decisions[0].id, decisions[0].created_at), (original_id, original_time)
             )
             self.assertEqual(registry.get_existing_mapping(), first_mapping)
+            history = session.scalars(
+                select(IdentityMappingHistory).where(
+                    IdentityMappingHistory.source_batch_id == "replay-batch"
+                )
+            ).all()
+            self.assertEqual(len(history), 2)
+            self.assertEqual({row.source_customer_id for row in history}, {"a", "b"})
             self.assertEqual(len(session.scalars(select(ReviewQueueItem)).all()), 1)
             changed = deepcopy(result)
             changed["decisions"][0]["reason"] = "changed evidence"
@@ -112,6 +121,89 @@ class PersistenceTests(unittest.TestCase):
             self.assertEqual(
                 session.scalars(select(MatchDecision)).one().reason, "single identifier"
             )
+
+    def test_identity_mapping_as_of_preserves_history(self):
+        initial_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        merge_time = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add(
+                RegistryVersion(
+                    version_tag="asof-v1",
+                    algorithm="test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Identity as-of test",
+                    created_at=initial_time,
+                )
+            )
+            session.add_all(
+                [
+                    GoldenCustomer(
+                        golden_customer_id="asof-old",
+                        first_source_batch_id="asof-batch-1",
+                        anchor_source_id="source-asof",
+                        status="APPROVED",
+                        created_at=initial_time,
+                        updated_at=initial_time,
+                    ),
+                    GoldenCustomer(
+                        golden_customer_id="asof-new",
+                        first_source_batch_id="asof-batch-2",
+                        anchor_source_id="source-asof",
+                        status="APPROVED",
+                        created_at=merge_time,
+                        updated_at=merge_time,
+                    ),
+                ]
+            )
+            session.flush()
+
+            session.add_all(
+                [
+                    IdentityMappingHistory(
+                        source_customer_id="source-asof",
+                        golden_customer_id="asof-old",
+                        registry_version="asof-v1",
+                        source_batch_id="asof-batch-1",
+                        assignment_type="PROVISIONAL",
+                        event_type="BASELINE",
+                        effective_at=initial_time,
+                        recorded_at=initial_time,
+                    ),
+                    IdentityMappingHistory(
+                        source_customer_id="source-asof",
+                        golden_customer_id="asof-new",
+                        registry_version="asof-v1",
+                        source_batch_id="asof-batch-2",
+                        assignment_type="MANUAL_OVERRIDE",
+                        event_type="MANUAL_MERGE",
+                        effective_at=merge_time,
+                        recorded_at=merge_time,
+                    ),
+                ]
+            )
+            session.commit()
+
+            registry = PersistentIdentityRegistry(session)
+
+            before_merge = registry.get_mapping_as_of(
+                effective_at=merge_time - timedelta(seconds=1),
+                recorded_at=merge_time + timedelta(days=1),
+            )
+            self.assertEqual(before_merge, {"source-asof": "asof-old"})
+
+            after_merge = registry.get_mapping_as_of(
+                effective_at=merge_time + timedelta(seconds=1),
+                recorded_at=merge_time + timedelta(days=1),
+            )
+            self.assertEqual(after_merge, {"source-asof": "asof-new"})
+
+            old_knowledge = registry.get_mapping_as_of(
+                effective_at=merge_time + timedelta(days=1),
+                recorded_at=merge_time - timedelta(seconds=1),
+            )
+            self.assertEqual(old_knowledge, {"source-asof": "asof-old"})
 
     def test_pg_loader_valid_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -294,7 +386,43 @@ class PersistenceTests(unittest.TestCase):
                 status="PENDING",
                 created_at=datetime.now(timezone.utc),
             )
+            initial_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+            session.add(
+                RegistryVersion(
+                    version_tag="v1",
+                    algorithm="test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Identity merge as-of test",
+                    created_at=initial_time,
+                )
+            )
             session.add_all([g1, g2, m1, m2, q_item])
+            session.flush()
+            session.add_all(
+                [
+                    IdentityMappingHistory(
+                        source_customer_id="s1",
+                        golden_customer_id="g-101",
+                        registry_version="v1",
+                        source_batch_id="b1",
+                        assignment_type="PROVISIONAL",
+                        event_type="BASELINE",
+                        effective_at=initial_time,
+                        recorded_at=initial_time,
+                    ),
+                    IdentityMappingHistory(
+                        source_customer_id="s2",
+                        golden_customer_id="g-102",
+                        registry_version="v1",
+                        source_batch_id="b1",
+                        assignment_type="PROVISIONAL",
+                        event_type="BASELINE",
+                        effective_at=initial_time,
+                        recorded_at=initial_time,
+                    ),
+                ]
+            )
             session.commit()
             queue_id = q_item.id
 
@@ -321,6 +449,49 @@ class PersistenceTests(unittest.TestCase):
             m2_updated = session.get(SourceIdentityMapping, "s2")
             self.assertEqual(m2_updated.golden_customer_id, "g-101")
             self.assertEqual(m2_updated.assignment_type, "MANUAL_OVERRIDE")
+
+            history = session.scalars(
+                select(IdentityMappingHistory).where(
+                    IdentityMappingHistory.event_type == "MANUAL_MERGE"
+                )
+            ).all()
+            self.assertEqual(len(history), 1)
+            self.assertEqual({row.source_customer_id for row in history}, {"s2"})
+            self.assertEqual(
+                {row.correlation_id for row in history}, {"corr-test-12345"}
+            )
+            self.assertEqual({row.reviewer_id for row in history}, {self.user_id})
+            # Verify bitemporal identity mapping using the real merge event.
+            merge_event = next(row for row in history if row.source_customer_id == "s2")
+            merge_effective_at = merge_event.effective_at
+            merge_recorded_at = merge_event.recorded_at
+
+            # SQLite may return timezone-aware columns as naive datetimes.
+            if merge_effective_at.tzinfo is None:
+                merge_effective_at = merge_effective_at.replace(tzinfo=timezone.utc)
+            if merge_recorded_at.tzinfo is None:
+                merge_recorded_at = merge_recorded_at.replace(tzinfo=timezone.utc)
+
+            before_effective_time = merge_effective_at - timedelta(microseconds=1)
+            after_recorded_time = merge_recorded_at + timedelta(seconds=1)
+
+            before_merge = reg.get_mapping_as_of(
+                effective_at=before_effective_time,
+                recorded_at=after_recorded_time,
+            )
+            self.assertEqual(before_merge, {"s1": "g-101", "s2": "g-102"})
+
+            after_merge = reg.get_mapping_as_of(
+                effective_at=merge_effective_at + timedelta(seconds=1),
+                recorded_at=after_recorded_time,
+            )
+            self.assertEqual(after_merge, {"s1": "g-101", "s2": "g-101"})
+
+            old_knowledge = reg.get_mapping_as_of(
+                effective_at=merge_effective_at + timedelta(seconds=1),
+                recorded_at=merge_recorded_at - timedelta(microseconds=1),
+            )
+            self.assertEqual(old_knowledge, {"s1": "g-101", "s2": "g-102"})
 
     def test_customer360_and_segmentation_snapshot_persistence(self):
         cutoff = datetime(2026, 9, 6, 23, 59, 59, tzinfo=timezone.utc)
