@@ -143,6 +143,7 @@ def _validate_existing_branches(
     return new_rows
 
 
+
 def _insert_branch_rows(
     session: Session,
     table: sa.Table,
@@ -155,20 +156,18 @@ def _insert_branch_rows(
     dialect = session.get_bind().dialect.name
 
     if dialect == "postgresql":
-        statement = (
+        session.execute(
             pg_insert(table)
             .values(rows)
             .on_conflict_do_nothing(index_elements=[table.c.branch_code])
         )
-        session.execute(statement)
 
     elif dialect == "sqlite":
-        statement = (
+        session.execute(
             sqlite_insert(table)
             .values(rows)
             .on_conflict_do_nothing(index_elements=[table.c.branch_code])
         )
-        session.execute(statement)
 
     else:
         new_rows = _validate_existing_branches(session, table, rows)
@@ -179,6 +178,7 @@ def _insert_branch_rows(
     # Verify after insertion as well. This catches an existing branch whose
     # code matched but whose business attributes differ from the incoming row.
     _validate_existing_branches(session, table, rows)
+
 
 
 def _insert_typed_rows(
