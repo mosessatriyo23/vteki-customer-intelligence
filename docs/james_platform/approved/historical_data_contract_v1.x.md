@@ -210,7 +210,8 @@ not implemented without an approved design.
 | Documentation-update CI | [Workflow run 43752947824](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752947824): backend, frontend build, and frontend E2E jobs all passed. |
 | PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495610): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
 | Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495799): passed, including campaign approval/audit trace and identity review. |
-| Local full test suite | Latest local run after identity-as-of review-status correction: 837 passed; 15 PostgreSQL tests skipped because no PostgreSQL URL/service was available. |
+| Local full test suite | Latest full run against a fresh isolated PostgreSQL 15 database: 852 passed, 0 skipped, including all 15 PostgreSQL acceptance tests. |
+| Local PostgreSQL acceptance | `tests/integration/test_postgres_platform.py`: 15 passed against a newly migrated disposable PostgreSQL database with project permission scripts applied. |
 | Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
 | Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
 | James | Draft owner; implementation submitted for review in PR #35. |

@@ -332,7 +332,7 @@ lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
 | Pemeriksaan | Hasil |
 |---|---|
-| `pytest -q` lokal | 837 passed, 15 skipped karena PostgreSQL lokal tidak tersedia |
+| `pytest -q` lokal | 852 passed, 0 skipped; semua 15 PostgreSQL integration tests ikut berjalan pada database PostgreSQL 15 disposable yang baru |
 | PostgreSQL acceptance CI | [15 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495610) |
 | Populated migration upgrade | CI meng-upgrade database berisi data dari revision 0014 sampai Alembic head dan memverifikasi transaction/visit/membership lineage |
 | Runtime DB role | CI memverifikasi login non-superuser API/worker dan grant; E2E memakai login API runtime |
@@ -384,7 +384,7 @@ mengklaim status yang tidak diketahui.
 | Static review queue tidak memengaruhi status profil as-of | **DONE — lokal** | Regression test membuktikan queue yang menandai `REVIEW` menghasilkan `UNKNOWN` pada profile as-of; `build_profiles()` non-as-of tetap mempertahankan perilaku saat ini. |
 | Persistensi status historis yang tidak diketahui | **DONE — lokal** | Persistence test menerima serta menyimpan status `UNKNOWN`. |
 | Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
-| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped lokal; CI pada commit `db189b0` lulus untuk backend, 15 PostgreSQL tests, migration-upgrade, frontend build, dan E2E. CI dokumentasi setelahnya juga lulus. |
+| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 852 passed, 0 skipped, termasuk 15 PostgreSQL acceptance tests pada database baru; CI pada commit `db189b0` dan CI dokumentasi setelahnya lulus. |
 
 Perubahan ini memperjelas batas identity-as-of, tetapi tidak menutup Gate C:
 identity decision correction/revocation, source feed refund/status,
