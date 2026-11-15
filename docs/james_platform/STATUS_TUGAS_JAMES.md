@@ -299,8 +299,8 @@ feed historis lengkap.
 ## Pembaruan status - 16 November 2026 (platform/runtime follow-up)
 
 PR #35 tetap **OPEN / DRAFT**. James-owned follow-up sudah dipush sampai
-commit `ae3f3b05290f73299a9ed009965645616f400b56`. CI terbaru pada commit
-tersebut, [run 43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158),
+commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`. CI terbaru pada commit
+tersebut, [run 43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934),
 lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
 ### Perubahan James yang ditambahkan
@@ -329,11 +329,11 @@ lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
 | Pemeriksaan | Hasil |
 |---|---|
-| `pytest -q tests` lokal dan CI | 729 passed, 15 skipped; skip adalah PostgreSQL tests yang berjalan terpisah di CI |
-| PostgreSQL acceptance CI | [15 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239579) |
+| `pytest -q` lokal | 837 passed, 15 skipped karena PostgreSQL lokal tidak tersedia |
+| PostgreSQL acceptance CI | [15 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495610) |
 | Populated migration upgrade | CI meng-upgrade database berisi data dari revision 0014 sampai Alembic head dan memverifikasi transaction/visit/membership lineage |
 | Runtime DB role | CI memverifikasi login non-superuser API/worker dan grant; E2E memakai login API runtime |
-| Frontend E2E | [7 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239767), termasuk campaign approval/audit trace dan identity review |
+| Frontend E2E | [CI job lulus](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495799), termasuk campaign approval/audit trace dan identity review |
 | Ruff | Lulus |
 | Black | Lulus; 168 file unchanged setelah format script migrasi |
 | MyPy | Lulus; 88 source files |
@@ -381,10 +381,10 @@ mengklaim status yang tidak diketahui.
 | Static review queue tidak memengaruhi status profil as-of | **DONE — lokal** | Regression test membuktikan queue yang menandai `REVIEW` menghasilkan `UNKNOWN` pada profile as-of; `build_profiles()` non-as-of tetap mempertahankan perilaku saat ini. |
 | Persistensi status historis yang tidak diketahui | **DONE — lokal** | Persistence test menerima serta menyimpan status `UNKNOWN`. |
 | Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
-| Hasil validasi patch terbaru | **DONE — lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped; 13 focused tests, Ruff, Black, dan MyPy lulus. Belum ada hasil CI untuk perubahan lokal ini. |
+| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped lokal; CI pada commit `db189b0` lulus untuk backend, 15 PostgreSQL tests, migration-upgrade, frontend build, dan E2E. |
 
 Perubahan ini memperjelas batas identity-as-of, tetapi tidak menutup Gate C:
 identity decision correction/revocation, source feed refund/status,
 snapshot resmi, dan approval lintas tim tetap belum terpenuhi. PR #35 perlu
-memuat perubahan ini dan CI terbaru sebelum status implementasi diperbarui
-sebagai terverifikasi di GitHub.
+memuat perubahan ini dan CI terbaru telah lulus; PR tetap OPEN/DRAFT menunggu
+review dan approval lintas tim.

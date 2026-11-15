@@ -168,8 +168,8 @@ Implemented test coverage in the follow-up:
 - Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
 - A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
 
-CI run [43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158)
-on commit `ae3f3b05290f73299a9ed009965645616f400b56` passed all jobs. Its
+CI run [43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934)
+on commit `db189b0b7ee15db69cb1ad33175d0c12865c7451` passed all jobs. Its
 PostgreSQL acceptance job passed all 15 `test_postgres_platform.py` tests,
 the populated-database migration fixture upgraded rows from revision 0014
 through head, and the E2E job passed all 7 browser tests. Local PostgreSQL is
@@ -202,10 +202,10 @@ not implemented without an approved design.
 | Evidence / review | Status |
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
-| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), OPEN / DRAFT, head `ae3f3b05290f73299a9ed009965645616f400b56`. |
-| Follow-up CI | [Workflow run 43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158): backend, frontend build, and frontend E2E jobs all passed. |
-| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239579): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
-| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239767): 7 tests passed, including campaign approval/audit trace and identity review. |
+| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), OPEN / DRAFT, head `db189b0b7ee15db69cb1ad33175d0c12865c7451`. |
+| Follow-up CI | [Workflow run 43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934): backend, frontend build, and frontend E2E jobs all passed. |
+| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495610): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
+| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934/job/132929495799): passed, including campaign approval/audit trace and identity review. |
 | Local full test suite | Latest local run after identity-as-of review-status correction: 837 passed; 15 PostgreSQL tests skipped because no PostgreSQL URL/service was available. |
 | Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
 | Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
