@@ -193,11 +193,13 @@ Fondasi transaction event history dan identity as-of telah berkembang,
 tetapi masih ada pekerjaan integrasi sumber, rekonstruksi histori,
 multi-batch, dan runtime yang harus diselesaikan.
 
-## Pembaruan status - 16 November 2026 (follow-up PR #33)
+## Pembaruan status - 16 November 2026 (follow-up PR #35 untuk PR #33)
 
 Status di bawah ini menggantikan kesimpulan implementasi sebelumnya untuk
-follow-up Gate C. Perubahan lanjutan masih lokal dan belum memiliki commit,
-PR, atau hasil CI. Gate C tetap **NOT CLOSED**.
+follow-up Gate C. Implementasi ada di commit
+`3ccbc666aaaae04e03ac03a150d72981d579e2bd`, branch
+`fix/historical-data-gate-c-followup`, pada [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35).
+PR masih draft. Gate C tetap **NOT CLOSED**.
 
 ### Perubahan James yang sudah dibuat lokal
 
@@ -228,14 +230,14 @@ PR, atau hasil CI. Gate C tetap **NOT CLOSED**.
 | Item | Status | Bukti / blocker |
 |---|---|---|
 | Refund/status/cancellation feed historis | **BLOCKED** | Tidak ada feed sumber/connector refund atau status-change di repository. API menerima event dengan provenance eksplisit; timestamp historis tidak dibuat. Perlu feed dan kontrak sumber dari owner. |
-| Completed visit/membership renewal history | **IN PROGRESS** | Ledger dan loader ditambahkan untuk CSV yang tersedia. Perlu tes PostgreSQL setelah migration 0020 dan review Moses untuk penggunaan churn. |
-| Final-state projection | **IN PROGRESS** | Kode projection dan tes unit lokal ada. Belum lulus tes PostgreSQL/CI; feed yang hilang membuat cakupan hanya `OBSERVED_EVENTS_ONLY`. |
-| Event batch A → B → C | **IN PROGRESS** | API/schema/tes integrasi ditambahkan. Perlu menjalankan acceptance test terhadap PostgreSQL. |
+| Completed visit/membership renewal history | **DONE — code + PostgreSQL CI** | Ledger/loader dan bitemporal read ditambahkan; CI PostgreSQL integration 11/11 lulus. Moses tetap perlu review sebelum renewal dipakai untuk churn. |
+| Final-state projection | **IN PROGRESS** | Kode projection dan tes unit ada; PostgreSQL CI lulus. Refund/status source feed masih hilang, jadi coverage hanya `OBSERVED_EVENTS_ONLY`. |
+| Event batch A → B → C | **DONE — code + PostgreSQL CI** | Tes PostgreSQL batch A/B/C, as-of, idempotency/conflict dan status lulus. |
 | Identity as-of merge/split/coverage | **IN PROGRESS** | Merge integration test yang ada, tes split/baseline baru, dan coverage status eksplisit. Review-required history/revocation dan stabilitas snapshot belum lengkap. |
 | Official historical snapshot | **BLOCKED** | Utility C360 masih memakai inbound dan review queue statis; belum boleh menjadi feature/training source. |
-| Multi-batch acceptance | **IN PROGRESS** | Loader memakai advisory lock dan satu transaksi serta cek checksum; tes baru/yang ada belum membuktikan semua kasus concurrency, partial recovery, rollback/no orphan, dan stabilitas published snapshot di PostgreSQL. |
-| Kontrak dan status | **IN PROGRESS** | Kontrak v1.1 tetap DRAFT; dokumen menjelaskan decision table, feed gaps, approval, dan test status. |
-| PR/commit/link CI | **BLOCKED** | Belum dibuat/dipush. Follow-up belum memiliki CI link. |
+| Multi-batch acceptance | **IN PROGRESS** | PostgreSQL CI membuktikan retry/concurrent duplicate batch, rollback/recovery, katalog per-batch, dan filter PUBLISHED. Overlap/master-data/snapshot immutability masih perlu bukti tambahan. |
+| Kontrak dan status | **DONE — DRAFT diperbarui** | Kontrak v1.1 berisi decision table, feed gaps, acceptance status dan approval eksplisit yang masih pending. |
+| PR/commit/link CI | **DONE — PR draft + CI hijau** | PR #35 dan commit di atas; seluruh checks CI selesai sukses. Belum merge. |
 | Approval Moses/Christ/cross-team | **BLOCKED** | Memerlukan review dan keputusan pihak terkait; James tidak menyatakan approval atas nama mereka. |
 | DB runtime role isolation, worker operations, audit benchmark, frontend E2E, runbook | **IN PROGRESS / VERIFICATION PENDING** | Di luar P0 yang sedang dikerjakan; tetap belum boleh dinyatakan VERIFIED tanpa bukti deployment/runtime. |
 | Physical table partitioning | **NOT APPLICABLE saat ini** | Belum ada workload, retensi, atau partition key yang disetujui untuk membenarkan migrasi fisik. |
@@ -248,20 +250,23 @@ PR, atau hasil CI. Gate C tetap **NOT CLOSED**.
 - Tes identity lokal: baseline migration tidak mengklaim pre-migration
   history; cutoff split mempertahankan mapping lama; unknown source tidak
   diberi Golden ID.
-- Tes PostgreSQL didefinisikan di
+- Tes PostgreSQL di
   `tests/integration/test_postgres_platform.py` untuk batch A/B/C,
   idempotency/conflict, late event, visit/membership availability,
   concurrency duplicate-batch, rollback/recovery, katalog per-batch, dan
   filter batch PUBLISHED.
 - Hasil PostgreSQL lokal follow-up: **tidak dijalankan** karena
   `VTEKI_TEST_POSTGRES_URL` tidak dikonfigurasi dan Docker/PostgreSQL tidak
-  tersedia. Seluruh 11 kasus PostgreSQL ter-skip, bukan lulus.
+  tersedia. Karena itu tes lokal PG ter-skip.
 - Full local Python suite: **831 passed, 11 skipped**.
 - Ruff: **All checks passed**; Black: **90 files unchanged**; MyPy:
   **Success, no issues found in 88 source files**; Alembic: satu head,
   `0020_business_event_history`.
-- CI follow-up: **belum tersedia**. CI lama PR #33 (dilaporkan reviewer
-  sebagai lulus) bukan bukti untuk perubahan ini.
+- [CI PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104):
+  **semua jobs lulus**. Job PostgreSQL menjalankan migration dan
+  `test_postgres_platform.py`: **11 passed**. Frontend build dan RBAC E2E
+  juga lulus. Unit job melaporkan 724 passed dan 11 PostgreSQL tests skipped;
+  kasus PostgreSQL tersebut lulus pada dedicated step setelah migration.
 
 Contoh query/projection as-of:
 
@@ -287,5 +292,6 @@ feed historis lengkap.
 - Event transaction baseline tidak membuktikan histori refund/status lama.
 - Ground truth tidak boleh menjadi input matching, feature, label, atau
   training.
-- Sampai P0 selesai, PostgreSQL/CI lulus, dan review lintas tim dicatat:
+- Sampai P0 selesai, seluruh feed dan acceptance coverage tersedia, dan
+  review lintas tim dicatat:
   `training_ready=false`, `experiment_ready=false`, `final_model=false`.

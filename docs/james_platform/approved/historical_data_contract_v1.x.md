@@ -144,23 +144,37 @@ Implemented test coverage in this change:
 - PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
 
+PostgreSQL CI evidence: migration through 0020 succeeded and all 11
+`test_postgres_platform.py` tests passed in the dedicated PostgreSQL CI job.
+The tests cover batch A/B/C, replay/conflicting key, late availability,
+visit/membership event history, published-batch filtering, concurrent
+duplicate-batch ingestion, rollback/recovery, and catalogue batch references.
+
 Still required before Gate C:
 
-- Execute PostgreSQL tests after Alembic upgrade through migration 0020; test equal database `available_at` values in PostgreSQL, concurrent event/batch retries, partial failure/recovery, rollback/no orphan, and snapshot immutability in a provisioned PostgreSQL CI job.
-- Integrate actual refund/status/cancellation/correction source feeds and prove coverage completeness. Do not synthesize missing events.
-- Extend identity tests for split, unresolved/review-required status history, corrected/revoked decisions, and merge/split stability of published snapshots.
-- Build official end-to-end feature snapshots or keep the current utility out of Moses training.
+- Test equal database `available_at` values in PostgreSQL; current tie-order
+  acceptance is covered by the pure deterministic projection test.
+- Integrate actual refund/status/cancellation/correction source feeds and
+  prove coverage completeness. Do not synthesize missing events.
+- Extend identity tests for review-required history, corrected/revoked
+  decisions, unresolved state, and merge/split stability of published
+  snapshots.
+- Test batch overlap/source-ID conflict, master-data update policy, and
+  published snapshot immutability after later batches on PostgreSQL.
+- Build official end-to-end feature snapshots or keep the current utility
+  out of Moses training.
 
 ## 9. Evidence and approval
 
 | Evidence / review | Status |
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
-| Follow-up CI link | Not available yet; this change has not been pushed as a PR. |
-| PostgreSQL acceptance result for this change | Not run: `VTEKI_TEST_POSTGRES_URL` is not configured and Docker/PostgreSQL is unavailable in the current environment; all 11 PostgreSQL integration cases skipped. |
-| Local full test suite | 831 passed, 11 PostgreSQL tests skipped. |
+| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), draft, commit `3ccbc666aaaae04e03ac03a150d72981d579e2bd`. |
+| Follow-up CI | [Workflow run 43747326104](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104): all jobs passed. |
+| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104/job/132913394806): migrations succeeded and all 11 `test_postgres_platform.py` tests passed. |
+| Local full test suite | 831 passed; 11 PostgreSQL tests skipped locally because no PostgreSQL URL/service was available. |
 | Ruff / Black / MyPy / Alembic | Ruff passed after import sorting; Black check passed for 90 Python files; MyPy passed for 88 source files; Alembic has one head, `0020_business_event_history`. |
-| James | Draft owner; implementation review pending. |
+| James | Draft owner; implementation submitted for review in PR #35. |
 | Moses | Point-in-time review pending. |
 | Christ | Business-value review pending if definitions affect targets. |
 | Cross-team Gate C | Pending. |
