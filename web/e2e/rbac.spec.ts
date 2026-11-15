@@ -302,7 +302,7 @@ test.describe('Frontend RBAC - empat role', () => {
     await page
       .getByRole('button', { name: 'Jalankan Penelusuran Trace' })
       .click()
-    await expect(page.getByText('campaign.approved')).toBeVisible()
+    await expect(page.getByText('campaign.approved', { exact: true })).toBeVisible()
   })
 
   test('Operator membuat dan menyelesaikan identity review', async ({ page }) => {
