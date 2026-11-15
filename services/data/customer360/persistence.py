@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from api.models import ProfileSnapshot
 
 _ALLOWED_IDENTITY_STATUSES = frozenset(
-    {"PROVISIONAL", "REVIEW_REQUIRED", "APPROVED", "REJECTED"}
+    {"PROVISIONAL", "REVIEW_REQUIRED", "APPROVED", "REJECTED", "UNKNOWN"}
 )
 
 

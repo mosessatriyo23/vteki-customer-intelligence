@@ -1,4 +1,4 @@
-# Historical Data Contract v1.2
+# Historical Data Contract v1.3
 
 **Status:** DRAFT — implementation changes require review; Gate C is not closed
 **Owner:** James — Platform & Historical Data
@@ -13,6 +13,7 @@
 | 1.0 | 15 November 2026 | Initial event availability and provenance contract; explicitly draft. |
 | 1.1 | 16 November 2026 | Separate transaction-origin and event-receipt batches; define projection/correction rules; persist visit and membership source events; make migration-0013 coverage boundary explicit; record outstanding evidence and source-feed gaps. |
 | 1.2 | 16 November 2026 | Add worker job idempotency and cancellation contract; expand PostgreSQL overlap/master-data/snapshot tests, frontend workflow tests, populated-database migration verification, and deploy/recovery runbook. Approval remains pending. |
+| 1.3 | 16 November 2026 | Prevent `build_profiles_as_of()` from deriving historical identity status from the static review queue; emit `UNKNOWN` until bitemporal review-decision history exists. |
 
 ## 1. Time and provenance
 
@@ -130,16 +131,28 @@ Migration 0013 creates a `BASELINE` at migration time. It does **not** reconstru
 
 `get_mapping_as_of()` raises `IdentityHistoryCoverageError` for a blocked cutoff. Unresolved sources are not assigned a fabricated Golden ID. Current `review_queue` is not an as-of review history; it must not be used to claim historical review status.
 
+`build_profiles_as_of()` therefore reports `identity_status="UNKNOWN"` rather
+than reading the latest/static `review_queue.csv`. This avoids retroactively
+applying current review state to a historical cutoff. The status remains
+unknown until review-decision events have their own effective/available/recorded
+history, including correction and revocation semantics.
+
 ## 7. Customer 360 scope
 
-`build_profiles_as_of()` is a **limited identity-aware profile utility**, not the official historical feature/training source. Only its identity mapping lookup is bitemporal. It still reads inbound transaction, visit, membership, and review-queue snapshots; these inputs do not all satisfy:
+`build_profiles_as_of()` is a **limited identity-aware profile utility**, not the official historical feature/training source. Only its identity mapping lookup is bitemporal. It still reads inbound transaction, visit, and membership snapshots; these inputs do not all satisfy:
 
 ```text
 effective_at <= feature_cutoff
 available_at <= known_at
 ```
 
-The function therefore does not guarantee historical refund, status, or review state. Official historical snapshots still need registry/rule versions, source batch, `known_at`, checksum, immutable publication semantics, and acceptance tests. Until then: `training_ready=false`, `experiment_ready=false`, `final_model=false`.
+The function therefore does not guarantee historical refund, status, or review state. The non-as-of `build_profiles()` path still reads the static review queue for
+its current development status. The as-of path deliberately emits
+`identity_status="UNKNOWN"` because bitemporal review decisions are not
+implemented. Official historical snapshots still need registry/rule versions,
+source batch, `known_at`, checksum, immutable publication semantics, and
+acceptance tests. Until then: `training_ready=false`, `experiment_ready=false`,
+`final_model=false`.
 
 ## 8. Acceptance test matrix
 
@@ -148,6 +161,9 @@ Implemented test coverage in the follow-up:
 - Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`.
 - PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable; source-ID overlap and master-data update rejection; snapshot replay immutability; unique worker idempotency key.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
+- Customer360 regression: changing the static review queue cannot make
+  `build_profiles_as_of()` claim historical `REVIEW_REQUIRED`; status is
+  `UNKNOWN` until review history is available.
 - Worker unit tests: retry/backoff, hard timeout, child-process cancellation, stale claim fencing, and recovery of a cancelled job.
 - Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
 - A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
@@ -165,9 +181,11 @@ Still required before Gate C:
   acceptance is covered by the pure deterministic projection test.
 - Integrate actual refund/status/cancellation/correction source feeds and
   prove coverage completeness. Do not synthesize missing events.
-- Extend identity tests for review-required history, corrected/revoked
-  decisions, unresolved state, and merge/split stability of published
-  snapshots.
+- Implement append-only bitemporal identity review-decision history, including
+  correction/revocation semantics, and add PostgreSQL acceptance tests. Current
+  `build_profiles_as_of()` deliberately returns `UNKNOWN` for review status.
+- Extend identity tests for unresolved state and merge/split stability of
+  published snapshots.
 - Publish immutable snapshot checksums/`known_at` and complete all feature
   inputs only if/when an official historical training snapshot is approved.
 - Build official end-to-end feature snapshots or keep the current utility
@@ -188,7 +206,8 @@ not implemented without an approved design.
 | Follow-up CI | [Workflow run 43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158): backend, frontend build, and frontend E2E jobs all passed. |
 | PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239579): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
 | Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239767): 7 tests passed, including campaign approval/audit trace and identity review. |
-| Local full test suite | 729 passed; 15 PostgreSQL tests skipped locally because no PostgreSQL URL/service was available. |
+| Local full test suite | Latest local run after identity-as-of review-status correction: 837 passed; 15 PostgreSQL tests skipped because no PostgreSQL URL/service was available. |
+| Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
 | Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
 | James | Draft owner; implementation submitted for review in PR #35. |
 | Moses | Point-in-time review pending. |

@@ -366,3 +366,25 @@ tim. Runbook dan kontrak tetap berstatus draft. CI hijau membuktikan kode
 dan acceptance tests yang terpasang, bukan source-feed completeness,
 production readiness, atau persetujuan Gate C. Jangan menyimpulkan bahwa
 Gate C telah ditutup.
+
+## Pembaruan identity-as-of — 16 November 2026
+
+Perbaikan lokal terbaru memastikan `build_profiles_as_of()` tidak membaca
+`review_queue.csv` untuk menetapkan status historis. Karena belum ada ledger
+review-decision yang bitemporal, profil as-of kini menyatakan
+`identity_status=UNKNOWN` alih-alih menganggap status review terkini berlaku
+secara retroaktif. `UNKNOWN` juga dapat disimpan oleh adapter snapshot tanpa
+mengklaim status yang tidak diketahui.
+
+| Butir | Status | Bukti / blocker |
+|---|---|---|
+| Static review queue tidak memengaruhi status profil as-of | **DONE — lokal** | Regression test membuktikan queue yang menandai `REVIEW` menghasilkan `UNKNOWN` pada profile as-of; `build_profiles()` non-as-of tetap mempertahankan perilaku saat ini. |
+| Persistensi status historis yang tidak diketahui | **DONE — lokal** | Persistence test menerima serta menyimpan status `UNKNOWN`. |
+| Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
+| Hasil validasi patch terbaru | **DONE — lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped; 13 focused tests, Ruff, Black, dan MyPy lulus. Belum ada hasil CI untuk perubahan lokal ini. |
+
+Perubahan ini memperjelas batas identity-as-of, tetapi tidak menutup Gate C:
+identity decision correction/revocation, source feed refund/status,
+snapshot resmi, dan approval lintas tim tetap belum terpenuhi. PR #35 perlu
+memuat perubahan ini dan CI terbaru sebelum status implementasi diperbarui
+sebagai terverifikasi di GitHub.

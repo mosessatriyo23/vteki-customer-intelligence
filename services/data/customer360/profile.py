@@ -11,6 +11,10 @@ import csv
 from datetime import datetime, timedelta
 from pathlib import Path
 
+_IDENTITY_STATUSES = frozenset(
+    {"PROVISIONAL", "REVIEW_REQUIRED", "APPROVED", "REJECTED", "UNKNOWN"}
+)
+
 
 def read(path):
     with Path(path).open(newline="", encoding="utf-8") as stream:
@@ -23,6 +27,7 @@ def build_profiles(
     cutoff: datetime,
     *,
     identity_mapping: dict[str, str] | None = None,
+    identity_status_override: str | None = None,
 ) -> list[dict]:
     import json
 
@@ -60,14 +65,21 @@ def build_profiles(
         for source, golden in mapping.items()
     ):
         raise ValueError("Identity mapping must contain non-empty string IDs")
+    if identity_status_override is not None and (
+        identity_status_override not in _IDENTITY_STATUSES
+    ):
+        raise ValueError(
+            f"Unsupported identity status override: {identity_status_override!r}"
+        )
     if len(mapping) != len(rows) or set(mapping) != set(sources):
         raise ValueError(
             "UNKNOWN: identity history does not resolve every source in this snapshot"
         )
     needs_review = set()
-    for row in read(resolution / "review_queue.csv"):
-        for field in ("left_source_id", "right_source_id"):
-            needs_review.add(mapping[row[field]])
+    if identity_status_override is None:
+        for row in read(resolution / "review_queue.csv"):
+            for field in ("left_source_id", "right_source_id"):
+                needs_review.add(mapping[row[field]])
     profiles = {}
     for source, golden in mapping.items():
         if sources[source]["join_date"] > cutoff.date().isoformat():
@@ -77,7 +89,11 @@ def build_profiles(
                 golden_customer_id=golden,
                 cutoff_at=cutoff.isoformat(),
                 identity_status=(
-                    "REVIEW_REQUIRED" if golden in needs_review else "PROVISIONAL"
+                    identity_status_override
+                    if identity_status_override is not None
+                    else (
+                        "REVIEW_REQUIRED" if golden in needs_review else "PROVISIONAL"
+                    )
                 ),
                 source_identity_count=0,
                 first_join_date=sources[source]["join_date"],
@@ -174,4 +190,5 @@ def build_profiles_as_of(
         resolution,
         cutoff,
         identity_mapping=snapshot.mapping,
+        identity_status_override="UNKNOWN",
     )

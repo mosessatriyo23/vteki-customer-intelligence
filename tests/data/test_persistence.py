@@ -692,7 +692,15 @@ class PersistenceTests(unittest.TestCase):
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
-            session.add(g)
+            unknown_status_golden = GoldenCustomer(
+                golden_customer_id="gold-unknown",
+                first_source_batch_id="b1",
+                anchor_source_id="s2",
+                status="PROVISIONAL",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            )
+            session.add_all([g, unknown_status_golden])
             session.commit()
 
             c360_saved = save_profile_snapshots(
@@ -702,6 +710,19 @@ class PersistenceTests(unittest.TestCase):
                 session=session,
             )
             self.assertEqual(c360_saved, 1)
+
+            unknown_status_profile = {
+                **mock_c360[0],
+                "golden_customer_id": "gold-unknown",
+                "identity_status": "UNKNOWN",
+            }
+            unknown_status_saved = save_profile_snapshots(
+                profiles=[unknown_status_profile],
+                batch_id="batch_01",
+                registry_version="v1.1",
+                session=session,
+            )
+            self.assertEqual(unknown_status_saved, 1)
 
             seg_saved = save_segmentation_snapshots(
                 segments=mock_seg,
@@ -715,6 +736,12 @@ class PersistenceTests(unittest.TestCase):
             c360_snap = session.scalars(select(ProfileSnapshot)).first()
             self.assertIsNotNone(c360_snap)
             self.assertEqual(c360_snap.retained_revenue, 1500000)
+            unknown_status_snapshot = session.scalars(
+                select(ProfileSnapshot).where(
+                    ProfileSnapshot.golden_customer_id == "gold-unknown"
+                )
+            ).one()
+            self.assertEqual(unknown_status_snapshot.identity_status, "UNKNOWN")
 
             seg_snap = session.scalars(select(RFMLifecycleSnapshot)).first()
             self.assertIsNotNone(seg_snap)
