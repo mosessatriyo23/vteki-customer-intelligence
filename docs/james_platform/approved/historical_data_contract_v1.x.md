@@ -152,11 +152,12 @@ Implemented test coverage in the follow-up:
 - Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
 - A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
 
-The preceding PostgreSQL CI run migrated through 0020 and passed all 11
-`test_postgres_platform.py` tests. The new PostgreSQL tests and populated
-migration-upgrade fixture are awaiting CI on the follow-up commit; local
-PostgreSQL/Docker is unavailable, so their results must not be inferred from
-the preceding run.
+CI run [43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158)
+on commit `ae3f3b05290f73299a9ed009965645616f400b56` passed all jobs. Its
+PostgreSQL acceptance job passed all 15 `test_postgres_platform.py` tests,
+the populated-database migration fixture upgraded rows from revision 0014
+through head, and the E2E job passed all 7 browser tests. Local PostgreSQL is
+unavailable; these database/E2E results are from CI, not local execution.
 
 Still required before Gate C:
 
@@ -183,11 +184,12 @@ not implemented without an approved design.
 | Evidence / review | Status |
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
-| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), draft, commit `3ccbc666aaaae04e03ac03a150d72981d579e2bd`. |
-| Follow-up CI | [Workflow run 43747326104](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104): all jobs passed. |
-| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104/job/132913394806): migrations succeeded and all 11 `test_postgres_platform.py` tests passed. |
-| Local full test suite | 831 passed; 11 PostgreSQL tests skipped locally because no PostgreSQL URL/service was available. |
-| Ruff / Black / MyPy / Alembic | Ruff passed after import sorting; Black check passed for 90 Python files; MyPy passed for 88 source files; Alembic has one head, `0020_business_event_history`. |
+| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), OPEN / DRAFT, head `ae3f3b05290f73299a9ed009965645616f400b56`. |
+| Follow-up CI | [Workflow run 43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158): backend, frontend build, and frontend E2E jobs all passed. |
+| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239579): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
+| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239767): 7 tests passed, including campaign approval/audit trace and identity review. |
+| Local full test suite | 729 passed; 15 PostgreSQL tests skipped locally because no PostgreSQL URL/service was available. |
+| Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
 | James | Draft owner; implementation submitted for review in PR #35. |
 | Moses | Point-in-time review pending. |
 | Christ | Business-value review pending if definitions affect targets. |
@@ -195,9 +197,10 @@ not implemented without an approved design.
 
 Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
 
-The next follow-up commit adds migration 0021 and more acceptance tests.
-Its CI result must be linked here only after the actual run completes.
-See [James deploy and recovery runbook](../RUNBOOK_GATE_C.md).
+The CI run above validates the current implementation but does not close
+remaining feed-coverage, historical identity, official-snapshot, production
+operations, or approval gaps. See
+[James deploy and recovery runbook](../RUNBOOK_GATE_C.md).
 
 ## 10. Training and ground-truth safeguards
 

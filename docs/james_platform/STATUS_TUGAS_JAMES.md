@@ -296,66 +296,73 @@ feed historis lengkap.
   review lintas tim dicatat:
   `training_ready=false`, `experiment_ready=false`, `final_model=false`.
 
-  ## Pembaruan status - 16 November 2026 (platform/runtime follow-up lokal)
+## Pembaruan status - 16 November 2026 (platform/runtime follow-up)
 
-  PR #35 tetap **OPEN / DRAFT**. Perubahan lanjutan di bawah ini sudah ada di
-  working tree, tetapi belum menjadi commit dan belum memiliki hasil CI baru.
-  Karena itu, hasil workflow pada commit `26e2095` tidak dianggap sebagai
-  validasi untuk perubahan ini.
+PR #35 tetap **OPEN / DRAFT**. James-owned follow-up sudah dipush sampai
+commit `ae3f3b05290f73299a9ed009965645616f400b56`. CI terbaru pada commit
+tersebut, [run 43751177158](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158),
+lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
-  ### Perubahan James yang ditambahkan
+### Perubahan James yang ditambahkan
 
-  - Migration 0021 menambahkan `idempotency_key` nullable dengan unique
-    constraint pada `act.batch_jobs`, kompatibel dengan row lama.
-  - API job mendukung replay idempotent, menolak pemakaian key dengan payload,
-    jenis job, atau batas attempt yang berbeda, dan menyediakan cancellation
-    untuk job queued/running.
-  - Worker memeriksa cancellation saat handler berjalan, menghentikan proses
-    handler, mencatat status/audit cancellation, dan memulihkan permintaan
-    cancellation yang lease-nya kedaluwarsa.
-  - CI menyiapkan kredensial login khusus API/worker dan memverifikasi koneksi
-    runtime non-superuser; E2E API menggunakan role API, bukan administrator.
-  - E2E browser menambah alur persetujuan campaign → audit trace dan pembuatan
-    serta keputusan identity review.
-  - PostgreSQL test definitions menambah overlap source ID, konflik update
-    master data, replay snapshot immutable, dan uniqueness idempotency job.
-  - Script CI memulai dari database populated pada revision 0014, meng-upgrade
-    ke head, lalu memeriksa transaction/visit/membership event lineage dan
-    occurrence time.
-  - Runbook deploy, rollback, backup/restore, monitoring, dan recovery tersedia
-    sebagai draft di `docs/james_platform/RUNBOOK_GATE_C.md`.
+- Migration 0021 menambahkan `idempotency_key` nullable dengan unique
+  constraint pada `act.batch_jobs`, kompatibel dengan row lama.
+- API job mendukung replay idempotent, menolak pemakaian key dengan payload,
+  jenis job, atau batas attempt yang berbeda, dan menyediakan cancellation
+  untuk job queued/running.
+- Worker memeriksa cancellation saat handler berjalan, menghentikan proses
+  handler, mencatat status/audit cancellation, dan memulihkan permintaan
+  cancellation yang lease-nya kedaluwarsa.
+- CI menyiapkan kredensial login khusus API/worker dan memverifikasi koneksi
+  runtime non-superuser; E2E API menggunakan role API, bukan administrator.
+- E2E browser menambah alur persetujuan campaign → audit trace dan pembuatan
+  serta keputusan identity review.
+- PostgreSQL test definitions menambah overlap source ID, konflik update
+  master data, replay snapshot immutable, dan uniqueness idempotency job.
+- Script CI memulai dari database populated pada revision 0014, meng-upgrade
+  ke head, lalu memeriksa transaction/visit/membership event lineage dan
+  occurrence time.
+- Runbook deploy, rollback, backup/restore, monitoring, dan recovery tersedia
+  sebagai draft di [RUNBOOK_GATE_C.md](./RUNBOOK_GATE_C.md).
 
-  ### Bukti validasi lokal untuk working tree
+### Bukti validasi
 
-  | Pemeriksaan | Hasil |
-  |---|---|
-  | `pytest -q tests` | 729 passed, 15 skipped |
-  | PostgreSQL acceptance tests lokal | Tidak dijalankan; 15 tes terkait ter-skip karena PostgreSQL lokal/URL tidak tersedia |
-  | Ruff | Lulus |
-  | Black | Lulus; 168 file unchanged setelah format script migrasi |
-  | MyPy | Lulus; 88 source files |
-  | Frontend production build | Lulus (`tsc -b` dan `vite build`) |
-  | Alembic | Satu head: `0021_batch_job_idempotency` |
-  | CI workflow YAML | Parse lokal berhasil |
+| Pemeriksaan | Hasil |
+|---|---|
+| `pytest -q tests` lokal dan CI | 729 passed, 15 skipped; skip adalah PostgreSQL tests yang berjalan terpisah di CI |
+| PostgreSQL acceptance CI | [15 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239579) |
+| Populated migration upgrade | CI meng-upgrade database berisi data dari revision 0014 sampai Alembic head dan memverifikasi transaction/visit/membership lineage |
+| Runtime DB role | CI memverifikasi login non-superuser API/worker dan grant; E2E memakai login API runtime |
+| Frontend E2E | [7 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43751177158/job/132925239767), termasuk campaign approval/audit trace dan identity review |
+| Ruff | Lulus |
+| Black | Lulus; 168 file unchanged setelah format script migrasi |
+| MyPy | Lulus; 88 source files |
+| Frontend production build | Lulus (`tsc -b` dan `vite build`) |
+| Alembic | Satu head: `0021_batch_job_idempotency` |
+| CI workflow YAML | Parse lokal berhasil |
 
-  CI run `43747326104` dan hasil PostgreSQL 11/11 merujuk commit sebelumnya,
-  bukan perubahan lokal terbaru. Migration-upgrade fixture, perubahan role
-  runtime CI, tambahan PostgreSQL tests, dan E2E baru **menunggu workflow baru**.
+Workflow sebelumnya menemukan lalu memperbaiki blocker append-only pada
+migration 0019, query review E2E yang meminta status filter kosong, dan
+selector audit trace yang tidak unik. Hasil CI hijau di atas adalah setelah
+perbaikan tersebut.
 
-  ### Status terbaru per butir
+### Status terbaru per butir
 
-  | Butir | Status |
-  |---|---|
-  | Worker job idempotency dan cancellation | **DONE — code + unit tests lokal**; menunggu CI |
-  | DB runtime login isolation API/worker | **IN PROGRESS** — provisioning dan koneksi nyata ditambahkan ke CI; belum ada hasil workflow untuk perubahan ini |
-  | Populated-database migration upgrade | **IN PROGRESS** — fixture/script ditambahkan; belum dijalankan terhadap PostgreSQL |
-  | PostgreSQL overlap/master-data/snapshot acceptance | **IN PROGRESS** — test definitions ditambahkan; menunggu PostgreSQL CI |
-  | Frontend approval, identity review, audit trace E2E | **IN PROGRESS** — skenario ditambahkan; menunggu Playwright CI |
-  | Deploy/rollback/backup/restore/recovery runbook | **DONE — draft terdokumentasi**; restore drill produksi belum dilakukan |
-  | Refund/status/cancellation source feeds | **BLOCKED** — sumber dan kontrak feed eksternal belum tersedia |
-  | Historical identity review/revocation dan official feature snapshot | **BLOCKED / INCOMPLETE** — membutuhkan keputusan dan histori input bitemporal |
-  | Moses/Christ/cross-team approval | **BLOCKED** — menunggu review pihak terkait; tidak dapat disetujui oleh James |
-  | Gate C, training, experiment, final model | **NOT CLOSED** — `training_ready=false`, `experiment_ready=false`, `final_model=false` |
+| Butir | Status |
+|---|---|
+| Worker job idempotency dan cancellation | **DONE — code + unit tests lokal/CI**; penggunaan multi-host dan efek samping eksternal tetap butuh uji operasional |
+| DB runtime login isolation API/worker | **DONE — CI role grants dan login non-superuser terverifikasi**; deployment production belum diverifikasi |
+| Populated-database migration upgrade | **DONE — populated PostgreSQL CI fixture lulus** dari 0014 ke head |
+| PostgreSQL overlap/master-data/snapshot acceptance | **DONE — 15 PostgreSQL tests lulus di CI**; tidak mencakup seluruh skenario Gate C atau equal-availability database stress |
+| Frontend approval, identity review, audit trace E2E | **DONE — 7 Playwright tests lulus di CI** |
+| Deploy/rollback/backup/restore/recovery runbook | **DONE — draft terdokumentasi**; restore drill produksi belum dilakukan |
+| Refund/status/cancellation source feeds | **BLOCKED** — sumber dan kontrak feed eksternal belum tersedia |
+| Historical identity review/revocation dan official feature snapshot | **BLOCKED / INCOMPLETE** — membutuhkan keputusan dan histori input bitemporal |
+| Moses/Christ/cross-team approval | **BLOCKED** — menunggu review pihak terkait; tidak dapat disetujui oleh James |
+| Gate C, training, experiment, final model | **NOT CLOSED** — `training_ready=false`, `experiment_ready=false`, `final_model=false` |
 
-  Commit dan link CI untuk pembaruan ini harus ditambahkan setelah commit
-  dipush dan workflow selesai. Jangan menganggap status DRAFT sebagai approval.
+PR #35 masih draft dan belum memiliki approval Moses, Christ, atau lintas
+tim. Runbook dan kontrak tetap berstatus draft. CI hijau membuktikan kode
+dan acceptance tests yang terpasang, bukan source-feed completeness,
+production readiness, atau persetujuan Gate C. Jangan menyimpulkan bahwa
+Gate C telah ditutup.
