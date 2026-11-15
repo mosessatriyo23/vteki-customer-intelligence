@@ -15,7 +15,13 @@ def read(path):
         return list(csv.DictReader(stream))
 
 
-def build_profiles(inbound: Path, resolution: Path, cutoff: datetime) -> list[dict]:
+def build_profiles(
+    inbound: Path,
+    resolution: Path,
+    cutoff: datetime,
+    *,
+    identity_mapping: dict[str, str] | None = None,
+) -> list[dict]:
     import json
 
     from services.data.ingestion.validator import sha256
@@ -39,7 +45,19 @@ def build_profiles(inbound: Path, resolution: Path, cutoff: datetime) -> list[di
     source_rows = read(inbound / "crm_customers.csv")
     sources = {r["crm_customer_id"]: r for r in source_rows}
     rows = read(resolution / "mapping.csv")
-    mapping = {r["source_customer_id"]: r["golden_customer_id"] for r in rows}
+    mapping = (
+        identity_mapping
+        if identity_mapping is not None
+        else {r["source_customer_id"]: r["golden_customer_id"] for r in rows}
+    )
+    if not isinstance(mapping, dict) or any(
+        not isinstance(source, str)
+        or not isinstance(golden, str)
+        or not source.strip()
+        or not golden.strip()
+        for source, golden in mapping.items()
+    ):
+        raise ValueError("Identity mapping must contain non-empty string IDs")
     if len(mapping) != len(rows) or set(mapping) != set(sources):
         raise ValueError("Identity coverage must exactly match source snapshot")
     needs_review = set()
@@ -124,3 +142,25 @@ def build_profiles(inbound: Path, resolution: Path, cutoff: datetime) -> list[di
                     raise ValueError("Event precedes customer join")
                 profiles[golden][metric] += 1
     return [profiles[key] for key in sorted(profiles)]
+
+
+def build_profiles_as_of(
+    inbound: Path,
+    resolution: Path,
+    cutoff: datetime,
+    session,
+    recorded_at: datetime | None = None,
+) -> list[dict]:
+    """Build Customer360 profiles using the bitemporal identity registry."""
+    from services.data.identity.registry import PersistentIdentityRegistry
+
+    mapping = PersistentIdentityRegistry(session).get_mapping_as_of(
+        cutoff,
+        recorded_at,
+    )
+    return build_profiles(
+        inbound,
+        resolution,
+        cutoff,
+        identity_mapping=mapping,
+    )

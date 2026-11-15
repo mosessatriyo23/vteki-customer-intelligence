@@ -1,7 +1,8 @@
-"""Typed SQLAlchemy source-table metadata matching Alembic revision 0009.
+"""Typed SQLAlchemy source-table metadata matching Alembic migrations.
 
-Keep table definitions synchronized when editing migration 0009 / subsequent migrations.
-Registering tables with Base also enables isolated SQLite persistence tests.
+Keep table definitions synchronized with migration 0009 and subsequent
+migrations. Registering tables with Base also enables isolated SQLite
+persistence tests.
 """
 
 from __future__ import annotations
@@ -31,7 +32,7 @@ SOURCE_TABLES: dict[str, sa.Table] = {
     "catalogue_items": sa.Table(
         "catalogue_items",
         Base.metadata,
-        sa.Column("item_code", sa.String(length=32), primary_key=True),
+        sa.Column("item_code", sa.String(length=32), nullable=False),
         sa.Column("item_type", sa.String(length=16), nullable=False),
         sa.Column("name", sa.String(length=128), nullable=False),
         sa.Column("category", sa.String(length=64), nullable=False),
@@ -49,6 +50,11 @@ SOURCE_TABLES: dict[str, sa.Table] = {
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint(
+            "item_code",
+            "source_batch_id",
+            name="catalogue_items_pkey",
+        ),
         schema="source",
     ),
     "crm_customers": sa.Table(
@@ -125,17 +131,13 @@ SOURCE_TABLES: dict[str, sa.Table] = {
             "source_transaction_id",
             sa.String(length=64),
             sa.ForeignKey(
-                "source.transactions.source_transaction_id", ondelete="CASCADE"
+                "source.transactions.source_transaction_id",
+                ondelete="CASCADE",
             ),
             nullable=False,
         ),
         sa.Column("item_type", sa.String(length=16), nullable=False),
-        sa.Column(
-            "item_code",
-            sa.String(length=32),
-            sa.ForeignKey("source.catalogue_items.item_code"),
-            nullable=False,
-        ),
+        sa.Column("item_code", sa.String(length=32), nullable=False),
         sa.Column("qty", sa.Integer(), nullable=False),
         sa.Column("unit_price", sa.BigInteger(), nullable=False),
         sa.Column("line_amount", sa.BigInteger(), nullable=False),
@@ -146,6 +148,14 @@ SOURCE_TABLES: dict[str, sa.Table] = {
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["item_code", "source_batch_id"],
+            [
+                "source.catalogue_items.item_code",
+                "source.catalogue_items.source_batch_id",
+            ],
+            name="fk_transaction_items_catalogue_batch",
+        ),
         schema="source",
     ),
     "app_events": sa.Table(
@@ -159,12 +169,7 @@ SOURCE_TABLES: dict[str, sa.Table] = {
             nullable=False,
         ),
         sa.Column("event_type", sa.String(length=32), nullable=False),
-        sa.Column(
-            "item_id",
-            sa.String(length=32),
-            sa.ForeignKey("source.catalogue_items.item_code"),
-            nullable=True,
-        ),
+        sa.Column("item_id", sa.String(length=32), nullable=True),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("channel", sa.String(length=16), nullable=False),
         sa.Column(
@@ -174,6 +179,14 @@ SOURCE_TABLES: dict[str, sa.Table] = {
             nullable=False,
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["item_id", "source_batch_id"],
+            [
+                "source.catalogue_items.item_code",
+                "source.catalogue_items.source_batch_id",
+            ],
+            name="fk_app_events_catalogue_batch",
+        ),
         schema="source",
     ),
     "service_cases": sa.Table(

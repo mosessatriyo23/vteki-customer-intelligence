@@ -1,21 +1,36 @@
 """PostgreSQL-only governance tests, run after Alembic and db_permissions.sql."""
 
+import argparse
+import csv
 import os
-from datetime import date, datetime, timezone
+import tempfile
+from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.orm import Session, sessionmaker
 
 from api.models import (
     AuditEvent,
+    GoldenCustomer,
+    IdentityMappingHistory,
     IngestionBatch,
     RegistryVersion,
     ReviewAuditLog,
     ReviewQueueItem,
     User,
+)
+from generator.generate import run as generate
+from services.data.customer360.profile import build_profiles_as_of
+from services.data.identity.cli import run as resolve
+from services.data.ingestion.pg_loader import PostgresIngestionLoader
+from services.data.ingestion.transaction_events import (
+    append_transaction_event,
+    get_transaction_events_as_of,
 )
 
 
@@ -208,6 +223,117 @@ def test_postgres_identity_review_audit_is_append_only(pg_engine: Engine):
                 outer.rollback()
 
 
+def test_postgres_identity_mapping_history_is_append_only(pg_engine: Engine):
+    batch_id = f"ci-{uuid4().hex}"
+    version_tag = f"ci-{uuid4().hex[:24]}"
+    golden_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+
+    batch_table = IngestionBatch.__table__
+    version_table = RegistryVersion.__table__
+    golden_table = GoldenCustomer.__table__
+    history_table = IdentityMappingHistory.__table__
+
+    with pg_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            connection.execute(
+                batch_table.insert().values(
+                    batch_id=batch_id,
+                    schema_version="2.0.0",
+                    seed=None,
+                    as_of_date=date.today(),
+                    manifest_payload={},
+                    table_checksums={},
+                    status="STAGED",
+                    rejection_reasons=None,
+                    row_counts={},
+                    loaded_at=now,
+                    published_at=None,
+                )
+            )
+
+            connection.execute(
+                version_table.insert().values(
+                    version_tag=version_tag,
+                    algorithm="ci-test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Temporary identity history test",
+                    created_at=now,
+                )
+            )
+
+            connection.execute(
+                golden_table.insert().values(
+                    golden_customer_id=golden_id,
+                    first_source_batch_id=batch_id,
+                    anchor_source_id=f"source-{uuid4().hex[:12]}",
+                    status="PROVISIONAL",
+                    merged_into_golden_id=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+            source_id = f"source-{uuid4().hex[:12]}"
+            history_id = connection.execute(
+                history_table.insert()
+                .values(
+                    source_customer_id=source_id,
+                    golden_customer_id=golden_id,
+                    registry_version=version_tag,
+                    source_batch_id=batch_id,
+                    assignment_type="AUTO_MATCH",
+                    event_type="BATCH_ASSIGNMENT",
+                    effective_at=now,
+                    recorded_at=now,
+                    reviewer_id=None,
+                    correlation_id=f"ci-{uuid4().hex}",
+                    change_reason="Temporary append-only integration test",
+                )
+                .returning(history_table.c.id)
+            ).scalar_one()
+
+            assert history_id is not None
+
+            # The database must reject an identical batch assignment event.
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        history_table.insert().values(
+                            source_customer_id=source_id,
+                            golden_customer_id=golden_id,
+                            registry_version=version_tag,
+                            source_batch_id=batch_id,
+                            assignment_type="AUTO_MATCH",
+                            event_type="BATCH_ASSIGNMENT",
+                            effective_at=now,
+                            recorded_at=now,
+                            reviewer_id=None,
+                            correlation_id=f"ci-{uuid4().hex}",
+                            change_reason="Duplicate event must be rejected",
+                        )
+                    )
+
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        history_table.update()
+                        .where(history_table.c.id == history_id)
+                        .values(change_reason="tampered")
+                    )
+
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        history_table.delete().where(history_table.c.id == history_id)
+                    )
+        finally:
+            if outer.is_active:
+                outer.rollback()
+
+
 def test_postgres_role_groups_obey_least_privilege(pg_engine: Engine):
     with pg_engine.connect() as connection:
         role_names = set(
@@ -280,3 +406,534 @@ def test_postgres_role_groups_obey_least_privilege(pg_engine: Engine):
                 "'status', 'UPDATE')"
             )
         ).scalar_one()
+
+
+def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
+    batch_id = f"ci-{uuid4().hex}"
+    version_tag = f"ci-{uuid4().hex[:24]}"
+    now = datetime.now(timezone.utc)
+
+    batch_table = IngestionBatch.__table__
+    version_table = RegistryVersion.__table__
+    golden_table = GoldenCustomer.__table__
+    history_table = IdentityMappingHistory.__table__
+
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        inbound = root / "inbound"
+        resolution = root / "resolution"
+
+        generate(
+            argparse.Namespace(
+                seed=20260906,
+                customers=20,
+                as_of_date=date(2026, 9, 6),
+                output_dir=inbound,
+                ground_truth_dir=root / "truth",
+            )
+        )
+        resolve(
+            inbound / "crm_customers.csv",
+            resolution,
+            synthetic_aliases=True,
+        )
+
+        with (resolution / "mapping.csv").open(newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+
+        assert len(rows) >= 2
+        mapping = {row["source_customer_id"]: row["golden_customer_id"] for row in rows}
+
+        cutoff = datetime(2026, 9, 7, 0, 0, tzinfo=timezone(timedelta(hours=7)))
+        merge_recorded_at = now
+        recorded_before = merge_recorded_at - timedelta(seconds=1)
+        recorded_after = merge_recorded_at + timedelta(seconds=1)
+
+        # Pilih dua source dengan Golden ID berbeda.
+        selected = None
+        for source_id, golden_id in mapping.items():
+            target = next(
+                (
+                    (other_source, other_golden)
+                    for other_source, other_golden in mapping.items()
+                    if other_golden != golden_id
+                ),
+                None,
+            )
+            if target:
+                selected = (source_id, golden_id, target[1])
+                break
+
+        assert selected is not None
+        moved_source, old_golden, target_golden = selected
+
+        with pg_engine.connect() as connection:
+            outer = connection.begin()
+            try:
+                connection.execute(
+                    batch_table.insert().values(
+                        batch_id=batch_id,
+                        schema_version="2.0.0",
+                        seed=None,
+                        as_of_date=date(2026, 9, 6),
+                        manifest_payload={},
+                        table_checksums={},
+                        status="STAGED",
+                        rejection_reasons=None,
+                        row_counts={},
+                        loaded_at=now,
+                        published_at=None,
+                    )
+                )
+
+                connection.execute(
+                    version_table.insert().values(
+                        version_tag=version_tag,
+                        algorithm="ci-customer360-asof",
+                        parameters={},
+                        status="ACTIVE",
+                        description="Customer360 as-of integration test",
+                        created_at=now,
+                    )
+                )
+
+                golden_ids = set(mapping.values())
+                for golden_id in golden_ids:
+                    anchor_source = next(
+                        source_id
+                        for source_id, value in mapping.items()
+                        if value == golden_id
+                    )
+                    connection.execute(
+                        golden_table.insert().values(
+                            golden_customer_id=golden_id,
+                            first_source_batch_id=batch_id,
+                            anchor_source_id=anchor_source,
+                            status="PROVISIONAL",
+                            merged_into_golden_id=None,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+
+                baseline_effective = cutoff - timedelta(days=2)
+                baseline_recorded = merge_recorded_at - timedelta(days=2)
+
+                for source_id, golden_id in mapping.items():
+                    connection.execute(
+                        history_table.insert().values(
+                            source_customer_id=source_id,
+                            golden_customer_id=golden_id,
+                            registry_version=version_tag,
+                            source_batch_id=batch_id,
+                            assignment_type="BASELINE",
+                            event_type="BASELINE",
+                            effective_at=baseline_effective,
+                            recorded_at=baseline_recorded,
+                            reviewer_id=None,
+                            correlation_id=f"ci-{uuid4().hex}",
+                            change_reason="Initial integration-test mapping",
+                        )
+                    )
+
+                # Merge berlaku secara efektif sebelum cutoff,
+                # tetapi baru diketahui setelah recorded_before.
+                connection.execute(
+                    history_table.insert().values(
+                        source_customer_id=moved_source,
+                        golden_customer_id=target_golden,
+                        registry_version=version_tag,
+                        source_batch_id=batch_id,
+                        assignment_type="MANUAL_MERGE",
+                        event_type="MANUAL_MERGE",
+                        effective_at=cutoff - timedelta(days=1),
+                        recorded_at=merge_recorded_at,
+                        reviewer_id=None,
+                        correlation_id=f"ci-{uuid4().hex}",
+                        change_reason="Retroactive merge integration test",
+                    )
+                )
+
+                with Session(bind=connection) as session:
+                    before = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        recorded_before,
+                    )
+                    after = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        recorded_after,
+                    )
+
+                before_by_id = {row["golden_customer_id"]: row for row in before}
+                after_by_id = {row["golden_customer_id"]: row for row in after}
+
+                assert old_golden in before_by_id
+                assert target_golden in before_by_id
+                assert target_golden in after_by_id
+
+                assert (
+                    before_by_id[target_golden]["source_identity_count"] + 1
+                    == after_by_id[target_golden]["source_identity_count"]
+                )
+                assert before_by_id[old_golden][
+                    "source_identity_count"
+                ] - 1 == after_by_id.get(old_golden, {}).get("source_identity_count", 0)
+            finally:
+                if outer.is_active:
+                    outer.rollback()
+
+
+def test_postgres_transaction_event_history_loader(pg_engine: Engine):
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        inbound = root / "inbound"
+
+        generate(
+            argparse.Namespace(
+                seed=int(uuid4().hex[:8], 16) % 2_147_483_647,
+                customers=20,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound,
+                ground_truth_dir=root / "truth",
+            )
+        )
+
+        with pg_engine.connect() as connection:
+            outer = connection.begin()
+            try:
+                loader = PostgresIngestionLoader(sessionmaker(bind=connection))
+
+                result = loader.ingest(inbound)
+                assert result["status"] == "LOADED"
+                batch_id = result["batch_id"]
+
+                transaction_count = connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM source.transactions
+                        WHERE source_batch_id = :batch_id
+                        """
+                    ),
+                    {"batch_id": batch_id},
+                ).scalar_one()
+
+                event_count = connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM source.transaction_event_history
+                        WHERE source_batch_id = :batch_id
+                        """
+                    ),
+                    {"batch_id": batch_id},
+                ).scalar_one()
+
+                assert transaction_count > 0
+                assert event_count == transaction_count
+
+                event = (
+                    connection.execute(
+                        text(
+                            """
+                        SELECT event_id, occurred_at, available_at, recorded_at
+                        FROM source.transaction_event_history
+                        WHERE source_batch_id = :batch_id
+                        ORDER BY event_id
+                        LIMIT 1
+                        """
+                        ),
+                        {"batch_id": batch_id},
+                    )
+                    .mappings()
+                    .one()
+                )
+
+                assert event["recorded_at"] >= event["available_at"]
+                assert event["occurred_at"] is not None
+
+                replay = loader.ingest(inbound)
+                assert replay["status"] == "ALREADY_LOADED"
+
+                replay_count = connection.execute(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM source.transaction_event_history
+                        WHERE source_batch_id = :batch_id
+                        """
+                    ),
+                    {"batch_id": batch_id},
+                ).scalar_one()
+
+                assert replay_count == event_count
+
+                with pytest.raises(DBAPIError):
+                    with connection.begin_nested():
+                        connection.execute(
+                            text(
+                                """
+                                UPDATE source.transaction_event_history
+                                SET event_type = 'CORRECTION'
+                                WHERE event_id = :event_id
+                                """
+                            ),
+                            {"event_id": event["event_id"]},
+                        )
+
+                with pytest.raises(DBAPIError):
+                    with connection.begin_nested():
+                        connection.execute(
+                            text(
+                                """
+                                DELETE FROM source.transaction_event_history
+                                WHERE event_id = :event_id
+                                """
+                            ),
+                            {"event_id": event["event_id"]},
+                        )
+
+            finally:
+                if outer.is_active:
+                    outer.rollback()
+
+
+def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        inbound = root / "inbound"
+
+        generate(
+            argparse.Namespace(
+                seed=int(uuid4().hex[:8], 16) % 2_147_483_647,
+                customers=20,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound,
+                ground_truth_dir=root / "truth",
+            )
+        )
+
+        with pg_engine.connect() as connection:
+            outer = connection.begin()
+            try:
+                loader = PostgresIngestionLoader(sessionmaker(bind=connection))
+                result = loader.ingest(inbound)
+                assert result["status"] == "LOADED"
+                batch_id = result["batch_id"]
+
+                transaction_id = connection.execute(
+                    text(
+                        """
+                        SELECT source_transaction_id
+                        FROM source.transactions
+                        WHERE source_batch_id = :batch_id
+                        LIMIT 1
+                        """
+                    ),
+                    {"batch_id": batch_id},
+                ).scalar_one()
+
+                factory = sessionmaker(bind=connection, expire_on_commit=False)
+                with factory() as session:
+                    now = datetime.now(timezone.utc)
+                    refund_occurred_at = now - timedelta(minutes=2)
+
+                    refund = append_transaction_event(
+                        session,
+                        source_transaction_id=transaction_id,
+                        event_type="REFUND_RECORDED",
+                        occurred_at=refund_occurred_at,
+                        source_batch_id=batch_id,
+                        idempotency_key=f"ci-refund-{uuid4().hex}",
+                        payload={
+                            "refund_amount": 100,
+                            "status": "PARTIAL_REFUND",
+                        },
+                        actor_type="SYSTEM",
+                        source_event_id=f"ci-source-{uuid4().hex}",
+                        source_version="1",
+                    )
+
+                    before_refund = refund.available_at - timedelta(microseconds=1)
+                    effective_cutoff = now + timedelta(days=1)
+
+                    old_view = get_transaction_events_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=effective_cutoff,
+                        known_at=before_refund,
+                    )
+                    assert refund.event_id not in {item.event_id for item in old_view}
+
+                    replay = append_transaction_event(
+                        session,
+                        source_transaction_id=transaction_id,
+                        event_type="REFUND_RECORDED",
+                        occurred_at=refund_occurred_at,
+                        source_batch_id=batch_id,
+                        idempotency_key=refund.idempotency_key,
+                        payload={
+                            "refund_amount": 100,
+                            "status": "PARTIAL_REFUND",
+                        },
+                        actor_type="SYSTEM",
+                        source_event_id=refund.source_event_id,
+                        source_version="1",
+                    )
+                    assert replay.event_id == refund.event_id
+
+                    correction = append_transaction_event(
+                        session,
+                        source_transaction_id=transaction_id,
+                        event_type="CORRECTION",
+                        occurred_at=refund_occurred_at,
+                        source_batch_id=batch_id,
+                        idempotency_key=f"ci-correction-{uuid4().hex}",
+                        payload={
+                            "refund_amount": 80,
+                            "status": "PARTIAL_REFUND",
+                        },
+                        actor_type="WORKER",
+                        corrects_event_id=refund.event_id,
+                    )
+
+                    between_events = get_transaction_events_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=effective_cutoff,
+                        known_at=correction.available_at - timedelta(microseconds=1),
+                    )
+                    between_ids = {item.event_id for item in between_events}
+                    assert refund.event_id in between_ids
+                    assert correction.event_id not in between_ids
+
+                    after_correction = get_transaction_events_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=effective_cutoff,
+                        known_at=correction.available_at + timedelta(microseconds=1),
+                    )
+                    after_ids = {item.event_id for item in after_correction}
+                    assert refund.event_id in after_ids
+                    assert correction.event_id in after_ids
+
+                    assert refund.payload["refund_amount"] == 100
+
+            finally:
+                if outer.is_active:
+                    outer.rollback()
+
+
+def test_postgres_multi_batch_ingestion_isolated_and_idempotent(
+    pg_engine: Engine,
+) -> None:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        inbound_a = root / "batch_a"
+        inbound_b = root / "batch_b"
+
+        generate(
+            argparse.Namespace(
+                seed=20261115,
+                customers=20,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound_a,
+                ground_truth_dir=root / "truth_a",
+            )
+        )
+        generate(
+            argparse.Namespace(
+                seed=20261116,
+                customers=20,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound_b,
+                ground_truth_dir=root / "truth_b",
+            )
+        )
+
+        with pg_engine.connect() as connection:
+            outer = connection.begin()
+            try:
+                loader = PostgresIngestionLoader(sessionmaker(bind=connection))
+
+                result_a = loader.ingest(inbound_a)
+                result_b = loader.ingest(inbound_b)
+
+                assert result_a["status"] == "LOADED"
+                assert result_b["status"] == "LOADED"
+                assert result_a["batch_id"] != result_b["batch_id"]
+
+                def batch_counts(batch_id: str) -> tuple[int, int]:
+                    transactions = connection.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM source.transactions
+                            WHERE source_batch_id = :batch_id
+                            """
+                        ),
+                        {"batch_id": batch_id},
+                    ).scalar_one()
+
+                    events = connection.execute(
+                        text(
+                            """
+                            SELECT COUNT(*)
+                            FROM source.transaction_event_history
+                            WHERE source_batch_id = :batch_id
+                            """
+                        ),
+                        {"batch_id": batch_id},
+                    ).scalar_one()
+
+                    return transactions, events
+
+                count_a = batch_counts(result_a["batch_id"])
+                count_b = batch_counts(result_b["batch_id"])
+
+                assert count_a[0] > 0
+                assert count_b[0] > 0
+                assert count_a[0] == count_a[1]
+                assert count_b[0] == count_b[1]
+
+                ids_a = set(
+                    connection.execute(
+                        text(
+                            """
+                            SELECT source_transaction_id
+                            FROM source.transactions
+                            WHERE source_batch_id = :batch_id
+                            """
+                        ),
+                        {"batch_id": result_a["batch_id"]},
+                    ).scalars()
+                )
+                ids_b = set(
+                    connection.execute(
+                        text(
+                            """
+                            SELECT source_transaction_id
+                            FROM source.transactions
+                            WHERE source_batch_id = :batch_id
+                            """
+                        ),
+                        {"batch_id": result_b["batch_id"]},
+                    ).scalars()
+                )
+
+                assert ids_a.isdisjoint(ids_b)
+
+                replay_a = loader.ingest(inbound_a)
+                assert replay_a["status"] == "ALREADY_LOADED"
+                assert batch_counts(result_a["batch_id"]) == count_a
+                assert batch_counts(result_b["batch_id"]) == count_b
+
+            finally:
+                if outer.is_active:
+                    outer.rollback()

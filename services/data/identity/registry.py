@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from api.models import (
     GoldenCustomer,
+    IdentityMappingHistory,
     MatchDecision,
     RegistryVersion,
     ReviewAuditLog,
@@ -53,6 +54,44 @@ class PersistentIdentityRegistry:
             SourceIdentityMapping.golden_customer_id,
         )
         return dict(self.session.execute(stmt).all())
+
+    def get_mapping_as_of(
+        self,
+        effective_at: datetime,
+        recorded_at: datetime | None = None,
+    ) -> dict[str, str]:
+        """Return source-to-Golden mappings as known at a bitemporal cutoff.
+
+        effective_at limits when a mapping was valid in the business domain.
+        recorded_at limits what the system had recorded by that point in time.
+        """
+        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
+            raise ValueError("effective_at must be timezone-aware")
+
+        knowledge_cutoff = recorded_at or datetime.now(timezone.utc)
+        if knowledge_cutoff.tzinfo is None or knowledge_cutoff.utcoffset() is None:
+            raise ValueError("recorded_at must be timezone-aware")
+
+        stmt = (
+            select(IdentityMappingHistory)
+            .where(
+                IdentityMappingHistory.effective_at <= effective_at,
+                IdentityMappingHistory.recorded_at <= knowledge_cutoff,
+            )
+            .order_by(
+                IdentityMappingHistory.source_customer_id,
+                IdentityMappingHistory.effective_at.desc(),
+                IdentityMappingHistory.recorded_at.desc(),
+                IdentityMappingHistory.id.desc(),
+            )
+        )
+
+        result: dict[str, str] = {}
+        for row in self.session.scalars(stmt):
+            if row.source_customer_id not in result:
+                result[row.source_customer_id] = row.golden_customer_id
+
+        return result
 
     def apply_resolution_batch(
         self,
@@ -182,6 +221,32 @@ class PersistentIdentityRegistry:
                 mapping_obj.source_batch_id = batch_id
                 mapping_obj.assigned_at = now
 
+            existing_history = self.session.scalar(
+                select(IdentityMappingHistory.id)
+                .where(
+                    IdentityMappingHistory.source_customer_id == source_id,
+                    IdentityMappingHistory.source_batch_id == batch_id,
+                    IdentityMappingHistory.registry_version == version_tag,
+                    IdentityMappingHistory.golden_customer_id == final_golden_id,
+                    IdentityMappingHistory.event_type == "BATCH_ASSIGNMENT",
+                )
+                .limit(1)
+            )
+            if existing_history is None:
+                self.session.add(
+                    IdentityMappingHistory(
+                        source_customer_id=source_id,
+                        golden_customer_id=final_golden_id,
+                        registry_version=version_tag,
+                        source_batch_id=batch_id,
+                        assignment_type=mapping_obj.assignment_type,
+                        event_type="BATCH_ASSIGNMENT",
+                        effective_at=now,
+                        recorded_at=now,
+                        change_reason="Identity assignment recorded from resolution batch",
+                    )
+                )
+
         # 4. Persist Match Decisions
         for dec in resolution_result.get("decisions", []):
             decision_obj = MatchDecision(
@@ -298,6 +363,21 @@ class PersistentIdentityRegistry:
                 mapping.golden_customer_id = item.left_golden_id
                 mapping.assignment_type = "MANUAL_OVERRIDE"
                 mapping.assigned_at = now
+                self.session.add(
+                    IdentityMappingHistory(
+                        source_customer_id=mapping.source_customer_id,
+                        golden_customer_id=item.left_golden_id,
+                        registry_version=mapping.registry_version,
+                        source_batch_id=mapping.source_batch_id,
+                        assignment_type="MANUAL_OVERRIDE",
+                        event_type="MANUAL_MERGE",
+                        effective_at=now,
+                        recorded_at=now,
+                        reviewer_id=actor_id,
+                        correlation_id=correlation_id,
+                        change_reason=rationale,
+                    )
+                )
 
             # Mark right golden customer as merged if applicable
             if item.right_golden_id and item.right_golden_id != item.left_golden_id:

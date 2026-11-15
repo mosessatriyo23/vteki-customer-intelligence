@@ -9,12 +9,14 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     SmallInteger,
     String,
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -445,6 +447,64 @@ class SourceIdentityMapping(Base):
     )
 
 
+class IdentityMappingHistory(Base):
+    """Append-only history of source-to-Golden identity assignments."""
+
+    __tablename__ = "identity_mapping_history"
+    __table_args__ = (
+        Index(
+            "ix_identity_mapping_history_asof",
+            "source_customer_id",
+            "effective_at",
+            "recorded_at",
+        ),
+        Index(
+            "uq_identity_mapping_history_batch_assignment",
+            "source_customer_id",
+            "source_batch_id",
+            "registry_version",
+            "golden_customer_id",
+            unique=True,
+            postgresql_where=text("event_type = 'BATCH_ASSIGNMENT'"),
+            sqlite_where=text("event_type = 'BATCH_ASSIGNMENT'"),
+        ),
+        {"schema": "identity"},
+    )
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    source_customer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    golden_customer_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("identity.golden_customers.golden_customer_id"),
+        nullable=False,
+    )
+    registry_version: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("identity.registry_versions.version_tag"),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    assignment_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    effective_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    reviewer_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("core.users.id"), nullable=True
+    )
+    correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class MatchDecision(Base):
     __tablename__ = "match_decisions"
     __table_args__ = (
@@ -631,3 +691,70 @@ class RFMLifecycleSnapshot(Base):
     transactions_90d: Mapped[int] = mapped_column(Integer)
     revenue_90d: Mapped[int] = mapped_column(BigInteger)
     lifecycle: Mapped[str] = mapped_column(String(32), index=True)
+
+
+class TransactionEventHistory(Base):
+    __tablename__ = "transaction_event_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_transaction_event_idempotency",
+        ),
+        Index(
+            "ix_transaction_event_asof",
+            "source_transaction_id",
+            "occurred_at",
+            "recorded_at",
+        ),
+        Index("ix_transaction_event_available", "available_at"),
+        Index(
+            "ix_transaction_event_source_version",
+            "source_event_id",
+            "source_version",
+        ),
+        {"schema": "source"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger, primary_key=True, autoincrement=True
+    )
+    source_transaction_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey(
+            "source.transactions.source_transaction_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("clock_timestamp()"),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stg.ingestion_batches.batch_id"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    corrects_event_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "source.transaction_event_history.event_id",
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    actor_type: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_event_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_version: Mapped[str | None] = mapped_column(String(64), nullable=True)

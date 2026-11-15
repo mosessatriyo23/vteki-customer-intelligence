@@ -79,6 +79,7 @@ class JamesIngestionTests(unittest.TestCase):
                     [
                         {
                             **first,
+                            "branch_name": f"{first['branch_name']} - CONFLICT",
                             "active_flag": True,
                             "source_batch_id": "preexisting",
                             "created_at": datetime.now(timezone.utc),
