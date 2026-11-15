@@ -299,8 +299,11 @@ feed historis lengkap.
 ## Pembaruan status - 16 November 2026 (platform/runtime follow-up)
 
 PR #35 tetap **OPEN / DRAFT**. James-owned follow-up sudah dipush sampai
-commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`. CI terbaru pada commit
-tersebut, [run 43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934),
+implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`; dokumentasi
+status juga diperbarui setelahnya. CI implementation pada
+[run 43752547934](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752547934)
+dan CI dokumentasi pada
+[run 43752947824](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43752947824)
 lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
 ### Perubahan James yang ditambahkan
@@ -381,7 +384,7 @@ mengklaim status yang tidak diketahui.
 | Static review queue tidak memengaruhi status profil as-of | **DONE — lokal** | Regression test membuktikan queue yang menandai `REVIEW` menghasilkan `UNKNOWN` pada profile as-of; `build_profiles()` non-as-of tetap mempertahankan perilaku saat ini. |
 | Persistensi status historis yang tidak diketahui | **DONE — lokal** | Persistence test menerima serta menyimpan status `UNKNOWN`. |
 | Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
-| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped lokal; CI pada commit `db189b0` lulus untuk backend, 15 PostgreSQL tests, migration-upgrade, frontend build, dan E2E. |
+| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 837 passed, 15 PostgreSQL tests skipped lokal; CI pada commit `db189b0` lulus untuk backend, 15 PostgreSQL tests, migration-upgrade, frontend build, dan E2E. CI dokumentasi setelahnya juga lulus. |
 
 Perubahan ini memperjelas batas identity-as-of, tetapi tidak menutup Gate C:
 identity decision correction/revocation, source feed refund/status,
