@@ -18,15 +18,18 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from api.models import (
     AuditEvent,
+    BatchJob,
     GoldenCustomer,
     IdentityMappingHistory,
     IngestionBatch,
+    ProfileSnapshot,
     RegistryVersion,
     ReviewAuditLog,
     ReviewQueueItem,
     User,
 )
 from generator.generate import run as generate
+from services.data.customer360.persistence import save_profile_snapshots
 from services.data.customer360.profile import build_profiles_as_of
 from services.data.identity.cli import run as resolve
 from services.data.ingestion import pg_loader as pg_loader_module
@@ -37,6 +40,7 @@ from services.data.ingestion.transaction_events import (
     get_transaction_events_as_of,
     project_transaction_as_of,
 )
+from services.data.ingestion.validator import sha256
 
 
 @pytest.fixture(scope="module")
@@ -1242,6 +1246,167 @@ def test_postgres_multi_batch_ingestion_isolated_and_idempotent(
                     outer.rollback()
 
 
+def _rewrite_csv_field(path: Path, field: str, old_value: str | None, new_value: str):
+    with path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        fieldnames = reader.fieldnames
+        rows = list(reader)
+    assert fieldnames is not None
+    changed = False
+    for row in rows:
+        if old_value is None or row[field] == old_value:
+            row[field] = new_value
+            changed = True
+            break
+    assert changed
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _refresh_manifest_checksums(inbound: Path, file_names: set[str]) -> None:
+    manifest_path = inbound / "generation_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for file_name in file_names:
+        manifest["tables"][file_name]["sha256"] = sha256(inbound / file_name)
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_postgres_rejects_source_id_overlap_across_batches_atomically(
+    pg_engine: Engine,
+):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        inbound_a = root / "batch_a"
+        inbound_b = root / "batch_b"
+        for directory, seed in ((inbound_a, 20261120), (inbound_b, 20261121)):
+            generate(
+                argparse.Namespace(
+                    seed=seed,
+                    customers=20,
+                    as_of_date=date(2026, 11, 15),
+                    output_dir=directory,
+                    ground_truth_dir=root / f"truth_{seed}",
+                )
+            )
+
+        with (inbound_a / "transactions.csv").open(
+            newline="", encoding="utf-8"
+        ) as stream:
+            overlapping_id = next(csv.DictReader(stream))["source_transaction_id"]
+        with (inbound_b / "transactions.csv").open(
+            newline="", encoding="utf-8"
+        ) as stream:
+            batch_b_transactions = list(csv.DictReader(stream))
+        with (inbound_b / "transaction_items.csv").open(
+            newline="", encoding="utf-8"
+        ) as stream:
+            batch_b_item_transaction_ids = {
+                row["source_transaction_id"] for row in csv.DictReader(stream)
+            }
+        replaced_id = next(
+            row["source_transaction_id"]
+            for row in batch_b_transactions
+            if row["source_transaction_id"] in batch_b_item_transaction_ids
+        )
+
+        assert overlapping_id != replaced_id
+        changed_files = {"transactions.csv", "transaction_items.csv"}
+        for file_name in changed_files:
+            _rewrite_csv_field(
+                inbound_b / file_name,
+                "source_transaction_id",
+                replaced_id,
+                overlapping_id,
+            )
+        _refresh_manifest_checksums(inbound_b, changed_files)
+
+        loader = PostgresIngestionLoader(sessionmaker(bind=pg_engine))
+        loaded_a = loader.ingest(inbound_a)
+        assert loaded_a["status"] == "LOADED"
+        manifest_b = json.loads(
+            (inbound_b / "generation_manifest.json").read_text(encoding="utf-8")
+        )
+        rejected_batch_id = loader.compute_batch_id(manifest_b)
+
+        with pytest.raises(DBAPIError):
+            loader.ingest(inbound_b)
+
+        with pg_engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM source.transactions "
+                        "WHERE source_transaction_id = :transaction_id"
+                    ),
+                    {"transaction_id": overlapping_id},
+                ).scalar_one()
+                == 1
+            )
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM stg.ingestion_batches "
+                        "WHERE batch_id = :batch_id"
+                    ),
+                    {"batch_id": rejected_batch_id},
+                ).scalar_one()
+                == 0
+            )
+
+
+def test_postgres_rejects_master_data_update_across_batches_atomically(
+    pg_engine: Engine,
+):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root = Path(temp_dir)
+        inbound_a = root / "batch_a"
+        inbound_b = root / "batch_b"
+        for directory, seed in ((inbound_a, 20261122), (inbound_b, 20261123)):
+            generate(
+                argparse.Namespace(
+                    seed=seed,
+                    customers=20,
+                    as_of_date=date(2026, 11, 15),
+                    output_dir=directory,
+                    ground_truth_dir=root / f"truth_{seed}",
+                )
+            )
+        _rewrite_csv_field(
+            inbound_b / "branches.csv",
+            "branch_name",
+            None,
+            "Conflicting branch master-data update",
+        )
+        _refresh_manifest_checksums(inbound_b, {"branches.csv"})
+
+        loader = PostgresIngestionLoader(sessionmaker(bind=pg_engine))
+        assert loader.ingest(inbound_a)["status"] == "LOADED"
+        manifest_b = json.loads(
+            (inbound_b / "generation_manifest.json").read_text(encoding="utf-8")
+        )
+        rejected_batch_id = loader.compute_batch_id(manifest_b)
+
+        with pytest.raises(ValueError, match="Conflicting branch definition"):
+            loader.ingest(inbound_b)
+
+        with pg_engine.connect() as connection:
+            assert (
+                connection.execute(
+                    text(
+                        "SELECT count(*) FROM stg.ingestion_batches "
+                        "WHERE batch_id = :batch_id"
+                    ),
+                    {"batch_id": rejected_batch_id},
+                ).scalar_one()
+                == 0
+            )
+
+
 def test_postgres_concurrent_duplicate_batch_is_idempotent(pg_engine: Engine):
     with tempfile.TemporaryDirectory() as temp_dir:
         root = Path(temp_dir)
@@ -1297,6 +1462,36 @@ def test_postgres_concurrent_duplicate_batch_is_idempotent(pg_engine: Engine):
             ).scalar_one()
             assert transactions == transaction_events
             assert business_events > 0
+
+
+def test_postgres_batch_job_idempotency_key_is_unique(pg_engine: Engine):
+    now = datetime.now(timezone.utc)
+    key = f"ci-job-{uuid4().hex}"
+    table = BatchJob.__table__
+    values = {
+        "kind": "ci-idempotency",
+        "status": "queued",
+        "payload": {"source": "batch"},
+        "attempts": 0,
+        "max_attempts": 3,
+        "available_at": now,
+        "claim_token": None,
+        "created_by": None,
+        "created_at": now,
+        "updated_at": now,
+        "idempotency_key": key,
+    }
+
+    with pg_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            connection.execute(table.insert().values(**values))
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(table.insert().values(**values))
+        finally:
+            if outer.is_active:
+                outer.rollback()
 
 
 def test_postgres_ingestion_failure_rolls_back_and_retry_recovers(
@@ -1364,3 +1559,114 @@ def test_postgres_ingestion_failure_rolls_back_and_retry_recovers(
         recovered = loader.ingest(inbound)
         assert recovered["status"] == "LOADED"
         assert recovered["batch_id"] == batch_id
+
+
+def test_postgres_customer360_snapshot_replay_is_immutable(pg_engine: Engine):
+    now = datetime.now(timezone.utc)
+    batch_a = f"ci-{uuid4().hex}"
+    batch_b = f"ci-{uuid4().hex}"
+    version_tag = f"ci-{uuid4().hex[:24]}"
+    golden_id = str(uuid4())
+
+    with pg_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            for batch_id in (batch_a, batch_b):
+                connection.execute(
+                    IngestionBatch.__table__.insert().values(
+                        batch_id=batch_id,
+                        schema_version="2.0.0",
+                        seed=None,
+                        as_of_date=date.today(),
+                        manifest_payload={},
+                        table_checksums={},
+                        status="PUBLISHED",
+                        rejection_reasons=None,
+                        row_counts={},
+                        loaded_at=now,
+                        published_at=now,
+                    )
+                )
+            connection.execute(
+                RegistryVersion.__table__.insert().values(
+                    version_tag=version_tag,
+                    algorithm="ci-snapshot-immutability",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Customer360 snapshot immutability test",
+                    created_at=now,
+                )
+            )
+            connection.execute(
+                GoldenCustomer.__table__.insert().values(
+                    golden_customer_id=golden_id,
+                    first_source_batch_id=batch_a,
+                    anchor_source_id=f"source-{uuid4().hex[:12]}",
+                    status="PROVISIONAL",
+                    merged_into_golden_id=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+            factory = sessionmaker(bind=connection, expire_on_commit=False)
+            with factory() as session:
+                row = {
+                    "golden_customer_id": golden_id,
+                    "cutoff_at": now.isoformat(),
+                    "identity_status": "PROVISIONAL",
+                    "source_identity_count": 1,
+                    "first_join_date": date.today().isoformat(),
+                    "transaction_count": 2,
+                    "retained_revenue": 25_000,
+                    "last_transaction_at": now.isoformat(),
+                    "visit_count": 1,
+                    "renewal_count": 0,
+                }
+                assert (
+                    save_profile_snapshots(
+                        [row],
+                        batch_a,
+                        version_tag,
+                        session,
+                        "ci-rule-v1",
+                        commit=False,
+                    )
+                    == 1
+                )
+                original = session.query(ProfileSnapshot).one()
+                original_generated_at = original.generated_at
+
+                assert (
+                    save_profile_snapshots(
+                        [row],
+                        batch_b,
+                        version_tag,
+                        session,
+                        "ci-rule-v1",
+                        commit=False,
+                    )
+                    == 1
+                )
+                session.expire_all()
+                replay = session.query(ProfileSnapshot).one()
+                assert replay.source_batch_id == batch_a
+                assert replay.generated_at == original_generated_at
+
+                with pytest.raises(ValueError, match="different payload"):
+                    save_profile_snapshots(
+                        [{**row, "retained_revenue": 30_000}],
+                        batch_b,
+                        version_tag,
+                        session,
+                        "ci-rule-v1",
+                        commit=False,
+                    )
+
+                session.expire_all()
+                persisted = session.query(ProfileSnapshot).one()
+                assert persisted.retained_revenue == 25_000
+                assert persisted.source_batch_id == batch_a
+        finally:
+            if outer.is_active:
+                outer.rollback()

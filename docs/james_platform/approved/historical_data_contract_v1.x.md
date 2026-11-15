@@ -1,4 +1,4 @@
-# Historical Data Contract v1.1
+# Historical Data Contract v1.2
 
 **Status:** DRAFT — implementation changes require review; Gate C is not closed
 **Owner:** James — Platform & Historical Data
@@ -12,6 +12,7 @@
 |---|---|---|
 | 1.0 | 15 November 2026 | Initial event availability and provenance contract; explicitly draft. |
 | 1.1 | 16 November 2026 | Separate transaction-origin and event-receipt batches; define projection/correction rules; persist visit and membership source events; make migration-0013 coverage boundary explicit; record outstanding evidence and source-feed gaps. |
+| 1.2 | 16 November 2026 | Add worker job idempotency and cancellation contract; expand PostgreSQL overlap/master-data/snapshot tests, frontend workflow tests, populated-database migration verification, and deploy/recovery runbook. Approval remains pending. |
 
 ## 1. Time and provenance
 
@@ -103,10 +104,14 @@ Rules:
 | Exact duplicate batch and identical manifest checksums | Return `ALREADY_LOADED`; do not rewrite batch or event publication metadata. |
 | Same batch ID but changed checksums or incomplete prior batch | Reject and require manual investigation. |
 | Overlapping source primary key in a different batch | Reject atomically; source IDs are globally unique in the current source tables. Do not silently overwrite master/source rows. |
+| Same source event ID and version retried with same idempotency key | Resolve to the original event without adding another financial/status effect. |
+| Same idempotency key with changed event payload or provenance | Reject; do not mutate the original event. |
 | Event for a transaction from a later receiving batch | Keep original `source_transaction_batch_id`; set `source_batch_id` to the new receiving batch. Both batches must be published before as-of query returns it. |
 | Late event | Preserve the source `occurred_at`; set availability/recording to database receipt time. Earlier `known_at` excludes it. |
 | Master-data update | Current loader treats shared branch data as immutable and validates equality. Versioned catalogue references use `(item_code, source_batch_id)`; a child uses the catalogue version from its own batch. |
 | Retry / concurrency | Per-batch advisory lock plus checksum lookup; event idempotency uses a database unique key and atomic conflict handling. |
+| Worker job retry | Use an optional stable `idempotency_key`; identical kind/payload/attempt limit returns the existing job, while changed content with that key is rejected. |
+| Worker cancellation | Queued jobs become `cancelled`; running jobs become `cancel_requested`, then the worker terminates its handler process and records `cancelled`. Cancellation cannot reverse an external side effect already completed; handlers must be retry-safe/idempotent. |
 | Partial failure | Ingestion writes raw, typed, event, and publish state in one database transaction. Any failure rolls the transaction back; a failed batch must not appear PUBLISHED. |
 | Recovery | Retry an uncommitted identical batch. A persisted non-PUBLISHED batch is an investigation blocker, not an automatic success-shaped retry. |
 | Publish order | Each batch publishes atomically after its rows and event history are written. No global ordering between independent batches is implied. |
@@ -138,17 +143,20 @@ The function therefore does not guarantee historical refund, status, or review s
 
 ## 8. Acceptance test matrix
 
-Implemented test coverage in this change:
+Implemented test coverage in the follow-up:
 
 - Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`.
-- PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable.
+- PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable; source-ID overlap and master-data update rejection; snapshot replay immutability; unique worker idempotency key.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
+- Worker unit tests: retry/backoff, hard timeout, child-process cancellation, stale claim fencing, and recovery of a cancelled job.
+- Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
+- A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
 
-PostgreSQL CI evidence: migration through 0020 succeeded and all 11
-`test_postgres_platform.py` tests passed in the dedicated PostgreSQL CI job.
-The tests cover batch A/B/C, replay/conflicting key, late availability,
-visit/membership event history, published-batch filtering, concurrent
-duplicate-batch ingestion, rollback/recovery, and catalogue batch references.
+The preceding PostgreSQL CI run migrated through 0020 and passed all 11
+`test_postgres_platform.py` tests. The new PostgreSQL tests and populated
+migration-upgrade fixture are awaiting CI on the follow-up commit; local
+PostgreSQL/Docker is unavailable, so their results must not be inferred from
+the preceding run.
 
 Still required before Gate C:
 
@@ -159,10 +167,16 @@ Still required before Gate C:
 - Extend identity tests for review-required history, corrected/revoked
   decisions, unresolved state, and merge/split stability of published
   snapshots.
-- Test batch overlap/source-ID conflict, master-data update policy, and
-  published snapshot immutability after later batches on PostgreSQL.
+- Publish immutable snapshot checksums/`known_at` and complete all feature
+  inputs only if/when an official historical training snapshot is approved.
 - Build official end-to-end feature snapshots or keep the current utility
   out of Moses training.
+- Record Moses/Christ/cross-team semantic review and explicit approval.
+
+Platform follow-up still requires production-like worker/advisory-lock/load
+testing, audit trace benchmark at representative volume, and restore drill.
+Physical table partitioning remains a data-volume/retention decision and is
+not implemented without an approved design.
 
 ## 9. Evidence and approval
 
@@ -180,6 +194,10 @@ Still required before Gate C:
 | Cross-team Gate C | Pending. |
 
 Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
+
+The next follow-up commit adds migration 0021 and more acceptance tests.
+Its CI result must be linked here only after the actual run completes.
+See [James deploy and recovery runbook](../RUNBOOK_GATE_C.md).
 
 ## 10. Training and ground-truth safeguards
 

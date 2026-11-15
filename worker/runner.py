@@ -11,13 +11,17 @@ from sqlalchemy.orm import Session, sessionmaker
 from api.audit import record_audit_event
 from api.database import SessionLocal
 from api.models import BatchJob
-from worker.scheduler import _execute_handler_with_timeout, start_scheduler
+from worker.scheduler import (
+    JobCancelledError,
+    _execute_handler_with_timeout,
+    start_scheduler,
+)
 from worker.tasks import TASK_HANDLERS
 
 logger = logging.getLogger(__name__)
 
 TaskHandler = Callable[[dict], dict]
-TaskExecutor = Callable[[TaskHandler, dict, int], dict]
+TaskExecutor = Callable[[TaskHandler, dict, int, Callable[[], bool]], dict]
 
 JOB_LEASE_SECONDS = 60 * 60
 
@@ -33,7 +37,7 @@ def recover_expired_jobs(
         statement = (
             select(BatchJob)
             .where(
-                BatchJob.status == "running",
+                BatchJob.status.in_(("running", "cancel_requested")),
                 BatchJob.lease_until.is_not(None),
                 BatchJob.lease_until <= now,
             )
@@ -48,7 +52,10 @@ def recover_expired_jobs(
                 (job.payload or {}).get("correlation_id") or f"batch-job-{job.id}"
             )
 
-            if job.attempts >= job.max_attempts:
+            if job.status == "cancel_requested":
+                job.status = "cancelled"
+                event_type = "batch.cancelled"
+            elif job.attempts >= job.max_attempts:
                 job.status = "failed"
                 event_type = "batch.failed"
             else:
@@ -152,8 +159,47 @@ def process_one(
 
     try:
         handler = handlers[kind]
-        result = handler_executor(handler, payload, job_timeout_seconds)
 
+        def cancellation_requested() -> bool:
+            with session_factory() as session:
+                current = session.get(BatchJob, job_id)
+                return (
+                    current is None
+                    or current.claim_token != claim_token
+                    or current.status == "cancel_requested"
+                )
+
+        result = handler_executor(
+            handler,
+            payload,
+            job_timeout_seconds,
+            cancellation_requested,
+        )
+
+    except JobCancelledError as error:
+        with session_factory() as session:
+            job = session.get(BatchJob, job_id)
+            if (
+                job is not None
+                and job.status == "cancel_requested"
+                and job.claim_token == claim_token
+            ):
+                job.status = "cancelled"
+                job.last_error = str(error)[:1000]
+                job.started_at = None
+                job.lease_until = None
+                job.claim_token = None
+                record_audit_event(
+                    session,
+                    correlation_id=correlation_id,
+                    event_type="batch.cancelled",
+                    actor_id=job.created_by,
+                    entity_type="batch_job",
+                    entity_id=job_id,
+                    details={"kind": kind, "attempt": job.attempts},
+                )
+                session.commit()
+        return True
     except Exception as error:
         logger.exception("Batch job failed id=%s kind=%s", job_id, kind)
 
@@ -163,7 +209,7 @@ def process_one(
             # A worker whose claim has expired must not overwrite a newer attempt.
             if (
                 job is not None
-                and job.status == "running"
+                and job.status in {"running", "cancel_requested"}
                 and job.claim_token == claim_token
             ):
                 job.last_error = str(error)[:1000]
@@ -171,7 +217,10 @@ def process_one(
                 job.lease_until = None
                 job.claim_token = None
 
-                if job.attempts >= job.max_attempts:
+                if job.status == "cancel_requested":
+                    job.status = "cancelled"
+                    event_type = "batch.cancelled"
+                elif job.attempts >= job.max_attempts:
                     job.status = "failed"
                     event_type = "batch.failed"
                 else:
@@ -205,12 +254,15 @@ def process_one(
         # Only the worker holding the current claim may complete the job.
         if (
             job is not None
-            and job.status == "running"
+            and job.status in {"running", "cancel_requested"}
             and job.claim_token == claim_token
         ):
-            job.result = result
-            job.status = "completed"
-            job.last_error = None
+            cancelled = job.status == "cancel_requested"
+            job.result = None if cancelled else result
+            job.status = "cancelled" if cancelled else "completed"
+            job.last_error = (
+                "Cancellation requested after handler returned." if cancelled else None
+            )
             job.started_at = None
             job.lease_until = None
             job.claim_token = None
@@ -218,11 +270,11 @@ def process_one(
             record_audit_event(
                 session,
                 correlation_id=correlation_id,
-                event_type="batch.completed",
+                event_type="batch.cancelled" if cancelled else "batch.completed",
                 actor_id=job.created_by,
                 entity_type="batch_job",
                 entity_id=job_id,
-                details={"kind": kind, "result": result},
+                details={"kind": kind, **({} if cancelled else {"result": result})},
             )
 
             session.commit()

@@ -93,7 +93,10 @@ class AuditEvent(Base):
 
 class BatchJob(Base):
     __tablename__ = "batch_jobs"
-    __table_args__ = {"schema": "act"}
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_batch_jobs_idempotency"),
+        {"schema": "act"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(String(64), index=True)
@@ -103,6 +106,7 @@ class BatchJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

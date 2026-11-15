@@ -295,3 +295,67 @@ feed historis lengkap.
 - Sampai P0 selesai, seluruh feed dan acceptance coverage tersedia, dan
   review lintas tim dicatat:
   `training_ready=false`, `experiment_ready=false`, `final_model=false`.
+
+  ## Pembaruan status - 16 November 2026 (platform/runtime follow-up lokal)
+
+  PR #35 tetap **OPEN / DRAFT**. Perubahan lanjutan di bawah ini sudah ada di
+  working tree, tetapi belum menjadi commit dan belum memiliki hasil CI baru.
+  Karena itu, hasil workflow pada commit `26e2095` tidak dianggap sebagai
+  validasi untuk perubahan ini.
+
+  ### Perubahan James yang ditambahkan
+
+  - Migration 0021 menambahkan `idempotency_key` nullable dengan unique
+    constraint pada `act.batch_jobs`, kompatibel dengan row lama.
+  - API job mendukung replay idempotent, menolak pemakaian key dengan payload,
+    jenis job, atau batas attempt yang berbeda, dan menyediakan cancellation
+    untuk job queued/running.
+  - Worker memeriksa cancellation saat handler berjalan, menghentikan proses
+    handler, mencatat status/audit cancellation, dan memulihkan permintaan
+    cancellation yang lease-nya kedaluwarsa.
+  - CI menyiapkan kredensial login khusus API/worker dan memverifikasi koneksi
+    runtime non-superuser; E2E API menggunakan role API, bukan administrator.
+  - E2E browser menambah alur persetujuan campaign → audit trace dan pembuatan
+    serta keputusan identity review.
+  - PostgreSQL test definitions menambah overlap source ID, konflik update
+    master data, replay snapshot immutable, dan uniqueness idempotency job.
+  - Script CI memulai dari database populated pada revision 0014, meng-upgrade
+    ke head, lalu memeriksa transaction/visit/membership event lineage dan
+    occurrence time.
+  - Runbook deploy, rollback, backup/restore, monitoring, dan recovery tersedia
+    sebagai draft di `docs/james_platform/RUNBOOK_GATE_C.md`.
+
+  ### Bukti validasi lokal untuk working tree
+
+  | Pemeriksaan | Hasil |
+  |---|---|
+  | `pytest -q tests` | 729 passed, 15 skipped |
+  | PostgreSQL acceptance tests lokal | Tidak dijalankan; 15 tes terkait ter-skip karena PostgreSQL lokal/URL tidak tersedia |
+  | Ruff | Lulus |
+  | Black | Lulus; 168 file unchanged setelah format script migrasi |
+  | MyPy | Lulus; 88 source files |
+  | Frontend production build | Lulus (`tsc -b` dan `vite build`) |
+  | Alembic | Satu head: `0021_batch_job_idempotency` |
+  | CI workflow YAML | Parse lokal berhasil |
+
+  CI run `43747326104` dan hasil PostgreSQL 11/11 merujuk commit sebelumnya,
+  bukan perubahan lokal terbaru. Migration-upgrade fixture, perubahan role
+  runtime CI, tambahan PostgreSQL tests, dan E2E baru **menunggu workflow baru**.
+
+  ### Status terbaru per butir
+
+  | Butir | Status |
+  |---|---|
+  | Worker job idempotency dan cancellation | **DONE — code + unit tests lokal**; menunggu CI |
+  | DB runtime login isolation API/worker | **IN PROGRESS** — provisioning dan koneksi nyata ditambahkan ke CI; belum ada hasil workflow untuk perubahan ini |
+  | Populated-database migration upgrade | **IN PROGRESS** — fixture/script ditambahkan; belum dijalankan terhadap PostgreSQL |
+  | PostgreSQL overlap/master-data/snapshot acceptance | **IN PROGRESS** — test definitions ditambahkan; menunggu PostgreSQL CI |
+  | Frontend approval, identity review, audit trace E2E | **IN PROGRESS** — skenario ditambahkan; menunggu Playwright CI |
+  | Deploy/rollback/backup/restore/recovery runbook | **DONE — draft terdokumentasi**; restore drill produksi belum dilakukan |
+  | Refund/status/cancellation source feeds | **BLOCKED** — sumber dan kontrak feed eksternal belum tersedia |
+  | Historical identity review/revocation dan official feature snapshot | **BLOCKED / INCOMPLETE** — membutuhkan keputusan dan histori input bitemporal |
+  | Moses/Christ/cross-team approval | **BLOCKED** — menunggu review pihak terkait; tidak dapat disetujui oleh James |
+  | Gate C, training, experiment, final model | **NOT CLOSED** — `training_ready=false`, `experiment_ready=false`, `final_model=false` |
+
+  Commit dan link CI untuk pembaruan ini harus ditambahkan setelah commit
+  dipush dan workflow selesai. Jangan menganggap status DRAFT sebagai approval.
