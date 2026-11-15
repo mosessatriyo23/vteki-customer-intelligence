@@ -15,7 +15,9 @@ from sqlalchemy.pool import StaticPool
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.models import (
     GoldenCustomer,
+    IdentityHistoryCoverage,
     IdentityMappingHistory,
+    IdentityReviewDecisionHistory,
     IngestionBatch,
     IngestionRawRow,
     ProfileSnapshot,
@@ -271,6 +273,33 @@ class PersistenceTests(unittest.TestCase):
             assert at_coverage.mapping == {
                 "migration-baseline-source": "migration-baseline-golden"
             }
+
+    def test_identity_coverage_marker_blocks_even_when_baseline_table_is_empty(self):
+        coverage_time = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        with self.SessionLocal() as session:
+            session.add(
+                IdentityHistoryCoverage(
+                    singleton_id=1,
+                    coverage_started_at=coverage_time,
+                    recorded_at=coverage_time,
+                )
+            )
+            session.commit()
+            result = PersistentIdentityRegistry(session).get_mapping_as_of_result(
+                effective_at=coverage_time - timedelta(seconds=1),
+                recorded_at=coverage_time + timedelta(minutes=1),
+            )
+            self.assertEqual(result.status, "BLOCKED")
+            self.assertEqual(result.mapping, {})
+            self.assertEqual(result.coverage_started_at, coverage_time)
+            unknown_to_old_knowledge = PersistentIdentityRegistry(
+                session
+            ).get_mapping_as_of_result(
+                effective_at=coverage_time + timedelta(seconds=1),
+                recorded_at=coverage_time - timedelta(seconds=1),
+            )
+            self.assertEqual(unknown_to_old_knowledge.status, "UNKNOWN")
+            self.assertIsNone(unknown_to_old_knowledge.coverage_started_at)
 
     def test_identity_split_as_of_preserves_prior_mapping_without_forcing_unknowns(
         self,
@@ -586,6 +615,16 @@ class PersistenceTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "APPROVED_MERGE")
 
+            decision_event = session.scalars(
+                select(IdentityReviewDecisionHistory).where(
+                    IdentityReviewDecisionHistory.review_queue_id == queue_id,
+                    IdentityReviewDecisionHistory.event_type == "DECISION",
+                )
+            ).one()
+            self.assertEqual(decision_event.action, "APPROVE_MERGE")
+            self.assertEqual(decision_event.reviewer_id, self.user_id)
+            self.assertEqual(decision_event.correlation_id, "corr-test-12345")
+
             # Check audit trail created
             audit = session.scalars(
                 select(ReviewAuditLog).where(ReviewAuditLog.review_queue_id == queue_id)
@@ -642,6 +681,150 @@ class PersistenceTests(unittest.TestCase):
                 recorded_at=merge_recorded_at - timedelta(microseconds=1),
             )
             self.assertEqual(old_knowledge, {"s1": "g-101", "s2": "g-102"})
+
+    def test_review_decision_history_is_bitemporal_and_correctable(self):
+        now = datetime.now(timezone.utc)
+        with self.SessionLocal() as session:
+            version = RegistryVersion(
+                version_tag="review-history-v1",
+                algorithm="test",
+                parameters={},
+                status="ACTIVE",
+                description="Review history test",
+                created_at=now,
+            )
+            queue = ReviewQueueItem(
+                source_batch_id="review-history-batch",
+                registry_version=version.version_tag,
+                left_source_id="review-left",
+                right_source_id="review-right",
+                left_golden_id=None,
+                right_golden_id=None,
+                heuristic_score=0.5,
+                reason="test",
+                status="PENDING",
+                created_at=now,
+            )
+            session.add_all([version, queue])
+            session.flush()
+            initial = IdentityReviewDecisionHistory(
+                review_queue_id=queue.id,
+                event_type="DECISION",
+                action="REJECT_KEEP_SEPARATE",
+                occurred_at=now - timedelta(minutes=30),
+                available_at=now - timedelta(minutes=30),
+                recorded_at=now - timedelta(minutes=30),
+                source_batch_id=queue.source_batch_id,
+                source_event_id="review-history:initial-event",
+                source_version="identity-review-v1",
+                idempotency_key="review-history:initial",
+                reviewer_id=self.user_id,
+                correlation_id="review-history-initial",
+                rationale="Initial reviewed decision",
+            )
+            session.add(initial)
+            session.commit()
+            queue_id, initial_id = queue.id, initial.event_id
+
+            registry = PersistentIdentityRegistry(session)
+            before_correction = now - timedelta(seconds=1)
+            with self.assertRaisesRegex(ValueError, "cannot predate"):
+                registry.append_review_decision_revision(
+                    queue_id=queue_id,
+                    supersedes_event_id=initial_id,
+                    event_type="CORRECTION",
+                    action="APPROVE_MERGE",
+                    actor_id=self.user_id,
+                    rationale="Invalid early correction",
+                    correlation_id="review-history-early-correction",
+                    occurred_at=now - timedelta(hours=1),
+                )
+            correction = registry.append_review_decision_revision(
+                queue_id=queue_id,
+                supersedes_event_id=initial_id,
+                event_type="CORRECTION",
+                action="APPROVE_MERGE",
+                actor_id=self.user_id,
+                rationale="Corrected after evidence review",
+                correlation_id="review-history-correction",
+            )
+            session.commit()
+            replay = registry.append_review_decision_revision(
+                queue_id=queue_id,
+                supersedes_event_id=initial_id,
+                event_type="CORRECTION",
+                action="APPROVE_MERGE",
+                actor_id=self.user_id,
+                rationale="Corrected after evidence review",
+                correlation_id="review-history-correction",
+            )
+            self.assertEqual(replay.event_id, correction.event_id)
+            with self.assertRaisesRegex(ValueError, "conflicts with payload"):
+                registry.append_review_decision_revision(
+                    queue_id=queue_id,
+                    supersedes_event_id=initial_id,
+                    event_type="CORRECTION",
+                    action="REJECT_KEEP_SEPARATE",
+                    actor_id=self.user_id,
+                    rationale="Conflicting retry",
+                    correlation_id="review-history-correction",
+                )
+
+            effective_after = now + timedelta(minutes=1)
+            knowledge_before = registry.get_review_decision_as_of(
+                queue_id, effective_after, before_correction
+            )
+            self.assertEqual(knowledge_before.action, "REJECT_KEEP_SEPARATE")
+            knowledge_after = registry.get_review_decision_as_of(
+                queue_id, effective_after, now + timedelta(minutes=1)
+            )
+            self.assertEqual(knowledge_after.action, "APPROVE_MERGE")
+            status_by_golden = registry.get_review_status_by_golden_as_of(
+                {
+                    "review-left": "gold-review-left",
+                    "review-right": "gold-review-right",
+                },
+                effective_after,
+                now + timedelta(minutes=1),
+            )
+            self.assertEqual(
+                set(status_by_golden.values()),
+                {"UNKNOWN"},
+            )
+            merged_status = registry.get_review_status_by_golden_as_of(
+                {"review-left": "gold-review-left", "review-right": "gold-review-left"},
+                effective_after,
+                now + timedelta(minutes=1),
+            )
+            self.assertEqual(
+                merged_status,
+                {"gold-review-left": "APPROVED"},
+            )
+
+            revoke = registry.append_review_decision_revision(
+                queue_id=queue_id,
+                supersedes_event_id=correction.event_id,
+                event_type="REVOCATION",
+                action=None,
+                actor_id=self.user_id,
+                rationale="Revoked pending new evidence",
+                correlation_id="review-history-revocation",
+            )
+            session.commit()
+            revoked = registry.get_review_decision_as_of(
+                queue_id, now + timedelta(minutes=2), now + timedelta(minutes=2)
+            )
+            self.assertEqual(revoked.event_id, revoke.event_id)
+            self.assertIsNone(revoked.action)
+            revoked_status = registry.get_review_status_by_golden_as_of(
+                {
+                    "review-left": "gold-review-left",
+                    "review-right": "gold-review-right",
+                },
+                now + timedelta(minutes=2),
+                now + timedelta(minutes=2),
+            )
+            self.assertEqual(set(revoked_status.values()), {"REVIEW_REQUIRED"})
 
     def test_customer360_and_segmentation_snapshot_persistence(self):
         cutoff = datetime(2026, 9, 6, 23, 59, 59, tzinfo=timezone.utc)

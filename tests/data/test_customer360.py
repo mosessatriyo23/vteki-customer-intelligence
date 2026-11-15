@@ -48,15 +48,22 @@ class Customer360Tests(unittest.TestCase):
                 for row in read_mapping(output / "mapping.csv")
             }
 
-            with patch.object(
-                PersistentIdentityRegistry,
-                "get_mapping_as_of_result",
-                return_value=IdentityMappingAsOf(
-                    status="AVAILABLE",
-                    mapping=mapping,
-                    coverage_started_at=cutoff,
+            with (
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_mapping_as_of_result",
+                    return_value=IdentityMappingAsOf(
+                        status="AVAILABLE",
+                        mapping=mapping,
+                        coverage_started_at=cutoff,
+                    ),
+                ) as lookup,
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_review_status_by_golden_as_of",
+                    return_value={},
                 ),
-            ) as lookup:
+            ):
                 profiles = build_profiles_as_of(
                     inbound,
                     output,
@@ -111,13 +118,20 @@ class Customer360Tests(unittest.TestCase):
                 row["source_customer_id"]: row["golden_customer_id"]
                 for row in mapping_rows
             }
-            with patch.object(
-                PersistentIdentityRegistry,
-                "get_mapping_as_of_result",
-                return_value=IdentityMappingAsOf(
-                    status="AVAILABLE",
-                    mapping=mapping,
-                    coverage_started_at=cutoff,
+            with (
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_mapping_as_of_result",
+                    return_value=IdentityMappingAsOf(
+                        status="AVAILABLE",
+                        mapping=mapping,
+                        coverage_started_at=cutoff,
+                    ),
+                ),
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_review_status_by_golden_as_of",
+                    return_value={},
                 ),
             ):
                 as_of_profiles = build_profiles_as_of(

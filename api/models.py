@@ -4,6 +4,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -509,6 +510,28 @@ class IdentityMappingHistory(Base):
     change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class IdentityHistoryCoverage(Base):
+    """Independent marker for the earliest complete identity-history coverage."""
+
+    __tablename__ = "identity_history_coverage"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_identity_history_coverage_singleton"
+        ),
+        {"schema": "identity"},
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    coverage_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class MatchDecision(Base):
     __tablename__ = "match_decisions"
     __table_args__ = (
@@ -605,6 +628,71 @@ class ReviewAuditLog(Base):
     performed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class IdentityReviewDecisionHistory(Base):
+    """Append-only bitemporal journal for identity review decisions."""
+
+    __tablename__ = "review_decision_history"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_review_decision_idempotency"),
+        Index(
+            "ix_review_decision_history_asof",
+            "review_queue_id",
+            "occurred_at",
+            "available_at",
+            "recorded_at",
+        ),
+        CheckConstraint(
+            "event_type IN ('DECISION', 'CORRECTION', 'REVOCATION')",
+            name="ck_review_decision_history_event_type",
+        ),
+        CheckConstraint(
+            "(event_type = 'REVOCATION' AND action IS NULL) OR "
+            "(event_type IN ('DECISION', 'CORRECTION') AND action IN "
+            "('APPROVE_MERGE', 'REJECT_KEEP_SEPARATE'))",
+            name="ck_review_decision_history_action",
+        ),
+        {"schema": "identity"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    review_queue_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("identity.review_queue.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    supersedes_event_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("identity.review_decision_history.event_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    reviewer_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("core.users.id"), nullable=False
+    )
+    correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    rationale: Mapped[str] = mapped_column(String(1000), nullable=False)
 
 
 class ProfileSnapshot(Base):

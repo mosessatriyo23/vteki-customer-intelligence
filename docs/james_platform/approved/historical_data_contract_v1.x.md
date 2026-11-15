@@ -14,6 +14,7 @@
 | 1.1 | 16 November 2026 | Separate transaction-origin and event-receipt batches; define projection/correction rules; persist visit and membership source events; make migration-0013 coverage boundary explicit; record outstanding evidence and source-feed gaps. |
 | 1.2 | 16 November 2026 | Add worker job idempotency and cancellation contract; expand PostgreSQL overlap/master-data/snapshot tests, frontend workflow tests, populated-database migration verification, and deploy/recovery runbook. Approval remains pending. |
 | 1.3 | 16 November 2026 | Prevent `build_profiles_as_of()` from deriving historical identity status from the static review queue; emit `UNKNOWN` until bitemporal review-decision history exists. |
+| 1.4 | 16 November 2026 | Add append-only bitemporal identity review decision history with correction/revocation, as-of projection, independent identity coverage marker, PostgreSQL tie-order test, and role grants. |
 
 ## 1. Time and provenance
 
@@ -131,11 +132,38 @@ Migration 0013 creates a `BASELINE` at migration time. It does **not** reconstru
 
 `get_mapping_as_of()` raises `IdentityHistoryCoverageError` for a blocked cutoff. Unresolved sources are not assigned a fabricated Golden ID. Current `review_queue` is not an as-of review history; it must not be used to claim historical review status.
 
-`build_profiles_as_of()` therefore reports `identity_status="UNKNOWN"` rather
-than reading the latest/static `review_queue.csv`. This avoids retroactively
-applying current review state to a historical cutoff. The status remains
-unknown until review-decision events have their own effective/available/recorded
-history, including correction and revocation semantics.
+Migration 0023 persists `identity.identity_history_coverage` independently of
+the number of baseline rows. If migration 0013 found no mappings, coverage
+begins at migration 0023 time; an empty baseline is not treated as evidence of
+complete earlier history. A knowledge cutoff before the coverage marker was
+recorded returns `UNKNOWN`; an effective cutoff before coverage returns
+`BLOCKED`.
+
+Migration 0013 records the mapping baseline at migration time only. It does
+not reconstruct identity changes before migration 0013.
+
+Migration 0022 adds `identity.review_decision_history`. New decisions carry
+`occurred_at`, database-assigned `available_at` and `recorded_at`,
+`source_event_id`, `source_version`, receiving `source_batch_id`, an
+idempotency key, reviewer, correlation, and rationale. Existing audit decisions
+are backfilled using their actual `performed_at`; availability starts at the
+backfill migration because earlier availability is unknown.
+
+Corrections append a new event linked to the current chain head; revocations
+append a null-action event. Corrections that predate the decision they revise,
+forks, and conflicting retries are rejected. The as-of query applies only
+events satisfying `occurred_at <= effective_at` and both receipt timestamps
+`<= known_at`. It does not read mutable `review_queue.status` or the static CSV.
+An approved merge is reported as `APPROVED` only when the as-of mapping also
+shows the reviewed identities in one Golden ID; otherwise the profile is
+`UNKNOWN`. A rejected decision is `REJECTED` only while the identities remain
+separate. The decision journal does not itself rewrite identity mappings:
+corrections that alter a merge/split must also append the corresponding
+`identity_mapping_history` events through the reviewed mapping workflow.
+
+`build_profiles_as_of()` now derives identity status from that bitemporal
+decision journal. Status stays `UNKNOWN` where no suitable decision history
+exists; it never imports the current review queue state retroactively.
 
 ## 7. Customer 360 scope
 
@@ -161,6 +189,8 @@ Implemented test coverage in the follow-up:
 - Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`.
 - PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable; source-ID overlap and master-data update rejection; snapshot replay immutability; unique worker idempotency key.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
+- Identity review unit tests: decision as-of, late correction visibility, linear correction/revocation, idempotent retry, correction/mapping consistency, and coverage marker behavior when baseline rows are empty.
+- PostgreSQL acceptance: identity review receipt timestamp cannot be backdated, history rejects update/delete, and transaction event ordering is deterministic when database availability timestamps tie.
 - Customer360 regression: changing the static review queue cannot make
   `build_profiles_as_of()` claim historical `REVIEW_REQUIRED`; status is
   `UNKNOWN` until review history is available.
@@ -183,9 +213,8 @@ Still required before Gate C:
   acceptance is covered by the pure deterministic projection test.
 - Integrate actual refund/status/cancellation/correction source feeds and
   prove coverage completeness. Do not synthesize missing events.
-- Implement append-only bitemporal identity review-decision history, including
-  correction/revocation semantics, and add PostgreSQL acceptance tests. Current
-  `build_profiles_as_of()` deliberately returns `UNKNOWN` for review status.
+- Verify migration 0022/0023 and the new PostgreSQL acceptance cases in CI; the local environment used for this follow-up has no PostgreSQL service.
+- Add PostgreSQL end-to-end review-decision correction/revocation tests. Unit tests cover the chain and as-of behavior; the current PostgreSQL case covers receipt-time enforcement and append-only mutation rejection.
 - Extend identity tests for unresolved state and merge/split stability of
   published snapshots.
 - Publish immutable snapshot checksums/`known_at` and complete all feature
@@ -204,7 +233,7 @@ not implemented without an approved design.
 | Evidence / review | Status |
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
-| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), OPEN / DRAFT; implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`. |
+| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35); GitHub currently reports it closed/merged at merge commit `30bb4a68794f6551a184e2f0cf7e9902477c6511`. This metadata is not cross-team approval. |
 | Latest PR-head CI | [Workflow run 43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746): backend, frontend build, and frontend E2E jobs all passed. |
 | PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
 | Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351): passed, including campaign approval/audit trace and identity review. |
@@ -218,6 +247,16 @@ not implemented without an approved design.
 | Cross-team Gate C | Pending. |
 
 Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
+
+This v1.4 follow-up is being prepared on a new branch after the PR #35 merge
+metadata above. It is not included in the cited PR #35 CI run until a new PR
+and CI run verify it.
+
+Local verification on the follow-up branch: `pytest -q` reports **839 passed,
+16 skipped**. The skipped cases require a PostgreSQL service; therefore the
+new migrations and PostgreSQL acceptance additions remain **CI pending**.
+Ruff, Black, and MyPy passed locally, and Alembic reports one head at
+`0023_identity_history_coverage_marker`.
 
 The CI run above validates the current implementation but does not close
 remaining feed-coverage, historical identity, official-snapshot, production

@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
@@ -21,11 +21,13 @@ from api.models import (
     BatchJob,
     GoldenCustomer,
     IdentityMappingHistory,
+    IdentityReviewDecisionHistory,
     IngestionBatch,
     ProfileSnapshot,
     RegistryVersion,
     ReviewAuditLog,
     ReviewQueueItem,
+    TransactionEventHistory,
     User,
 )
 from generator.generate import run as generate
@@ -247,6 +249,115 @@ def test_postgres_identity_review_audit_is_append_only(pg_engine: Engine):
                 outer.rollback()
 
 
+def test_postgres_identity_review_decision_history_is_bitemporal_and_append_only(
+    pg_engine: Engine,
+):
+    batch_id = f"ci-{uuid4().hex}"
+    version_tag = f"ci-{uuid4().hex[:24]}"
+    now = datetime.now(timezone.utc)
+    submitted_available = now - timedelta(days=7)
+    event_table = IdentityReviewDecisionHistory.__table__
+
+    with pg_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            connection.execute(
+                IngestionBatch.__table__.insert().values(
+                    batch_id=batch_id,
+                    schema_version="2.0.0",
+                    seed=None,
+                    as_of_date=date.today(),
+                    manifest_payload={},
+                    table_checksums={},
+                    status="STAGED",
+                    rejection_reasons=None,
+                    row_counts={},
+                    loaded_at=now,
+                    published_at=None,
+                )
+            )
+            connection.execute(
+                RegistryVersion.__table__.insert().values(
+                    version_tag=version_tag,
+                    algorithm="ci-test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Temporary bitemporal review test",
+                    created_at=now,
+                )
+            )
+            queue_id = connection.execute(
+                ReviewQueueItem.__table__.insert()
+                .values(
+                    source_batch_id=batch_id,
+                    registry_version=version_tag,
+                    left_source_id=f"left-{uuid4().hex[:12]}",
+                    right_source_id=f"right-{uuid4().hex[:12]}",
+                    left_golden_id=None,
+                    right_golden_id=None,
+                    heuristic_score=0.5,
+                    reason="ci_test",
+                    status="PENDING",
+                    created_at=now,
+                )
+                .returning(ReviewQueueItem.__table__.c.id)
+            ).scalar_one()
+            actor_id = connection.execute(
+                User.__table__.insert()
+                .values(
+                    email=f"ci-{uuid4().hex}@example.com",
+                    password_hash="not-a-real-password-hash",
+                    is_active=True,
+                    created_at=now,
+                )
+                .returning(User.__table__.c.id)
+            ).scalar_one()
+            event_id = connection.execute(
+                event_table.insert()
+                .values(
+                    review_queue_id=queue_id,
+                    event_type="DECISION",
+                    action="REJECT_KEEP_SEPARATE",
+                    occurred_at=now - timedelta(days=8),
+                    available_at=submitted_available,
+                    source_batch_id=batch_id,
+                    source_event_id=f"ci-review:{uuid4().hex}",
+                    source_version="identity-review-v1",
+                    idempotency_key=f"ci:{uuid4().hex}",
+                    reviewer_id=actor_id,
+                    correlation_id=f"ci-{uuid4().hex}",
+                    rationale="temporary CI bitemporal review test",
+                )
+                .returning(event_table.c.event_id)
+            ).scalar_one()
+            stored = connection.execute(
+                select(
+                    event_table.c.available_at,
+                    event_table.c.recorded_at,
+                    event_table.c.occurred_at,
+                ).where(event_table.c.event_id == event_id)
+            ).one()
+            assert stored.available_at > submitted_available
+            assert stored.recorded_at == stored.available_at
+            assert stored.occurred_at == now - timedelta(days=8)
+
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        event_table.update()
+                        .where(event_table.c.event_id == event_id)
+                        .values(rationale="tampered")
+                    )
+            with pytest.raises(DBAPIError):
+                with connection.begin_nested():
+                    connection.execute(
+                        event_table.delete().where(event_table.c.event_id == event_id)
+                    )
+        finally:
+            if outer.is_active:
+                outer.rollback()
+
+
 def test_postgres_identity_mapping_history_is_append_only(pg_engine: Engine):
     batch_id = f"ci-{uuid4().hex}"
     version_tag = f"ci-{uuid4().hex[:24]}"
@@ -428,6 +539,26 @@ def test_postgres_role_groups_obey_least_privilege(pg_engine: Engine):
                 "SELECT has_column_privilege("
                 "'vteki_identity_reviewer', 'identity.golden_customers', "
                 "'status', 'UPDATE')"
+            )
+        ).scalar_one()
+        for privilege in ("SELECT", "INSERT"):
+            assert connection.execute(
+                text(
+                    "SELECT has_table_privilege("
+                    f"'vteki_identity_reviewer', 'identity.review_decision_history', '{privilege}')"
+                )
+            ).scalar_one()
+        for privilege in ("UPDATE", "DELETE"):
+            assert not connection.execute(
+                text(
+                    "SELECT has_table_privilege("
+                    f"'vteki_identity_reviewer', 'identity.review_decision_history', '{privilege}')"
+                )
+            ).scalar_one()
+        assert connection.execute(
+            text(
+                "SELECT has_table_privilege("
+                "'vteki_identity_reviewer', 'identity.identity_history_coverage', 'SELECT')"
             )
         ).scalar_one()
 
@@ -1100,6 +1231,60 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
                     assert after_status.actual_revenue == 0
                     assert refund.payload["refund_amount"] == 1
                     assert loader.ingest(receipt_batch)["status"] == "ALREADY_LOADED"
+
+                    tie_time = now - timedelta(seconds=30)
+                    connection.execute(
+                        text(
+                            "ALTER TABLE source.transaction_event_history "
+                            "DISABLE TRIGGER set_transaction_event_receipt_time"
+                        )
+                    )
+                    try:
+                        first_tie = TransactionEventHistory(
+                            source_transaction_id=transaction_id,
+                            event_type="STATUS_CHANGED",
+                            occurred_at=tie_time,
+                            available_at=tie_time,
+                            recorded_at=tie_time,
+                            source_batch_id=correction_batch_id,
+                            source_transaction_batch_id=transaction_batch_id,
+                            idempotency_key=f"ci-tie-first-{uuid4().hex}",
+                            payload={"status": "CANCELLED"},
+                            actor_type="SOURCE",
+                            source_event_id=f"ci-tie-first-{uuid4().hex}",
+                            source_version="1",
+                        )
+                        second_tie = TransactionEventHistory(
+                            source_transaction_id=transaction_id,
+                            event_type="STATUS_CHANGED",
+                            occurred_at=tie_time,
+                            available_at=tie_time,
+                            recorded_at=tie_time,
+                            source_batch_id=correction_batch_id,
+                            source_transaction_batch_id=transaction_batch_id,
+                            idempotency_key=f"ci-tie-second-{uuid4().hex}",
+                            payload={"status": "COMPLETED"},
+                            actor_type="SOURCE",
+                            source_event_id=f"ci-tie-second-{uuid4().hex}",
+                            source_version="1",
+                        )
+                        session.add_all([first_tie, second_tie])
+                        session.flush()
+                    finally:
+                        connection.execute(
+                            text(
+                                "ALTER TABLE source.transaction_event_history "
+                                "ENABLE TRIGGER set_transaction_event_receipt_time"
+                            )
+                        )
+                    tie_cutoff = tie_time + timedelta(seconds=1)
+                    tie_state = project_transaction_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=tie_cutoff,
+                        known_at=tie_cutoff,
+                    )
+                    assert tie_state.status == "COMPLETED"
 
             finally:
                 if outer.is_active:

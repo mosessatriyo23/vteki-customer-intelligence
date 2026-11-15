@@ -46,11 +46,15 @@ REVOKE ALL ON SCHEMA core, gov FROM vteki_identity_reviewer;
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA gov FROM vteki_identity_reviewer;
 GRANT USAGE ON SCHEMA identity TO vteki_identity_reviewer;
 GRANT SELECT ON identity.golden_customers, identity.source_identity_mapping,
-    identity.match_decisions, identity.review_queue, identity.registry_versions
+    identity.identity_mapping_history, identity.identity_history_coverage,
+    identity.review_decision_history, identity.match_decisions,
+    identity.review_queue, identity.registry_versions
     TO vteki_identity_reviewer;
 GRANT UPDATE (status, reviewer_id, reviewer_note, decided_at)
     ON identity.review_queue TO vteki_identity_reviewer;
 GRANT INSERT, SELECT ON identity.review_audit_log TO vteki_identity_reviewer;
+GRANT INSERT, SELECT ON identity.identity_mapping_history,
+    identity.review_decision_history TO vteki_identity_reviewer;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA identity TO vteki_identity_reviewer;
 
 REVOKE ALL ON SCHEMA core, gov, act, dec, feat, stg, source

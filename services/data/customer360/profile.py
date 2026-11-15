@@ -28,6 +28,7 @@ def build_profiles(
     *,
     identity_mapping: dict[str, str] | None = None,
     identity_status_override: str | None = None,
+    identity_status_by_golden: dict[str, str] | None = None,
 ) -> list[dict]:
     import json
 
@@ -71,12 +72,17 @@ def build_profiles(
         raise ValueError(
             f"Unsupported identity status override: {identity_status_override!r}"
         )
+    if identity_status_by_golden is not None and any(
+        status not in _IDENTITY_STATUSES
+        for status in identity_status_by_golden.values()
+    ):
+        raise ValueError("Identity status map contains an unsupported status")
     if len(mapping) != len(rows) or set(mapping) != set(sources):
         raise ValueError(
             "UNKNOWN: identity history does not resolve every source in this snapshot"
         )
     needs_review = set()
-    if identity_status_override is None:
+    if identity_status_override is None and identity_status_by_golden is None:
         for row in read(resolution / "review_queue.csv"):
             for field in ("left_source_id", "right_source_id"):
                 needs_review.add(mapping[row[field]])
@@ -92,7 +98,13 @@ def build_profiles(
                     identity_status_override
                     if identity_status_override is not None
                     else (
-                        "REVIEW_REQUIRED" if golden in needs_review else "PROVISIONAL"
+                        identity_status_by_golden.get(golden, "PROVISIONAL")
+                        if identity_status_by_golden is not None
+                        else (
+                            "REVIEW_REQUIRED"
+                            if golden in needs_review
+                            else "PROVISIONAL"
+                        )
                     )
                 ),
                 source_identity_count=0,
@@ -185,10 +197,21 @@ def build_profiles_as_of(
         raise IdentityHistoryCoverageError(
             f"{snapshot.status}: identity mapping is unavailable for this cutoff"
         )
+    known_at = recorded_at or datetime.now(cutoff.tzinfo)
+    registry = PersistentIdentityRegistry(session)
+    review_status = registry.get_review_status_by_golden_as_of(
+        snapshot.mapping,
+        cutoff,
+        known_at,
+    )
+    review_status = {
+        golden_id: review_status.get(golden_id, "UNKNOWN")
+        for golden_id in set(snapshot.mapping.values())
+    }
     return build_profiles(
         inbound,
         resolution,
         cutoff,
         identity_mapping=snapshot.mapping,
-        identity_status_override="UNKNOWN",
+        identity_status_by_golden=review_status,
     )

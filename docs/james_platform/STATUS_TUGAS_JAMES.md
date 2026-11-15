@@ -298,9 +298,12 @@ feed historis lengkap.
 
 ## Pembaruan status - 16 November 2026 (platform/runtime follow-up)
 
-PR #35 tetap **OPEN / DRAFT**. James-owned follow-up sudah dipush sampai
-implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`; dokumentasi
-status juga diperbarui setelahnya. CI terbaru pada
+Metadata GitHub yang diperiksa ulang melaporkan PR #35 **CLOSED / MERGED**
+ke `main` pada merge commit `30bb4a68794f6551a184e2f0cf7e9902477c6511`.
+Kesimpulan lama OPEN / DRAFT di bawah ini sudah tidak mencerminkan metadata
+tersebut; status approval Gate C tetap pending. James-owned follow-up pada
+riwayat PR mencapai implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`; dokumentasi
+status juga diperbarui setelahnya. CI terbaru yang dicatat pada perubahan itu
 [run 43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746)
 lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
 
@@ -384,8 +387,67 @@ mengklaim status yang tidak diketahui.
 | Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
 | Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 852 passed, 0 skipped, termasuk 15 PostgreSQL acceptance tests pada database baru; CI pada head PR terverifikasi melalui run 43756508746. |
 
-Perubahan ini memperjelas batas identity-as-of, tetapi tidak menutup Gate C:
-identity decision correction/revocation, source feed refund/status,
-snapshot resmi, dan approval lintas tim tetap belum terpenuhi. PR #35 perlu
-memuat perubahan ini dan CI terbaru telah lulus; PR tetap OPEN/DRAFT menunggu
-review dan approval lintas tim.
+Perubahan itu memperjelas batas identity-as-of, tetapi belum menutup Gate C.
+Pembaruan James berikutnya dicatat di bawah.
+
+## Pembaruan James — identity review history follow-up, 16 November 2026
+
+Branch kerja: `fix/gate-c-bitemporal-identity-review` dari `main` commit
+`30bb4a68794f6551a184e2f0cf7e9902477c6511`.
+
+### Implementasi yang ditambahkan
+
+- Migration `0022_identity_review_decision_history` menambah ledger append-only
+  bitemporal untuk review decision. Keputusan legacy dari `review_audit_log`
+  dibackfill memakai `performed_at` asli dan `available_at` saat migration;
+  ketersediaan sebelum backfill tidak direka.
+- `get_review_decision_as_of()` memproyeksikan keputusan sesuai effective dan
+  knowledge cutoff. Correction/revocation linear append-only; fork, koreksi
+  yang mendahului event induk, dan konflik retry ditolak.
+- Keputusan baru mencatat source event ID/version, batch asal, idempotency key,
+  reviewer, correlation ID, rationale, serta waktu receipt database.
+- `build_profiles_as_of()` membaca status review dari ledger bitemporal dan
+  tidak memakai status `review_queue` terkini atau `review_queue.csv`. Status
+  merge/reject hanya diakui bila cocok dengan identity mapping pada cutoff;
+  konflik tetap `UNKNOWN`.
+- Migration `0023_identity_history_coverage_marker` mencatat batas coverage
+  tanpa bergantung pada ada/tidaknya baseline mapping. Database kosong saat
+  baseline mendapat coverage mulai waktu migration marker, bukan timestamp
+  historis rekaan.
+- Tes PostgreSQL ditambah untuk append-only dan pencegahan backdate `available_at`
+  pada review ledger serta tie ordering event transaksi pada `available_at`
+  identik. Role `vteki_identity_reviewer` mendapat SELECT/INSERT ledger.
+
+### Validasi lokal pada branch
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Full local `pytest -q` | 839 passed, 16 skipped; skipped tests require PostgreSQL |
+| `pytest tests/data/test_persistence.py tests/data/test_customer360.py tests/integration/test_postgres_platform.py` | 15 passed, 16 skipped |
+| Ruff pada file yang berubah | Lulus |
+| MyPy untuk identity/customer360 dan `api/models.py` | Lulus, 10 source files |
+| Black pada file yang berubah | Lulus setelah format |
+| PostgreSQL lokal | Tidak tersedia; 16 tes integrasi PostgreSQL ter-skip |
+| CI branch follow-up | Belum dijalankan |
+
+Tes lokal membuktikan chain projection, status cutoff, correction/revocation,
+idempotent replay, serta BLOCKED saat identity coverage marker ada walau tabel
+baseline kosong. Hasil itu belum membuktikan migrasi PostgreSQL 0022/0023 atau
+tes PostgreSQL baru; CI harus menjalankannya.
+
+### Status setelah follow-up ini
+
+| Butir James | Status | Batas |
+|---|---|---|
+| Bitemporal identity decision history + as-of read | **IMPLEMENTED — LOCAL TESTED** | Butuh CI PostgreSQL untuk migration dan trigger. |
+| Correction / revocation ledger | **IMPLEMENTED — LOCAL TESTED** | Tidak otomatis mengubah identity mapping; perubahan merge/split tetap perlu event mapping yang sesuai. |
+| Identity coverage saat baseline kosong | **IMPLEMENTED — LOCAL TESTED** | Migration 0023 menetapkan awal coverage pada waktunya bila tidak ada baseline yang dapat dibuktikan. |
+| Equal-availability PostgreSQL ordering | **TEST ADDED — CI PENDING** | Butuh dedicated PostgreSQL CI. |
+| Refund/status/cancellation feed historis | **BLOCKED** | Source feed/contract belum tersedia. Timestamp tidak disintesis. |
+| Official historical feature snapshot | **NOT IMPLEMENTED / OUT OF CURRENT UTILITY SCOPE** | Profile builder tetap bukan training source. Immutable `known_at`/checksum/version registry perlu desain bila disetujui. |
+| Review identity merge/split lintas tim | **PENDING** | Moses/Christ/cross-team perlu meninjau semantik dan approval. |
+| Gate C dan Moses training readiness | **NOT CLOSED** | Tetap `training_ready=false`, `experiment_ready=false`, `final_model=false`. |
+
+PR #35 sudah berstatus merged menurut metadata GitHub. Perubahan branch follow-up
+ini belum dipush/di-PR dan belum memiliki hasil CI. Approval Gate C tetap belum
+ada; jangan menandai kontrak APPROVED.
