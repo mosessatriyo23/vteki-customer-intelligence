@@ -743,6 +743,11 @@ class TransactionEventHistory(Base):
         ForeignKey("stg.ingestion_batches.batch_id"),
         nullable=False,
     )
+    source_transaction_batch_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stg.ingestion_batches.batch_id"),
+        nullable=False,
+    )
     idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     corrects_event_id: Mapped[int | None] = mapped_column(
@@ -758,3 +763,50 @@ class TransactionEventHistory(Base):
     actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_event_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class BusinessEventHistory(Base):
+    __tablename__ = "business_event_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_business_event_history_idempotency",
+        ),
+        Index(
+            "ix_business_event_history_asof",
+            "source_customer_ref",
+            "occurred_at",
+            "available_at",
+        ),
+        {"schema": "source"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    subject_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_customer_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("clock_timestamp()"),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stg.ingestion_batches.batch_id"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    lineage_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)

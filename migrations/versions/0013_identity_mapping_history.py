@@ -77,7 +77,7 @@ def upgrade() -> None:
                 source_batch_id,
                 assignment_type,
                 'BASELINE',
-                assigned_at,
+                CURRENT_TIMESTAMP,
                 CURRENT_TIMESTAMP,
                 NULL,
                 NULL,

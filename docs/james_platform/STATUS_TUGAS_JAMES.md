@@ -192,3 +192,100 @@ lintas tim terpenuhi.
 Fondasi transaction event history dan identity as-of telah berkembang,
 tetapi masih ada pekerjaan integrasi sumber, rekonstruksi histori,
 multi-batch, dan runtime yang harus diselesaikan.
+
+## Pembaruan status - 16 November 2026 (follow-up PR #33)
+
+Status di bawah ini menggantikan kesimpulan implementasi sebelumnya untuk
+follow-up Gate C. Perubahan lanjutan masih lokal dan belum memiliki commit,
+PR, atau hasil CI. Gate C tetap **NOT CLOSED**.
+
+### Perubahan James yang sudah dibuat lokal
+
+- Migration 0019 memisahkan batch transaksi asal dan batch penerimaan event
+  pada `source.transaction_event_history`; data lama di-backfill dari
+  transaksi asal dan kolom origin memiliki foreign key ke batch.
+- `append_transaction_event()` menerima event pada batch penerimaan yang
+  berbeda, mensyaratkan batch terkait `PUBLISHED`, mewajibkan
+  `source_event_id`/`source_version`, dan menangani replay/conflict
+  idempotency secara atomik.
+- `project_transaction_as_of()` menambahkan projection status, gross,
+  discount, refund kumulatif, net, actual revenue, cancellation, dan
+  correction chain. Projection menandai `source_coverage` sebagai
+  `OBSERVED_EVENTS_ONLY`; ini bukan bukti feed sumber lengkap.
+- Migration 0020 dan loader menyalin completed visit, membership join, dan
+  renewal dari input dengan occurrence time, source event ID, feed schema
+  version, batch, receipt time DB, dan lineage ke event bisnis asal.
+- As-of event query membatasi data ke batch PUBLISHED dan ordering memiliki
+  tie-break deterministik.
+- Migration 0013 baru merekam baseline pada waktu migrasi. Pembacaan juga
+  membatasi baseline lama berdasarkan `recorded_at` dan melaporkan
+  `AVAILABLE`, `BLOCKED`, atau `UNKNOWN`.
+- `build_profiles_as_of()` didokumentasikan sebagai utility identity-aware
+  terbatas, bukan feature/training snapshot resmi.
+
+### Status item dengan format yang diminta
+
+| Item | Status | Bukti / blocker |
+|---|---|---|
+| Refund/status/cancellation feed historis | **BLOCKED** | Tidak ada feed sumber/connector refund atau status-change di repository. API menerima event dengan provenance eksplisit; timestamp historis tidak dibuat. Perlu feed dan kontrak sumber dari owner. |
+| Completed visit/membership renewal history | **IN PROGRESS** | Ledger dan loader ditambahkan untuk CSV yang tersedia. Perlu tes PostgreSQL setelah migration 0020 dan review Moses untuk penggunaan churn. |
+| Final-state projection | **IN PROGRESS** | Kode projection dan tes unit lokal ada. Belum lulus tes PostgreSQL/CI; feed yang hilang membuat cakupan hanya `OBSERVED_EVENTS_ONLY`. |
+| Event batch A → B → C | **IN PROGRESS** | API/schema/tes integrasi ditambahkan. Perlu menjalankan acceptance test terhadap PostgreSQL. |
+| Identity as-of merge/split/coverage | **IN PROGRESS** | Merge integration test yang ada, tes split/baseline baru, dan coverage status eksplisit. Review-required history/revocation dan stabilitas snapshot belum lengkap. |
+| Official historical snapshot | **BLOCKED** | Utility C360 masih memakai inbound dan review queue statis; belum boleh menjadi feature/training source. |
+| Multi-batch acceptance | **IN PROGRESS** | Loader memakai advisory lock dan satu transaksi serta cek checksum; tes baru/yang ada belum membuktikan semua kasus concurrency, partial recovery, rollback/no orphan, dan stabilitas published snapshot di PostgreSQL. |
+| Kontrak dan status | **IN PROGRESS** | Kontrak v1.1 tetap DRAFT; dokumen menjelaskan decision table, feed gaps, approval, dan test status. |
+| PR/commit/link CI | **BLOCKED** | Belum dibuat/dipush. Follow-up belum memiliki CI link. |
+| Approval Moses/Christ/cross-team | **BLOCKED** | Memerlukan review dan keputusan pihak terkait; James tidak menyatakan approval atas nama mereka. |
+| DB runtime role isolation, worker operations, audit benchmark, frontend E2E, runbook | **IN PROGRESS / VERIFICATION PENDING** | Di luar P0 yang sedang dikerjakan; tetap belum boleh dinyatakan VERIFIED tanpa bukti deployment/runtime. |
+| Physical table partitioning | **NOT APPLICABLE saat ini** | Belum ada workload, retensi, atau partition key yang disetujui untuk membenarkan migrasi fisik. |
+
+### Acceptance test dan hasil yang benar-benar tersedia
+
+- Tes unit projection: transaksi + refund berulang, correction chain, fork
+  correction ditolak, tie ordering, replay-order determinism, dan cutoff
+  knowledge untuk correction terlambat.
+- Tes identity lokal: baseline migration tidak mengklaim pre-migration
+  history; cutoff split mempertahankan mapping lama; unknown source tidak
+  diberi Golden ID.
+- Tes PostgreSQL didefinisikan di
+  `tests/integration/test_postgres_platform.py` untuk batch A/B/C,
+  idempotency/conflict, late event, visit/membership availability,
+  concurrency duplicate-batch, rollback/recovery, katalog per-batch, dan
+  filter batch PUBLISHED.
+- Hasil PostgreSQL lokal follow-up: **tidak dijalankan** karena
+  `VTEKI_TEST_POSTGRES_URL` tidak dikonfigurasi dan Docker/PostgreSQL tidak
+  tersedia. Seluruh 11 kasus PostgreSQL ter-skip, bukan lulus.
+- Full local Python suite: **831 passed, 11 skipped**.
+- Ruff: **All checks passed**; Black: **90 files unchanged**; MyPy:
+  **Success, no issues found in 88 source files**; Alembic: satu head,
+  `0020_business_event_history`.
+- CI follow-up: **belum tersedia**. CI lama PR #33 (dilaporkan reviewer
+  sebagai lulus) bukan bukti untuk perubahan ini.
+
+Contoh query/projection as-of:
+
+```python
+state = project_transaction_as_of(
+    session,
+    source_transaction_id="source-tx-id",
+    effective_at=effective_cutoff,
+    known_at=knowledge_cutoff,
+)
+# state.source_coverage == "OBSERVED_EVENTS_ONLY"
+```
+
+Replay event menggunakan idempotency key dan payload sumber yang sama.
+Payload berbeda dengan key yang sama ditolak. Contoh tersebut bukan bukti
+feed historis lengkap.
+
+### Batasan dan keputusan Moses
+
+- Migration 0013 baseline adalah awal cakupan identity; identity sebelum
+  migrasi tidak direkonstruksi. Cutoff yang lebih awal harus menghasilkan
+  `BLOCKED`, bukan mapping seolah-olah historis.
+- Event transaction baseline tidak membuktikan histori refund/status lama.
+- Ground truth tidak boleh menjadi input matching, feature, label, atau
+  training.
+- Sampai P0 selesai, PostgreSQL/CI lulus, dan review lintas tim dicatat:
+  `training_ready=false`, `experiment_ready=false`, `final_model=false`.

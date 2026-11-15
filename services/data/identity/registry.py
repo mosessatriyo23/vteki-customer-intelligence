@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from api.models import (
@@ -18,6 +19,19 @@ from api.models import (
     ReviewQueueItem,
     SourceIdentityMapping,
 )
+
+MIGRATION_BASELINE_REASON = "Initial baseline captured during migration 0013"
+
+
+@dataclass(frozen=True)
+class IdentityMappingAsOf:
+    status: Literal["AVAILABLE", "BLOCKED", "UNKNOWN"]
+    mapping: dict[str, str]
+    coverage_started_at: datetime | None
+
+
+class IdentityHistoryCoverageError(ValueError):
+    """Raised when an identity cutoff predates the recorded history coverage."""
 
 
 class PersistentIdentityRegistry:
@@ -65,22 +79,72 @@ class PersistentIdentityRegistry:
         effective_at limits when a mapping was valid in the business domain.
         recorded_at limits what the system had recorded by that point in time.
         """
-        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
-            raise ValueError("effective_at must be timezone-aware")
+        snapshot = self.get_mapping_as_of_result(effective_at, recorded_at)
+        if snapshot.status == "BLOCKED":
+            raise IdentityHistoryCoverageError(
+                "BLOCKED: effective_at predates recorded identity-history coverage"
+            )
+        return snapshot.mapping
 
+    def get_mapping_as_of_result(
+        self,
+        effective_at: datetime,
+        recorded_at: datetime | None = None,
+    ) -> IdentityMappingAsOf:
+        """Return mappings with an explicit identity-history coverage status."""
+        self._validate_cutoffs(effective_at, recorded_at)
         knowledge_cutoff = recorded_at or datetime.now(timezone.utc)
-        if knowledge_cutoff.tzinfo is None or knowledge_cutoff.utcoffset() is None:
-            raise ValueError("recorded_at must be timezone-aware")
+        migration_baseline = self.session.scalar(
+            select(func.min(IdentityMappingHistory.recorded_at)).where(
+                IdentityMappingHistory.event_type == "BASELINE",
+                IdentityMappingHistory.change_reason == MIGRATION_BASELINE_REASON,
+            )
+        )
+        if migration_baseline is not None:
+            coverage_started_at = _as_utc(migration_baseline)
+            if _as_utc(effective_at) < coverage_started_at:
+                return IdentityMappingAsOf(
+                    status="BLOCKED",
+                    mapping={},
+                    coverage_started_at=coverage_started_at,
+                )
+        else:
+            first_history = self.session.scalar(
+                select(func.min(IdentityMappingHistory.effective_at))
+            )
+            if first_history is None:
+                return IdentityMappingAsOf(
+                    status="UNKNOWN",
+                    mapping={},
+                    coverage_started_at=None,
+                )
+            coverage_started_at = _as_utc(first_history)
+            if _as_utc(effective_at) < coverage_started_at:
+                return IdentityMappingAsOf(
+                    status="BLOCKED",
+                    mapping={},
+                    coverage_started_at=coverage_started_at,
+                )
 
+        effective_time = case(
+            (
+                and_(
+                    IdentityMappingHistory.event_type == "BASELINE",
+                    IdentityMappingHistory.change_reason == MIGRATION_BASELINE_REASON,
+                ),
+                IdentityMappingHistory.recorded_at,
+            ),
+            else_=IdentityMappingHistory.effective_at,
+        )
         stmt = (
             select(IdentityMappingHistory)
             .where(
-                IdentityMappingHistory.effective_at <= effective_at,
+                effective_time <= effective_at,
                 IdentityMappingHistory.recorded_at <= knowledge_cutoff,
             )
             .order_by(
                 IdentityMappingHistory.source_customer_id,
-                IdentityMappingHistory.effective_at.desc(),
+                effective_time.desc(),
                 IdentityMappingHistory.recorded_at.desc(),
                 IdentityMappingHistory.id.desc(),
             )
@@ -91,7 +155,23 @@ class PersistentIdentityRegistry:
             if row.source_customer_id not in result:
                 result[row.source_customer_id] = row.golden_customer_id
 
-        return result
+        return IdentityMappingAsOf(
+            status="AVAILABLE" if result else "UNKNOWN",
+            mapping=result,
+            coverage_started_at=coverage_started_at,
+        )
+
+    @staticmethod
+    def _validate_cutoffs(
+        effective_at: datetime,
+        recorded_at: datetime | None,
+    ) -> None:
+        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
+            raise ValueError("effective_at must be timezone-aware")
+        if recorded_at is not None and (
+            recorded_at.tzinfo is None or recorded_at.utcoffset() is None
+        ):
+            raise ValueError("recorded_at must be timezone-aware")
 
     def apply_resolution_batch(
         self,
@@ -421,3 +501,9 @@ class PersistentIdentityRegistry:
             "decision": action,
             "correlation_id": correlation_id,
         }
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

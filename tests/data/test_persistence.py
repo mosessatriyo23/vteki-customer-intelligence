@@ -29,7 +29,10 @@ from api.models import (
 )
 from generator.generate import run
 from services.data.customer360.persistence import save_profile_snapshots
-from services.data.identity.registry import PersistentIdentityRegistry
+from services.data.identity.registry import (
+    IdentityHistoryCoverageError,
+    PersistentIdentityRegistry,
+)
 from services.data.identity.resolver import resolve_csv
 from services.data.ingestion.pg_loader import PostgresIngestionLoader
 from services.data.segmentation.persistence import save_segmentation_snapshots
@@ -204,6 +207,153 @@ class PersistenceTests(unittest.TestCase):
                 recorded_at=merge_time - timedelta(seconds=1),
             )
             self.assertEqual(old_knowledge, {"source-asof": "asof-old"})
+
+    def test_migration_baseline_does_not_claim_pre_migration_identity_history(self):
+        baseline_time = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        prior_assignment_time = datetime(2025, 12, 1, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add(
+                RegistryVersion(
+                    version_tag="migration-baseline-v1",
+                    algorithm="test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Migration baseline boundary test",
+                    created_at=baseline_time,
+                )
+            )
+            session.add(
+                GoldenCustomer(
+                    golden_customer_id="migration-baseline-golden",
+                    first_source_batch_id="migration-baseline-batch",
+                    anchor_source_id="migration-baseline-source",
+                    status="PROVISIONAL",
+                    created_at=prior_assignment_time,
+                    updated_at=baseline_time,
+                )
+            )
+            session.flush()
+            session.add(
+                IdentityMappingHistory(
+                    source_customer_id="migration-baseline-source",
+                    golden_customer_id="migration-baseline-golden",
+                    registry_version="migration-baseline-v1",
+                    source_batch_id="migration-baseline-batch",
+                    assignment_type="PROVISIONAL",
+                    event_type="BASELINE",
+                    effective_at=prior_assignment_time,
+                    recorded_at=baseline_time,
+                    change_reason=("Initial baseline captured during migration 0013"),
+                )
+            )
+            session.commit()
+
+            registry = PersistentIdentityRegistry(session)
+            before_coverage = registry.get_mapping_as_of_result(
+                effective_at=baseline_time - timedelta(seconds=1),
+                recorded_at=baseline_time + timedelta(days=1),
+            )
+            assert before_coverage.status == "BLOCKED"
+            assert before_coverage.mapping == {}
+
+            with self.assertRaisesRegex(IdentityHistoryCoverageError, "BLOCKED"):
+                registry.get_mapping_as_of(
+                    effective_at=baseline_time - timedelta(seconds=1),
+                    recorded_at=baseline_time + timedelta(days=1),
+                )
+
+            at_coverage = registry.get_mapping_as_of_result(
+                effective_at=baseline_time + timedelta(seconds=1),
+                recorded_at=baseline_time + timedelta(days=1),
+            )
+            assert at_coverage.status == "AVAILABLE"
+            assert at_coverage.mapping == {
+                "migration-baseline-source": "migration-baseline-golden"
+            }
+
+    def test_identity_split_as_of_preserves_prior_mapping_without_forcing_unknowns(
+        self,
+    ):
+        baseline_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        split_time = datetime(2026, 2, 1, tzinfo=timezone.utc)
+
+        with self.SessionLocal() as session:
+            session.add(
+                RegistryVersion(
+                    version_tag="split-asof-v1",
+                    algorithm="test",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Identity split as-of test",
+                    created_at=baseline_time,
+                )
+            )
+            session.add_all(
+                [
+                    GoldenCustomer(
+                        golden_customer_id="split-old",
+                        first_source_batch_id="split-batch-1",
+                        anchor_source_id="split-source",
+                        status="PROVISIONAL",
+                        created_at=baseline_time,
+                        updated_at=baseline_time,
+                    ),
+                    GoldenCustomer(
+                        golden_customer_id="split-new",
+                        first_source_batch_id="split-batch-2",
+                        anchor_source_id="split-source",
+                        status="PROVISIONAL",
+                        created_at=split_time,
+                        updated_at=split_time,
+                    ),
+                ]
+            )
+            session.flush()
+            session.add_all(
+                [
+                    IdentityMappingHistory(
+                        source_customer_id="split-source",
+                        golden_customer_id="split-old",
+                        registry_version="split-asof-v1",
+                        source_batch_id="split-batch-1",
+                        assignment_type="PROVISIONAL",
+                        event_type="BASELINE",
+                        effective_at=baseline_time,
+                        recorded_at=baseline_time,
+                    ),
+                    IdentityMappingHistory(
+                        source_customer_id="split-source",
+                        golden_customer_id="split-new",
+                        registry_version="split-asof-v1",
+                        source_batch_id="split-batch-2",
+                        assignment_type="MANUAL_OVERRIDE",
+                        event_type="MANUAL_SPLIT",
+                        effective_at=split_time,
+                        recorded_at=split_time,
+                    ),
+                ]
+            )
+            session.commit()
+
+            registry = PersistentIdentityRegistry(session)
+            before_split = registry.get_mapping_as_of_result(
+                effective_at=split_time - timedelta(seconds=1),
+                recorded_at=split_time + timedelta(days=1),
+            )
+            after_split = registry.get_mapping_as_of_result(
+                effective_at=split_time + timedelta(seconds=1),
+                recorded_at=split_time + timedelta(days=1),
+            )
+            unknown_source = registry.get_mapping_as_of_result(
+                effective_at=split_time + timedelta(seconds=1),
+                recorded_at=split_time - timedelta(seconds=1),
+            )
+
+            assert before_split.mapping == {"split-source": "split-old"}
+            assert after_split.mapping == {"split-source": "split-new"}
+            assert "unresolved-source" not in after_split.mapping
+            assert unknown_source.mapping == {"split-source": "split-old"}
 
     def test_pg_loader_valid_and_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:

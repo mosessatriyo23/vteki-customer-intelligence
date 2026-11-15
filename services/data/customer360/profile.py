@@ -1,6 +1,8 @@
-"""Development Customer360 aggregates. Identity mapping is a current snapshot.
+"""Development Customer360 aggregates with an identity-only as-of utility.
 
-Not a training feature pipeline: historical identity availability is not versioned.
+``build_profiles_as_of`` versions only identity mapping. Its inbound transaction,
+visit, membership, and review-queue inputs are not a complete bitemporal feature
+source and must not be used as historical training snapshots.
 """
 
 from __future__ import annotations
@@ -59,7 +61,9 @@ def build_profiles(
     ):
         raise ValueError("Identity mapping must contain non-empty string IDs")
     if len(mapping) != len(rows) or set(mapping) != set(sources):
-        raise ValueError("Identity coverage must exactly match source snapshot")
+        raise ValueError(
+            "UNKNOWN: identity history does not resolve every source in this snapshot"
+        )
     needs_review = set()
     for row in read(resolution / "review_queue.csv"):
         for field in ("left_source_id", "right_source_id"):
@@ -152,15 +156,22 @@ def build_profiles_as_of(
     recorded_at: datetime | None = None,
 ) -> list[dict]:
     """Build Customer360 profiles using the bitemporal identity registry."""
-    from services.data.identity.registry import PersistentIdentityRegistry
+    from services.data.identity.registry import (
+        IdentityHistoryCoverageError,
+        PersistentIdentityRegistry,
+    )
 
-    mapping = PersistentIdentityRegistry(session).get_mapping_as_of(
+    snapshot = PersistentIdentityRegistry(session).get_mapping_as_of_result(
         cutoff,
         recorded_at,
     )
+    if snapshot.status != "AVAILABLE":
+        raise IdentityHistoryCoverageError(
+            f"{snapshot.status}: identity mapping is unavailable for this cutoff"
+        )
     return build_profiles(
         inbound,
         resolution,
         cutoff,
-        identity_mapping=mapping,
+        identity_mapping=snapshot.mapping,
     )

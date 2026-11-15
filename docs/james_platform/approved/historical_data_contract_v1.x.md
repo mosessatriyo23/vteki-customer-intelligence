@@ -1,113 +1,172 @@
-# Historical Data Contract v1.0
+# Historical Data Contract v1.1
 
-**Owner:** James - Platform & Historical Data
-**Status:** DRAFT - menunggu review lintas tim
-**Tanggal:** 15 November 2026
+**Status:** DRAFT — implementation changes require review; Gate C is not closed
+**Owner:** James — Platform & Historical Data
+**Approver:** Pending: Moses (point-in-time review), Christ (business value semantics, if applicable), and cross-team Gate C reviewers
+**Approval date:** Not approved
+**Updated:** 16 November 2026
 
-## 1. Tujuan
+## Changelog
 
-Dokumen ini menjelaskan pencatatan histori transaksi agar sistem dapat
-membedakan waktu kejadian bisnis dan waktu informasi diterima platform.
+| Version | Date | Change |
+|---|---|---|
+| 1.0 | 15 November 2026 | Initial event availability and provenance contract; explicitly draft. |
+| 1.1 | 16 November 2026 | Separate transaction-origin and event-receipt batches; define projection/correction rules; persist visit and membership source events; make migration-0013 coverage boundary explicit; record outstanding evidence and source-feed gaps. |
 
-## 2. Definisi waktu
+## 1. Time and provenance
 
-| Field | Makna |
+All event times are timezone-aware:
+
+| Field | Meaning |
 |---|---|
-| occurred_at | Waktu kejadian menurut waktu bisnis/sumber |
-| available_at | Waktu event diterima dan tersedia di platform |
-| recorded_at | Waktu event dicatat oleh database |
+| `occurred_at` | Source-observed business occurrence time. Never inferred from ingestion time. |
+| `available_at` | Time the platform first accepted the event; assigned by PostgreSQL. |
+| `recorded_at` | Database recording time; assigned by PostgreSQL. |
 
-Semua timestamp harus timezone-aware. Event baru memperoleh available_at
-dan recorded_at dari waktu database, bukan waktu yang dapat di-backdate
-oleh pemanggil.
+New source events require `source_event_id`, `source_version`, `source_batch_id`, and `idempotency_key`. `source_batch_id` identifies the receiving/publishing batch. Transaction events also store `source_transaction_batch_id`, the immutable batch containing the original transaction. Corrections point to the event they replace. Membership renewal events retain their source `previous_event_id`; completed visits retain their source transaction ID as lineage.
 
-## 3. Event history
+The membership/visit `source_version` is the input contract/schema version recorded on the ingestion batch. It is not a claim that the source supplied an event revision number. Transaction event callers must supply the actual source event ID and version; missing values are rejected rather than fabricated.
 
-Tabel yang digunakan adalah source.transaction_event_history.
+## 2. Source coverage
 
-Jenis event yang didukung:
-- TRANSACTION_RECORDED
-- REFUND_RECORDED
-- STATUS_CHANGED
-- CORRECTION
+| Event family | Available source / behavior | Historical limitation |
+|---|---|---|
+| Transaction recorded | Existing transaction batch; loader writes an immutable baseline event. | A baseline reflects the transaction record available at ingestion; it does not reconstruct subsequent refund/status changes. If the feed lacks a separate source event ID/version, the legacy baseline leaves those provenance fields missing rather than inventing them. |
+| Refund / partial refund | Event append API accepts `REFUND_RECORDED`. | No source refund feed/connector is present in this repository. A missing feed is **MISSING**, not a zero refund or an inferred timestamp. |
+| Status change / cancellation | Event append API accepts `STATUS_CHANGED`; cancellation is represented by status `CANCELLED` or `REFUNDED`. | No source status-change feed/connector is present. The current transaction row is not a status history. |
+| Correction | Append-only `CORRECTION` event references a prior event. | Corrections must form one chain; correction forks are rejected by projection. |
+| Completed visit | `customer_visits.csv` source rows are copied to `source.business_event_history`; `visit_datetime` is the occurrence time and `visit_id` is the source event ID. | Existing history is backfilled when this ledger is first installed; `available_at` then means first captured by this ledger, not original feed arrival. |
+| Membership join / renewal | `membership_events.csv` rows are copied to `source.business_event_history`; `occurred_at`, `event_id`, and `previous_event_id` are source-provided. | Same first-capture limitation as visits. Renewal may be used for churn only after point-in-time review. |
 
-Setiap event memiliki idempotency_key, source_batch_id, payload, dan
-referensi lineage yang tersedia. Actor dan source provenance dicatat
-melalui actor_type, actor_id, source_event_id, serta source_version.
+The visit/membership backfill preserves source occurrence times and uses database time for first availability/recording. It does not claim that those events were known to the platform at their historical occurrence.
 
-Event bersifat append-only. Correction harus dibuat sebagai event baru
-yang merujuk event sebelumnya melalui corrects_event_id.
+## 3. As-of visibility and deterministic ordering
 
-## 4. Late-arriving event
+An event can participate only when:
 
-Event hanya boleh masuk snapshot as-known jika:
+```text
+occurred_at <= effective_at
+available_at <= known_at
+receiving batch is PUBLISHED
+transaction-origin batch is PUBLISHED (transaction events)
+```
 
-    occurred_at <= effective_at
-    available_at <= known_at
+Queries order by `occurred_at`, `available_at`, `recorded_at`, then database event ID. The final ID tie-break makes events with equal availability deterministic. As-known queries exclude a late event when its `available_at` is after `known_at`; the old cutoff is not recomputed using later knowledge.
 
-Contoh: transaksi terjadi tanggal 10 Oktober, tetapi baru diterima
-tanggal 12 Oktober. Snapshot yang mengetahui data sampai tanggal 11
-Oktober tidak boleh menggunakan event tersebut.
+Example transaction query and idempotent replay:
 
-## 5. Idempotency
+```python
+state = project_transaction_as_of(
+    session,
+    source_transaction_id="source-tx-id",
+    effective_at=effective_cutoff,
+    known_at=knowledge_cutoff,
+)
 
-Replay dengan idempotency key dan isi yang sama tidak boleh membuat
-event duplikat. Penggunaan key yang sama dengan isi berbeda harus ditolak.
+# Retry only with the same source identity, version, batch, and payload.
+event = append_transaction_event(
+    session,
+    source_transaction_id="source-tx-id",
+    event_type="REFUND_RECORDED",
+    occurred_at=source_refund_time,
+    source_batch_id="published-receiving-batch",
+    idempotency_key="source:refund-id:version",
+    payload={"refund_amount": 100},
+    actor_type="SOURCE",
+    source_event_id="refund-id",
+    source_version="source-revision",
+)
+```
 
-## 6. Refund, status, dan correction
+`source_refund_time` must come from the source event. If the source did not
+provide it, the event cannot be represented as historically occurred; do not
+substitute receipt time.
 
-Loader saat ini membuat baseline TRANSACTION_RECORDED dari transaksi
-yang tersedia. Baseline tersebut tidak membuktikan histori refund atau
-status sebelum ingestion.
+## 4. Transaction final-state projection
 
-Service mendukung pencatatan event refund, status, dan correction.
-Namun, feed historis refund/status dari sumber belum terintegrasi penuh.
-Final-state projection setelah correction juga belum tersedia.
+`project_transaction_as_of()` projects the visible append-only event set for an `effective_at` and `known_at`. It returns status, gross, discount, cumulative refund, net amount, actual revenue, cancellation flag, contributing event IDs, and `source_coverage="OBSERVED_EVENTS_ONLY"`.
 
-Karena itu, event log belum boleh diklaim sebagai rekonstruksi final
-kondisi transaksi yang lengkap.
+Rules:
 
-## 7. Aturan snapshot dan training
+1. `TRANSACTION_RECORDED` establishes the amount/status baseline. Amounts are non-negative integer IDR; `net_amount` must equal `gross_amount - discount_amount`.
+2. `REFUND_RECORDED.refund_amount` is a positive integer increment. Multiple visible refunds add; cumulative refund cannot exceed net amount.
+3. `STATUS_CHANGED.status` is the latest visible status in deterministic event order. `CANCELLED` and `REFUNDED` have zero actual revenue; otherwise actual revenue is `net_amount - refund_amount`.
+4. A correction replaces the effect of its referenced event; it is not an additional refund or status update. A correction of a correction replaces the same root effect. A correction must reference an event for the same transaction. Each event may have at most one visible correcting child; forks are invalid.
+5. An event superseded by a visible correction is excluded from financial/status application. A correction not yet visible at the requested cutoffs has no effect.
+6. Projection is over **observed events only**. Since the source refund/status feeds are not integrated, the returned arithmetic is not proof of complete historical revenue and must not be used as a training label/feature.
+7. Replaying an identical idempotency key and payload returns the original event. Reusing the key with different content is rejected. PostgreSQL uniqueness arbitrates concurrent insert races.
 
-- Gunakan effective_at dan known_at secara eksplisit.
-- Jangan gunakan event yang available_at-nya melewati known_at.
-- Jangan mengubah snapshot historis yang telah diterbitkan.
-- Perubahan kontrak harus menghasilkan versi/output baru.
-- Jangan mengarang timestamp historis yang tidak tersedia dari sumber.
+## 5. Batch and correction decision table
 
-## 8. Bukti pengujian lokal
-
-Validasi lanjutan pada 15 November 2026:
-- Migration PostgreSQL testing: 0018_identity_mapping_batch_fk (head).
-- PostgreSQL integration test: 9 passed.
-- Test suite: 725 passed.
-- Ruff: All checks passed.
-- Black: 162 files unchanged.
-- Foreign key identity mapping history ke ingestion batches:
-  berhasil diverifikasi pada database testing.
-
-Pengujian dilakukan pada database testing lokal, bukan database produksi.
-Hasil ini bukan bukti CI GitHub terbaru atau production readiness.
-
-## 9. Pekerjaan yang masih diperlukan
-
-1. Integrasikan feed historis refund dan status dari sumber.
-2. Implementasikan final-state projection untuk correction.
-3. Tambahkan tes correction chain, refund berulang, status change,
-   replay konflik, dan concurrency.
-4. Buktikan snapshot lama tidak berubah setelah event terlambat.
-5. Minta review dan persetujuan lintas tim.
-
-## 10. Persetujuan
-
-| Reviewer | Status |
+| Case | Contract decision |
 |---|---|
-| James - Platform | Draft disiapkan |
-| Data owner / Moses | Pending |
-| Business owner / Christ | Pending bila terkait definisi bisnis |
-| Cross-team Gate C | Pending |
+| Exact duplicate batch and identical manifest checksums | Return `ALREADY_LOADED`; do not rewrite batch or event publication metadata. |
+| Same batch ID but changed checksums or incomplete prior batch | Reject and require manual investigation. |
+| Overlapping source primary key in a different batch | Reject atomically; source IDs are globally unique in the current source tables. Do not silently overwrite master/source rows. |
+| Event for a transaction from a later receiving batch | Keep original `source_transaction_batch_id`; set `source_batch_id` to the new receiving batch. Both batches must be published before as-of query returns it. |
+| Late event | Preserve the source `occurred_at`; set availability/recording to database receipt time. Earlier `known_at` excludes it. |
+| Master-data update | Current loader treats shared branch data as immutable and validates equality. Versioned catalogue references use `(item_code, source_batch_id)`; a child uses the catalogue version from its own batch. |
+| Retry / concurrency | Per-batch advisory lock plus checksum lookup; event idempotency uses a database unique key and atomic conflict handling. |
+| Partial failure | Ingestion writes raw, typed, event, and publish state in one database transaction. Any failure rolls the transaction back; a failed batch must not appear PUBLISHED. |
+| Recovery | Retry an uncommitted identical batch. A persisted non-PUBLISHED batch is an investigation blocker, not an automatic success-shaped retry. |
+| Publish order | Each batch publishes atomically after its rows and event history are written. No global ordering between independent batches is implied. |
+| Correction | Append a new event referencing the event it replaces. Corrections do not mutate old rows; correction branches are rejected. |
+| Snapshot replay | Identical versioned payload is a no-op; a different payload under the same composite key is rejected by snapshot persistence. |
 
-Kesimpulan: fondasi event availability dan provenance telah diuji
-secara lokal. J-PLAT-01 masih in progress sampai integrasi histori
-sumber, rekonstruksi final state, acceptance tests, dan persetujuan
-lintas tim terpenuhi.
+## 6. Identity history boundary
+
+Migration 0013 creates a `BASELINE` at migration time. It does **not** reconstruct identity changes before migration 0013. New installations now set baseline `effective_at` to migration time. Reads also fence legacy migration-0013 baseline rows at their `recorded_at`, so their former `assigned_at` value cannot imply unsupported pre-migration coverage.
+
+`get_mapping_as_of_result()` reports:
+
+- `AVAILABLE`: mapping rows exist within coverage;
+- `BLOCKED`: requested effective cutoff predates known history coverage;
+- `UNKNOWN`: no usable mapping history exists at the requested cutoff.
+
+`get_mapping_as_of()` raises `IdentityHistoryCoverageError` for a blocked cutoff. Unresolved sources are not assigned a fabricated Golden ID. Current `review_queue` is not an as-of review history; it must not be used to claim historical review status.
+
+## 7. Customer 360 scope
+
+`build_profiles_as_of()` is a **limited identity-aware profile utility**, not the official historical feature/training source. Only its identity mapping lookup is bitemporal. It still reads inbound transaction, visit, membership, and review-queue snapshots; these inputs do not all satisfy:
+
+```text
+effective_at <= feature_cutoff
+available_at <= known_at
+```
+
+The function therefore does not guarantee historical refund, status, or review state. Official historical snapshots still need registry/rule versions, source batch, `known_at`, checksum, immutable publication semantics, and acceptance tests. Until then: `training_ready=false`, `experiment_ready=false`, `final_model=false`.
+
+## 8. Acceptance test matrix
+
+Implemented test coverage in this change:
+
+- Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`.
+- PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable.
+- Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
+
+Still required before Gate C:
+
+- Execute PostgreSQL tests after Alembic upgrade through migration 0020; test equal database `available_at` values in PostgreSQL, concurrent event/batch retries, partial failure/recovery, rollback/no orphan, and snapshot immutability in a provisioned PostgreSQL CI job.
+- Integrate actual refund/status/cancellation/correction source feeds and prove coverage completeness. Do not synthesize missing events.
+- Extend identity tests for split, unresolved/review-required status history, corrected/revoked decisions, and merge/split stability of published snapshots.
+- Build official end-to-end feature snapshots or keep the current utility out of Moses training.
+
+## 9. Evidence and approval
+
+| Evidence / review | Status |
+|---|---|
+| PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
+| Follow-up CI link | Not available yet; this change has not been pushed as a PR. |
+| PostgreSQL acceptance result for this change | Not run: `VTEKI_TEST_POSTGRES_URL` is not configured and Docker/PostgreSQL is unavailable in the current environment; all 11 PostgreSQL integration cases skipped. |
+| Local full test suite | 831 passed, 11 PostgreSQL tests skipped. |
+| Ruff / Black / MyPy / Alembic | Ruff passed after import sorting; Black check passed for 90 Python files; MyPy passed for 88 source files; Alembic has one head, `0020_business_event_history`. |
+| James | Draft owner; implementation review pending. |
+| Moses | Point-in-time review pending. |
+| Christ | Business-value review pending if definitions affect targets. |
+| Cross-team Gate C | Pending. |
+
+Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
+
+## 10. Training and ground-truth safeguards
+
+Until P0 tests, source-feed validation, and cross-team approval are complete, Moses must not publish new labels/features, train a new model, open campaigns, or enable production scoring from these projections. Synthetic ground truth remains prohibited as matching input, feature, label, and training data.

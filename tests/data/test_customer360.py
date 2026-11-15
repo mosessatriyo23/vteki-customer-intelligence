@@ -9,7 +9,11 @@ from unittest.mock import patch
 from generator.generate import run as generate
 from services.data.customer360.profile import build_profiles, build_profiles_as_of
 from services.data.identity.cli import run as resolve
-from services.data.identity.registry import PersistentIdentityRegistry
+from services.data.identity.registry import (
+    IdentityHistoryCoverageError,
+    IdentityMappingAsOf,
+    PersistentIdentityRegistry,
+)
 
 
 def read_mapping(path):
@@ -44,8 +48,12 @@ class Customer360Tests(unittest.TestCase):
 
             with patch.object(
                 PersistentIdentityRegistry,
-                "get_mapping_as_of",
-                return_value=mapping,
+                "get_mapping_as_of_result",
+                return_value=IdentityMappingAsOf(
+                    status="AVAILABLE",
+                    mapping=mapping,
+                    coverage_started_at=cutoff,
+                ),
             ) as lookup:
                 profiles = build_profiles_as_of(
                     inbound,
@@ -57,6 +65,26 @@ class Customer360Tests(unittest.TestCase):
 
             lookup.assert_called_once_with(cutoff, recorded_at)
             self.assertTrue(profiles)
+
+    def test_build_profiles_as_of_surfaces_blocked_history_coverage(self):
+        cutoff = datetime.fromisoformat("2026-06-01T00:00:00+07:00")
+        blocked = IdentityMappingAsOf(
+            status="BLOCKED",
+            mapping={},
+            coverage_started_at=datetime.fromisoformat("2026-11-15T00:00:00+00:00"),
+        )
+        with patch.object(
+            PersistentIdentityRegistry,
+            "get_mapping_as_of_result",
+            return_value=blocked,
+        ):
+            with self.assertRaisesRegex(IdentityHistoryCoverageError, "BLOCKED"):
+                build_profiles_as_of(
+                    Path("inbound"),
+                    Path("resolution"),
+                    cutoff,
+                    session=object(),
+                )
 
     def test_generated_snapshot_cutoff_and_integrity(self):
         with tempfile.TemporaryDirectory() as temp:
