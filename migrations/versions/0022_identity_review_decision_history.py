@@ -1,3 +1,4 @@
+
 """Add bitemporal identity review decision history."""
 
 import sqlalchemy as sa
@@ -57,7 +58,10 @@ def upgrade() -> None:
         ),
         sa.Column("correlation_id", sa.String(128), nullable=False),
         sa.Column("rationale", sa.String(1000), nullable=False),
-        sa.UniqueConstraint("idempotency_key", name="uq_review_decision_idempotency"),
+        sa.UniqueConstraint(
+            "idempotency_key",
+            name="uq_review_decision_idempotency",
+        ),
         sa.CheckConstraint(
             "event_type IN ('DECISION', 'CORRECTION', 'REVOCATION')",
             name="ck_review_decision_history_event_type",
@@ -70,12 +74,14 @@ def upgrade() -> None:
         ),
         schema="identity",
     )
+
     op.create_index(
         "ix_review_decision_history_asof",
         "review_decision_history",
         ["review_queue_id", "occurred_at", "available_at", "recorded_at"],
         schema="identity",
     )
+
     op.execute(
         """
         CREATE OR REPLACE FUNCTION identity.set_review_decision_receipt_time()
@@ -90,6 +96,7 @@ def upgrade() -> None:
         $$
         """
     )
+
     op.execute(
         """
         CREATE TRIGGER set_review_decision_receipt_time
@@ -98,6 +105,7 @@ def upgrade() -> None:
         EXECUTE FUNCTION identity.set_review_decision_receipt_time()
         """
     )
+
     op.execute(
         """
         CREATE TRIGGER enforce_append_only
@@ -106,8 +114,9 @@ def upgrade() -> None:
         EXECUTE FUNCTION gov.reject_audit_mutation()
         """
     )
-    # Preserve auditable decisions already captured in the legacy review log.
-    # Their historical availability is unknown, so fence them at migration time.
+
+    # Preserve legacy decisions. Their historical availability is unknown,
+    # so availability is fenced at migration time.
     op.execute(
         """
         INSERT INTO identity.review_decision_history (
@@ -116,24 +125,25 @@ def upgrade() -> None:
             source_version, idempotency_key,
             reviewer_id, correlation_id, rationale
         )
-        SELECT DISTINCT ON (review_queue_id)
-            review_queue_id,
+        SELECT DISTINCT ON (a.review_queue_id)
+            a.review_queue_id,
             'DECISION',
-            action,
+            a.action,
             NULL,
-            performed_at,
+            a.performed_at,
             clock_timestamp(),
             q.source_batch_id,
-            'legacy-review:' || id::text,
+            'legacy-review:' || a.id::text,
             'legacy-audit-v1',
-            'legacy-review:' || review_queue_id::text || ':' || id::text,
-            actor_id,
-            correlation_id,
-            rationale
+            'legacy-review:' || a.review_queue_id::text || ':' || a.id::text,
+            a.actor_id,
+            a.correlation_id,
+            a.rationale
         FROM identity.review_audit_log AS a
-        JOIN identity.review_queue AS q ON q.id = a.review_queue_id
-        WHERE action IN ('APPROVE_MERGE', 'REJECT_KEEP_SEPARATE')
-        ORDER BY review_queue_id, performed_at, id
+        JOIN identity.review_queue AS q
+            ON q.id = a.review_queue_id
+        WHERE a.action IN ('APPROVE_MERGE', 'REJECT_KEEP_SEPARATE')
+        ORDER BY a.review_queue_id, a.performed_at, a.id
         """
     )
 
@@ -141,13 +151,19 @@ def upgrade() -> None:
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         raise RuntimeError("Migration 0022 requires PostgreSQL.")
+
     op.execute(
         "DROP TRIGGER IF EXISTS enforce_append_only "
         "ON identity.review_decision_history"
     )
+
     op.execute(
         "DROP TRIGGER IF EXISTS set_review_decision_receipt_time "
         "ON identity.review_decision_history"
     )
+
     op.drop_table("review_decision_history", schema="identity")
-    op.execute("DROP FUNCTION IF EXISTS identity.set_review_decision_receipt_time()")
+
+    op.execute(
+        "DROP FUNCTION IF EXISTS identity.set_review_decision_receipt_time()"
+    )
