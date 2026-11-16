@@ -599,7 +599,7 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
         assert len(rows) >= 2
         mapping = {row["source_customer_id"]: row["golden_customer_id"] for row in rows}
 
-        cutoff = datetime(2026, 9, 7, 0, 0, tzinfo=timezone(timedelta(hours=7)))
+        cutoff = (now + timedelta(days=2)).astimezone(timezone(timedelta(hours=7)))
         merge_recorded_at = now
         recorded_before = merge_recorded_at - timedelta(seconds=1)
         recorded_after = merge_recorded_at + timedelta(seconds=1)
@@ -1282,7 +1282,7 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
                         session,
                         source_transaction_id=transaction_id,
                         effective_at=tie_cutoff,
-                        known_at=tie_cutoff,
+                        known_at=now,
                     )
                     assert tie_state.status == "COMPLETED"
 
