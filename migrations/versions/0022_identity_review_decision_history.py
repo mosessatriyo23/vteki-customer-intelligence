@@ -1,4 +1,3 @@
-
 """Add bitemporal identity review decision history."""
 
 import sqlalchemy as sa
@@ -164,6 +163,4 @@ def downgrade() -> None:
 
     op.drop_table("review_decision_history", schema="identity")
 
-    op.execute(
-        "DROP FUNCTION IF EXISTS identity.set_review_decision_receipt_time()"
-    )
+    op.execute("DROP FUNCTION IF EXISTS identity.set_review_decision_receipt_time()")
