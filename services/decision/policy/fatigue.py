@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
+from services.decision.timeutil import to_naive_utc
+
 # ---------------------------------------------------------------------------
 # Konstanta Bisnis
 # ---------------------------------------------------------------------------
@@ -109,6 +111,9 @@ def check_frequency_cap(
     """
     if evaluation_date is None:
         evaluation_date = datetime.now(timezone.utc).replace(tzinfo=None)
+    # Fase 4 (DEF-02): terima datetime naif maupun beraksesoris zona waktu (mis. timestamptz
+    # dari PostgreSQL) tanpa TypeError; semuanya dibandingkan sebagai naive-UTC.
+    evaluation_date = to_naive_utc(evaluation_date)
 
     window_start = evaluation_date - timedelta(days=window_days)
     window_end = evaluation_date
@@ -121,7 +126,7 @@ def check_frequency_cap(
             record.customer_id == customer_id
             and record.action_id not in EXCLUDED_ACTIONS
             and record.is_commercial
-            and window_start <= record.sent_at <= window_end
+            and window_start <= to_naive_utc(record.sent_at) <= window_end
         )
     ]
 
