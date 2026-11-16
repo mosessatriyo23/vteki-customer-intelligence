@@ -28,6 +28,7 @@ PAGU DISKON & BLACKLIST (keputusan tim, BUKAN tertulis di Requirement_Capstone /
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Pattern, Tuple
 
@@ -165,9 +166,11 @@ _INVISIBLE_CHARS = re.compile("[\u200b\u200c\u200d\u2060\ufeff\u00ad]")
 
 def _normalize(text: str) -> str:
     """
-    Huruf kecil + spasi tunggal + buang karakter tak terlihat (zero-width, soft hyphen)
-    agar pencocokan tidak mudah dihindari.
+    Normalisasi Unicode NFKC (angka/tanda persen fullwidth menjadi ASCII), huruf kecil,
+    spasi tunggal, dan buang karakter tak terlihat (zero-width, soft hyphen)
+    agar pencocokan tidak mudah dihindari. (Fase 4, DEF-01)
     """
+    text = unicodedata.normalize("NFKC", text)  # fullwidth "１００％" -> "100%"
     text = _INVISIBLE_CHARS.sub("", text)
     return re.sub(r"\s+", " ", text).strip().lower()
 
