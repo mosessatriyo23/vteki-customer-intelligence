@@ -30,6 +30,7 @@ Referensi: Requirement_Capstone.md Bab 3, 4, 5 (FRD §9.6, §10.1, §10.3 / TRD 
 from __future__ import annotations
 
 import logging
+import math
 import re
 import uuid
 from dataclasses import dataclass, field
@@ -72,6 +73,7 @@ from services.decision.policy.suppression import (
     check_suppression,
     is_opted_out,
 )
+from services.decision.timeutil import to_naive_utc, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +280,31 @@ class DecisionRecord:
         }
 
 
+def scores_are_valid(scores: AIScores) -> bool:
+    """
+    True bila skor numerik layak dipakai (Fase 4, DEF-03).
+
+    Probabilitas (churn, propensity_purchase, propensity_renew) harus angka terhingga
+    dalam [0, 1]; `clv_amount` harus angka terhingga >= 0. Selain itu skor ditolak.
+    """
+
+    def finite(value: Any) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(value)
+        )
+
+    for probability in (
+        scores.churn_score,
+        scores.propensity_purchase,
+        scores.propensity_renew,
+    ):
+        if not finite(probability) or not 0.0 <= probability <= 1.0:
+            return False
+    return finite(scores.clv_amount) and scores.clv_amount >= 0.0
+
+
 # ---------------------------------------------------------------------------
 # Kelas Utama: NBAEngine
 # ---------------------------------------------------------------------------
@@ -359,10 +386,20 @@ class NBAEngine:
             NBAResult berisi aksi terpilih, EV, dan detail semua pemeriksaan.
         """
         if evaluation_date is None:
-            evaluation_date = datetime.utcnow()
+            evaluation_date = utc_now()
+        evaluation_date = to_naive_utc(evaluation_date)  # Fase 4 (DEF-02)
 
         customer_id = ai_scores.customer_id
         logger.info(f"[NBAEngine] Memulai evaluasi untuk pelanggan: {customer_id}")
+
+        # Fase 4 (DEF-03): skor di luar rentang / NaN / inf tidak boleh menggelembungkan EV.
+        # Diperlakukan seperti skor belum tersedia (default konservatif + degraded_input).
+        if not scores_are_valid(ai_scores):
+            logger.warning(
+                f"[NBAEngine] Skor AI pelanggan {customer_id} tidak valid "
+                f"(di luar rentang / bukan angka terhingga). Memakai default konservatif."
+            )
+            ai_scores = self._conservative_scores(customer_id, evaluation_date)
 
         # ---------------------------------------------------------------
         # LANGKAH 1: Cek Validitas Skor AI
@@ -551,7 +588,8 @@ class NBAEngine:
             ValueError: customer_id tidak konsisten atau correlation_id tidak valid.
         """
         if evaluation_date is None:
-            evaluation_date = datetime.utcnow()
+            evaluation_date = utc_now()
+        evaluation_date = to_naive_utc(evaluation_date)  # Fase 4 (DEF-02)
 
         if correlation_id is None:
             correlation_id = f"corr-{uuid.uuid4().hex}"
@@ -574,6 +612,11 @@ class NBAEngine:
                 )
             scores = ai_scores
 
+        scores_invalid = ai_scores is not None and not scores_are_valid(ai_scores)
+        if scores_invalid:
+            # Fase 4 (DEF-03): snapshot K-07 tidak boleh memuat NaN/inf (bukan JSON valid).
+            scores = self._conservative_scores(customer_id, evaluation_date)
+
         result = self.evaluate(
             ai_scores=scores,
             consent=consent,
@@ -584,7 +627,7 @@ class NBAEngine:
             evaluation_date=evaluation_date,
         )
 
-        degraded = scores_missing or result.scores_expired
+        degraded = scores_missing or scores_invalid or result.scores_expired
         rationale = result.decision_rationale
 
         selected = result.selected_action
@@ -598,6 +641,11 @@ class NBAEngine:
             rationale += (
                 " [degraded_input=True: skor AI kedaluwarsa atau belum dihitung; "
                 "nilai default dipakai.]"
+            )
+        if scores_invalid:
+            rationale += (
+                " [skor AI tidak valid (di luar rentang 0-1 / bukan angka terhingga); "
+                "ditolak dan diganti default konservatif.]"
             )
 
         return DecisionRecord(
@@ -624,10 +672,10 @@ class NBAEngine:
 
     def _is_score_expired(self, ai_scores: AIScores, evaluation_date: datetime) -> bool:
         """Memeriksa apakah skor AI sudah melampaui masa berlaku (valid_until)."""
-        valid_until = ai_scores.score_generated_at + timedelta(
+        valid_until = to_naive_utc(ai_scores.score_generated_at) + timedelta(
             days=self.score_validity_days
         )
-        return evaluation_date > valid_until
+        return to_naive_utc(evaluation_date) > valid_until
 
     def _evaluate_candidates(
         self,
