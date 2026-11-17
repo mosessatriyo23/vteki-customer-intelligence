@@ -818,7 +818,12 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                 baseline_effective = cutoff - timedelta(days=2)
                 baseline_recorded = merge_recorded_at - timedelta(days=2)
 
+                unresolved_source = next(
+                    source_id for source_id in mapping if source_id != moved_source
+                )
                 for source_id, golden_id in mapping.items():
+                    if source_id == unresolved_source:
+                        continue
                     connection.execute(
                         history_table.insert().values(
                             source_customer_id=source_id,
@@ -834,6 +839,34 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                             change_reason="Initial integration-test mapping",
                         )
                     )
+
+                # A partial registry result must not force an unresolved source
+                # into a Golden ID merely to make the profile build succeed.
+                with Session(bind=connection) as session:
+                    with pytest.raises(ValueError, match="UNKNOWN: identity history"):
+                        build_profiles_as_of(
+                            inbound,
+                            resolution,
+                            cutoff,
+                            session,
+                            recorded_after,
+                        )
+
+                connection.execute(
+                    history_table.insert().values(
+                        source_customer_id=unresolved_source,
+                        golden_customer_id=mapping[unresolved_source],
+                        registry_version=version_tag,
+                        source_batch_id=batch_id,
+                        assignment_type="BASELINE",
+                        event_type="BASELINE",
+                        effective_at=baseline_effective,
+                        recorded_at=baseline_recorded,
+                        reviewer_id=None,
+                        correlation_id=f"ci-{uuid4().hex}",
+                        change_reason="Resolve integration-test coverage",
+                    )
+                )
 
                 # Merge berlaku secara efektif sebelum cutoff,
                 # tetapi baru diketahui setelah recorded_before.
@@ -930,6 +963,174 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                 assert before_by_id[old_golden][
                     "source_identity_count"
                 ] - 1 == after_by_id.get(old_golden, {}).get("source_identity_count", 0)
+
+                # Exercise the review correction through the profile consumer:
+                # a rejection conflicts with the as-of merged mapping, while a
+                # later approved correction is reflected only at later known_at.
+                target_source = next(
+                    source_id
+                    for source_id, golden_id in mapping.items()
+                    if golden_id == target_golden
+                )
+                with Session(bind=connection) as session:
+                    queue = ReviewQueueItem(
+                        source_batch_id=batch_id,
+                        registry_version=version_tag,
+                        left_source_id=moved_source,
+                        right_source_id=target_source,
+                        left_golden_id=old_golden,
+                        right_golden_id=target_golden,
+                        heuristic_score=0.5,
+                        reason="ci_review_correction_profile",
+                        status="PENDING",
+                        created_at=now - timedelta(days=1),
+                    )
+                    reviewer = User(
+                        email=f"ci-{uuid4().hex}@example.com",
+                        password_hash="not-a-real-password-hash",
+                        is_active=True,
+                        created_at=now,
+                    )
+                    session.add_all([queue, reviewer])
+                    session.flush()
+                    decision = IdentityReviewDecisionHistory(
+                        review_queue_id=queue.id,
+                        event_type="DECISION",
+                        action="REJECT_KEEP_SEPARATE",
+                        occurred_at=now - timedelta(minutes=2),
+                        source_batch_id=batch_id,
+                        source_event_id=f"ci-review:{uuid4().hex}",
+                        source_version="identity-review-v1",
+                        idempotency_key=f"ci-review:{uuid4().hex}",
+                        reviewer_id=reviewer.id,
+                        correlation_id=f"ci-review:{uuid4().hex}",
+                        rationale="Initial decision for profile as-of test",
+                    )
+                    session.add(decision)
+                    session.flush()
+                    session.refresh(decision)
+
+                    registry = PersistentIdentityRegistry(session)
+                    review_known_before_correction = decision.available_at + timedelta(
+                        microseconds=1
+                    )
+                    profile_before_review_correction = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        review_known_before_correction,
+                    )
+                    profile_before_by_id = {
+                        row["golden_customer_id"]: row
+                        for row in profile_before_review_correction
+                    }
+                    assert (
+                        profile_before_by_id[target_golden]["identity_status"]
+                        == "UNKNOWN"
+                    )
+
+                    review_correction = registry.append_review_decision_revision(
+                        queue_id=queue.id,
+                        supersedes_event_id=decision.event_id,
+                        event_type="CORRECTION",
+                        action="APPROVE_MERGE",
+                        actor_id=reviewer.id,
+                        rationale="Corrected review decision for profile test",
+                        correlation_id=f"ci-review-correction:{uuid4().hex}",
+                        occurred_at=now + timedelta(seconds=1),
+                    )
+                    session.flush()
+                    session.refresh(review_correction)
+                    profile_after_review_correction = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        review_correction.available_at + timedelta(microseconds=1),
+                    )
+                    profile_after_by_id = {
+                        row["golden_customer_id"]: row
+                        for row in profile_after_review_correction
+                    }
+                    assert (
+                        profile_after_by_id[target_golden]["identity_status"]
+                        == "APPROVED"
+                    )
+
+                split_effective_at = cutoff + timedelta(days=1)
+                split_recorded_at = merge_recorded_at + timedelta(seconds=2)
+                connection.execute(
+                    history_table.insert().values(
+                        source_customer_id=moved_source,
+                        golden_customer_id=old_golden,
+                        registry_version=version_tag,
+                        source_batch_id=batch_id,
+                        assignment_type="MANUAL_SPLIT",
+                        event_type="MANUAL_SPLIT",
+                        effective_at=split_effective_at,
+                        recorded_at=split_recorded_at,
+                        reviewer_id=None,
+                        correlation_id=f"ci-{uuid4().hex}",
+                        change_reason="Post-merge split as-of integration test",
+                    )
+                )
+                with Session(bind=connection) as session:
+                    before_split = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        split_effective_at - timedelta(seconds=1),
+                        session,
+                        split_recorded_at + timedelta(seconds=1),
+                    )
+                    after_split = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        split_effective_at + timedelta(seconds=1),
+                        session,
+                        split_recorded_at + timedelta(seconds=1),
+                    )
+                before_split_by_id = {
+                    row["golden_customer_id"]: row for row in before_split
+                }
+                after_split_by_id = {
+                    row["golden_customer_id"]: row for row in after_split
+                }
+                assert (
+                    before_split_by_id[target_golden]["source_identity_count"]
+                    == after_split_by_id[target_golden]["source_identity_count"] + 1
+                )
+                assert (
+                    before_split_by_id[old_golden]["source_identity_count"] + 1
+                    == after_split_by_id[old_golden]["source_identity_count"]
+                )
+
+                with Session(bind=connection) as session:
+                    old_snapshot_after_split = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        recorded_before,
+                    )
+                    save_profile_snapshots(
+                        old_snapshot_after_split,
+                        batch_id,
+                        version_tag,
+                        session,
+                        commit=False,
+                    )
+                    unchanged = session.scalar(
+                        select(ProfileSnapshot).where(
+                            ProfileSnapshot.golden_customer_id == target_golden,
+                            ProfileSnapshot.cutoff_at == cutoff,
+                            ProfileSnapshot.identity_registry_version == version_tag,
+                            ProfileSnapshot.rule_version == "c360-development-v1",
+                        )
+                    )
+                    assert unchanged is not None
+                    assert unchanged.generated_at == published_generated_at
+                    assert unchanged.source_batch_id == published_source_batch
             finally:
                 if outer.is_active:
                     outer.rollback()
