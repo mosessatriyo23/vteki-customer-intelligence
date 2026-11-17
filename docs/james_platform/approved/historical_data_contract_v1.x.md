@@ -264,7 +264,7 @@ not implemented without an approved design.
 | Earlier local patch checks | Historical result: focused tests 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
 | Ruff / Black / MyPy / Alembic | Earlier local results are historical; verify current head before making a release claim. Alembic head is `0023_identity_history_coverage_marker`. |
 | James | Owner; implementation is on main. This contract remains DRAFT. |
-| Moses | Point-in-time review pending. |
+| Moses | Reviewed 2026-11-17 against `main` `40f5096`: ACCEPT WITH LIMITATIONS for development/dev-only semantics and REQUEST CHANGES for training-source use. See [Moses review handoff](../../moses_data_ai/MOSES_REVIEW_JAMES_HANDOFF_2026-11-17.md). |
 | Christ | Business-value review pending if definitions affect targets. |
 | Cross-team Gate C | Pending. |
 
