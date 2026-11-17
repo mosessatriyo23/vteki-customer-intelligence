@@ -124,7 +124,7 @@ export const api = {
   approveCampaign: (token: string, id: number) => request<ApiCampaign>(`/campaigns/${id}/approve`, token, { method: 'POST' }),
   rejectCampaign: (token: string, id: number, reviewComment: string) => request<{ status: string }>(`/governance/campaigns/${id}/approval`, token, { method: 'POST', body: JSON.stringify({ approved: false, review_comment: reviewComment }) }),
   launchCampaign: (token: string, id: number) => request<{ status: string; batch_job_id: number }>(`/campaigns/${id}/launch`, token, { method: 'POST' }),
-  reviews: (token: string) => request<ApiReview[]>('/governance/identity-reviews?status_filter=', token),
+  reviews: (token: string) => request<ApiReview[]>('/governance/identity-reviews?status_filter=all', token),
   resolveReview: (token: string, id: number, approved: boolean, note: string) => request<ApiReview>(`/governance/identity-reviews/${id}/resolve`, token, { method: 'POST', body: JSON.stringify({ decision: approved ? 'approved' : 'rejected', review_note: note }) }),
   decisions: (token: string) => request<ApiDecision[]>('/governance/nba-decisions', token),
   createReview: (token: string, payload: { subject_reference: string; candidate_references: string[]; confidence: number; reason: string }) => request<{ id: number; status: string }>('/identity-reviews', token, { method: 'POST', body: JSON.stringify(payload) }),

@@ -254,4 +254,81 @@ test.describe('Frontend RBAC - empat role', () => {
       ).toBe(403)
     }
   })
+
+  test('Campaign Manager menyelesaikan approval dan audit trace dapat direkonstruksi', async ({
+    page,
+  }) => {
+    const campaignName = `E2E Approval ${Date.now()}`
+    await login(page, accounts.campaign)
+    await openPage(page, 'Campaigns & Approval')
+    await page.getByRole('button', { name: 'Kampanye Baru' }).click()
+    await page.getByLabel('Nama Kampanye').fill(campaignName)
+    await page
+      .getByLabel('Target Segmen Pelanggan')
+      .selectOption({ index: 1 })
+    await page
+      .getByLabel('Draf Pesan Kampanye (Persetujuan Draf)')
+      .fill('Pesan approval E2E untuk channel simulator.')
+
+    const createdResponse = page.waitForResponse(
+      (response) =>
+        response.url().endsWith('/api/campaigns') &&
+        response.request().method() === 'POST',
+    )
+    await page
+      .getByRole('button', { name: 'Simpan Draf Kampanye' })
+      .click()
+    const campaign = await (await createdResponse).json()
+    const correlationId = campaign.correlation_id as string
+    if (!correlationId) {
+      throw new Error('Campaign response tidak memiliki correlation_id.')
+    }
+
+    const campaignRow = page
+      .getByRole('row')
+      .filter({ hasText: campaignName })
+    await campaignRow
+      .getByRole('button', { name: 'Ajukan Approval' })
+      .click()
+    await campaignRow.getByRole('button', { name: 'Setujui' }).click()
+    await expect(campaignRow.getByText('Approved')).toBeVisible()
+
+    await page.getByRole('button', { name: 'Keluar' }).click()
+    await login(page, accounts.admin)
+    await openPage(page, 'Monitoring & Audit Trace')
+    await page
+      .getByPlaceholder('Masukkan correlation_id workflow...')
+      .fill(correlationId)
+    await page
+      .getByRole('button', { name: 'Jalankan Penelusuran Trace' })
+      .click()
+    await expect(page.getByText('campaign.approved', { exact: true })).toBeVisible()
+  })
+
+  test('Operator membuat dan menyelesaikan identity review', async ({ page }) => {
+    const subject = `E2E Identity ${Date.now()}`
+    await login(page, accounts.operator)
+    await openPage(page, 'Manual Review Identitas')
+    await page.getByRole('button', { name: 'Tambah kasus' }).click()
+    await page.getByLabel('Referensi utama').fill(subject)
+    await page
+      .getByLabel('Kandidat, pisahkan dengan koma')
+      .fill(`candidate-${Date.now()}`)
+    await page
+      .getByLabel('Alasan flagging')
+      .fill('Acceptance test identity review workflow.')
+    await page.getByRole('button', { name: 'Masukkan ke antrean' }).click()
+
+    const reviewCard = page
+      .locator('.review-card')
+      .filter({ hasText: subject })
+    await reviewCard
+      .getByRole('button', { name: 'Tolak Gabung Identitas' })
+      .click()
+    await expect(reviewCard.getByText('Rejected')).toBeVisible()
+    await expect(
+      reviewCard.getByText('Resolusi Identitas Telah Diselesaikan'),
+    ).toBeVisible()
+  })
+
 })

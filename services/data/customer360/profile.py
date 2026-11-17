@@ -1,6 +1,8 @@
-"""Development Customer360 aggregates. Identity mapping is a current snapshot.
+"""Development Customer360 aggregates with an identity-only as-of utility.
 
-Not a training feature pipeline: historical identity availability is not versioned.
+``build_profiles_as_of`` versions only identity mapping. Its inbound transaction,
+visit, membership, and review-queue inputs are not a complete bitemporal feature
+source and must not be used as historical training snapshots.
 """
 
 from __future__ import annotations
@@ -8,6 +10,10 @@ from __future__ import annotations
 import csv
 from datetime import datetime, timedelta
 from pathlib import Path
+
+_IDENTITY_STATUSES = frozenset(
+    {"PROVISIONAL", "REVIEW_REQUIRED", "APPROVED", "REJECTED", "UNKNOWN"}
+)
 
 
 def read(path):
@@ -21,6 +27,8 @@ def build_profiles(
     cutoff: datetime,
     *,
     identity_mapping: dict[str, str] | None = None,
+    identity_status_override: str | None = None,
+    identity_status_by_golden: dict[str, str] | None = None,
 ) -> list[dict]:
     import json
 
@@ -58,12 +66,26 @@ def build_profiles(
         for source, golden in mapping.items()
     ):
         raise ValueError("Identity mapping must contain non-empty string IDs")
+    if identity_status_override is not None and (
+        identity_status_override not in _IDENTITY_STATUSES
+    ):
+        raise ValueError(
+            f"Unsupported identity status override: {identity_status_override!r}"
+        )
+    if identity_status_by_golden is not None and any(
+        status not in _IDENTITY_STATUSES
+        for status in identity_status_by_golden.values()
+    ):
+        raise ValueError("Identity status map contains an unsupported status")
     if len(mapping) != len(rows) or set(mapping) != set(sources):
-        raise ValueError("Identity coverage must exactly match source snapshot")
+        raise ValueError(
+            "UNKNOWN: identity history does not resolve every source in this snapshot"
+        )
     needs_review = set()
-    for row in read(resolution / "review_queue.csv"):
-        for field in ("left_source_id", "right_source_id"):
-            needs_review.add(mapping[row[field]])
+    if identity_status_override is None and identity_status_by_golden is None:
+        for row in read(resolution / "review_queue.csv"):
+            for field in ("left_source_id", "right_source_id"):
+                needs_review.add(mapping[row[field]])
     profiles = {}
     for source, golden in mapping.items():
         if sources[source]["join_date"] > cutoff.date().isoformat():
@@ -73,7 +95,17 @@ def build_profiles(
                 golden_customer_id=golden,
                 cutoff_at=cutoff.isoformat(),
                 identity_status=(
-                    "REVIEW_REQUIRED" if golden in needs_review else "PROVISIONAL"
+                    identity_status_override
+                    if identity_status_override is not None
+                    else (
+                        identity_status_by_golden.get(golden, "PROVISIONAL")
+                        if identity_status_by_golden is not None
+                        else (
+                            "REVIEW_REQUIRED"
+                            if golden in needs_review
+                            else "PROVISIONAL"
+                        )
+                    )
                 ),
                 source_identity_count=0,
                 first_join_date=sources[source]["join_date"],
@@ -152,15 +184,34 @@ def build_profiles_as_of(
     recorded_at: datetime | None = None,
 ) -> list[dict]:
     """Build Customer360 profiles using the bitemporal identity registry."""
-    from services.data.identity.registry import PersistentIdentityRegistry
+    from services.data.identity.registry import (
+        IdentityHistoryCoverageError,
+        PersistentIdentityRegistry,
+    )
 
-    mapping = PersistentIdentityRegistry(session).get_mapping_as_of(
+    snapshot = PersistentIdentityRegistry(session).get_mapping_as_of_result(
         cutoff,
         recorded_at,
     )
+    if snapshot.status != "AVAILABLE":
+        raise IdentityHistoryCoverageError(
+            f"{snapshot.status}: identity mapping is unavailable for this cutoff"
+        )
+    known_at = recorded_at or datetime.now(cutoff.tzinfo)
+    registry = PersistentIdentityRegistry(session)
+    review_status = registry.get_review_status_by_golden_as_of(
+        snapshot.mapping,
+        cutoff,
+        known_at,
+    )
+    review_status = {
+        golden_id: review_status.get(golden_id, "UNKNOWN")
+        for golden_id in set(snapshot.mapping.values())
+    }
     return build_profiles(
         inbound,
         resolution,
         cutoff,
-        identity_mapping=mapping,
+        identity_mapping=snapshot.mapping,
+        identity_status_by_golden=review_status,
     )

@@ -4,6 +4,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -93,7 +94,10 @@ class AuditEvent(Base):
 
 class BatchJob(Base):
     __tablename__ = "batch_jobs"
-    __table_args__ = {"schema": "act"}
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_batch_jobs_idempotency"),
+        {"schema": "act"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     kind: Mapped[str] = mapped_column(String(64), index=True)
@@ -103,6 +107,7 @@ class BatchJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
     last_error: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     available_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -505,6 +510,28 @@ class IdentityMappingHistory(Base):
     change_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class IdentityHistoryCoverage(Base):
+    """Independent marker for the earliest complete identity-history coverage."""
+
+    __tablename__ = "identity_history_coverage"
+    __table_args__ = (
+        CheckConstraint(
+            "singleton_id = 1", name="ck_identity_history_coverage_singleton"
+        ),
+        {"schema": "identity"},
+    )
+
+    singleton_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    coverage_started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
 class MatchDecision(Base):
     __tablename__ = "match_decisions"
     __table_args__ = (
@@ -601,6 +628,71 @@ class ReviewAuditLog(Base):
     performed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class IdentityReviewDecisionHistory(Base):
+    """Append-only bitemporal journal for identity review decisions."""
+
+    __tablename__ = "review_decision_history"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_review_decision_idempotency"),
+        Index(
+            "ix_review_decision_history_asof",
+            "review_queue_id",
+            "occurred_at",
+            "available_at",
+            "recorded_at",
+        ),
+        CheckConstraint(
+            "event_type IN ('DECISION', 'CORRECTION', 'REVOCATION')",
+            name="ck_review_decision_history_event_type",
+        ),
+        CheckConstraint(
+            "(event_type = 'REVOCATION' AND action IS NULL) OR "
+            "(event_type IN ('DECISION', 'CORRECTION') AND action IN "
+            "('APPROVE_MERGE', 'REJECT_KEEP_SEPARATE'))",
+            name="ck_review_decision_history_action",
+        ),
+        {"schema": "identity"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
+    review_queue_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("identity.review_queue.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    event_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    supersedes_event_id: Mapped[int | None] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("identity.review_decision_history.event_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    reviewer_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("core.users.id"), nullable=False
+    )
+    correlation_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    rationale: Mapped[str] = mapped_column(String(1000), nullable=False)
 
 
 class ProfileSnapshot(Base):
@@ -743,6 +835,11 @@ class TransactionEventHistory(Base):
         ForeignKey("stg.ingestion_batches.batch_id"),
         nullable=False,
     )
+    source_transaction_batch_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stg.ingestion_batches.batch_id"),
+        nullable=False,
+    )
     idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
     correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     corrects_event_id: Mapped[int | None] = mapped_column(
@@ -758,3 +855,50 @@ class TransactionEventHistory(Base):
     actor_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_event_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     source_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class BusinessEventHistory(Base):
+    __tablename__ = "business_event_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "idempotency_key",
+            name="uq_business_event_history_idempotency",
+        ),
+        Index(
+            "ix_business_event_history_asof",
+            "source_customer_ref",
+            "occurred_at",
+            "available_at",
+        ),
+        {"schema": "source"},
+    )
+
+    event_id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    subject_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_customer_ref: Mapped[str] = mapped_column(String(64), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    recorded_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=text("clock_timestamp()"),
+        nullable=False,
+    )
+    source_batch_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("stg.ingestion_batches.batch_id"),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    lineage_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)

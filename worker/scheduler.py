@@ -24,6 +24,10 @@ PROCESS_SHUTDOWN_GRACE_SECONDS = 1.0
 _local_pipeline_lock = threading.Lock()
 
 
+class JobCancelledError(Exception):
+    """Raised when an external cancellation request stops a running job."""
+
+
 def _invoke_handler(
     connection: Connection,
     handler: Callable[[dict[str, Any]], dict[str, Any]],
@@ -60,6 +64,7 @@ def _execute_handler_with_timeout(
     handler: Callable[[dict[str, Any]], dict[str, Any]],
     payload: dict[str, Any],
     timeout_seconds: float,
+    cancellation_requested: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
     """Run a module-level handler with a hard process deadline.
 
@@ -107,6 +112,11 @@ def _execute_handler_with_timeout(
                     "Pipeline handler exceeded its "
                     f"{timeout_seconds:.2f}s execution deadline; "
                     "child process terminated"
+                )
+            if cancellation_requested is not None and cancellation_requested():
+                _terminate_process(process)
+                raise JobCancelledError(
+                    "Job cancellation requested; child process terminated"
                 )
 
             if receiver.poll(min(0.1, remaining)):

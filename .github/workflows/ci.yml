@@ -111,10 +111,21 @@ jobs:
           print(f"PASS: single Alembic head: {heads[0]}")
           PY
 
+      - name: Verify Upgrade of a Populated Historical Database
+        env:
+          VTEKI_ALLOW_TEST_DATABASE_RESET: "1"
+          VTEKI_TEST_POSTGRES_ADMIN_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
+        run: python scripts/verify_populated_migration_upgrade.py
+
       - name: Provision Least-Privilege and Runtime PostgreSQL Roles
+        env:
+          VTEKI_API_TEST_PASSWORD: ci-only-api-password
+          VTEKI_WORKER_TEST_PASSWORD: ci-only-worker-password
         run: |
           python - <<'PY'
+          import os
           import psycopg
+          from psycopg import sql
           from pathlib import Path
 
           connection_string = (
@@ -128,20 +139,37 @@ jobs:
           )
 
           for filename in scripts:
-              sql = Path(filename).read_text(encoding="utf-8")
+              script_sql = Path(filename).read_text(encoding="utf-8")
 
               with psycopg.connect(
                   connection_string,
                   autocommit=True,
               ) as connection:
-                  connection.execute(sql, prepare=False)
+                  connection.execute(script_sql, prepare=False)
 
               print(f"PASS: provisioned {filename}")
+
+          with psycopg.connect(connection_string, autocommit=True) as connection:
+              for role, password in (
+                  ("vteki_api", os.environ["VTEKI_API_TEST_PASSWORD"]),
+                  ("vteki_worker", os.environ["VTEKI_WORKER_TEST_PASSWORD"]),
+              ):
+                  connection.execute(
+                      sql.SQL("ALTER ROLE {} WITH PASSWORD {}").format(
+                          sql.Identifier(role),
+                          sql.Literal(password),
+                      )
+                  )
+                  print(f"PASS: configured CI login for {role}")
           PY
 
       - name: Verify PostgreSQL Runtime Role Permissions
+        env:
+          VTEKI_API_TEST_PASSWORD: ci-only-api-password
+          VTEKI_WORKER_TEST_PASSWORD: ci-only-worker-password
         run: |
           python - <<'PY'
+          import os
           import psycopg
 
           connection_string = (
@@ -220,6 +248,38 @@ jobs:
                       print(
                           f"PASS: {role} cannot {privilege} audit events"
                       )
+
+          for role, password, runtime_role in (
+              (
+                  "vteki_api",
+                  os.environ["VTEKI_API_TEST_PASSWORD"],
+                  "vteki_api_runtime",
+              ),
+              (
+                  "vteki_worker",
+                  os.environ["VTEKI_WORKER_TEST_PASSWORD"],
+                  "vteki_worker_runtime",
+              ),
+          ):
+              with psycopg.connect(
+                  host="localhost",
+                  dbname="vteki_ci",
+                  user=role,
+                  password=password,
+              ) as connection:
+                  current_user, is_superuser, has_runtime_role = connection.execute(
+                      """
+                      SELECT current_user,
+                             rolsuper,
+                             pg_has_role(current_user, %s, 'MEMBER')
+                      FROM pg_roles
+                      WHERE rolname = current_user
+                      """,
+                      (runtime_role,),
+                  ).fetchone()
+                  if current_user != role or is_superuser or not has_runtime_role:
+                      raise SystemExit(f"FAILED: runtime login isolation for {role}")
+                  print(f"PASS: connects as non-superuser {role}")
           PY
 
       - name: Verify PostgreSQL Audit and Role Isolation
@@ -228,9 +288,13 @@ jobs:
         run: pytest -q tests/integration/test_postgres_platform.py
 
       - name: Bootstrap CI Administrator
+        env:
+          DATABASE_URL: postgresql+psycopg://vteki_api:ci-only-api-password@localhost:5432/vteki_ci
         run: python -m api.bootstrap
 
       - name: Run Schemathesis Coverage, Fuzzing and Stateful Tests
+        env:
+          DATABASE_URL: postgresql+psycopg://vteki_api:ci-only-api-password@localhost:5432/vteki_ci
         timeout-minutes: 5
         run: |
           uvicorn api.main:app --host 127.0.0.1 --port 8000 > /tmp/vteki-api.log 2>&1 &
@@ -339,8 +403,9 @@ jobs:
           --health-retries 10
 
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_e2e
+      DATABASE_URL: postgresql+psycopg://vteki_api:ci-only-api-password@localhost:5432/vteki_e2e
       MIGRATION_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_e2e
+      VTEKI_API_TEST_PASSWORD: ci-only-api-password
       JWT_SECRET: ci-only-e2e-secret-not-for-production
       BOOTSTRAP_ADMIN_EMAIL: admin@example.com
       BOOTSTRAP_ADMIN_PASSWORD: CI-Only-Admin-Password-123!
@@ -379,6 +444,40 @@ jobs:
 
       - name: Apply Database Migrations
         run: alembic upgrade head
+
+      - name: Provision E2E API Runtime Role
+        run: |
+          python - <<'PY'
+          import os
+          import psycopg
+          from psycopg import sql
+          from pathlib import Path
+
+          connection_string = (
+              "host=localhost dbname=vteki_e2e "
+              "user=postgres password=postgres"
+          )
+          for filename in (
+              "scripts/db_permissions.sql",
+              "scripts/runtime_roles.sql",
+          ):
+              with psycopg.connect(
+                  connection_string,
+                  autocommit=True,
+              ) as connection:
+                  connection.execute(
+                      Path(filename).read_text(encoding="utf-8"),
+                      prepare=False,
+                  )
+          with psycopg.connect(connection_string, autocommit=True) as connection:
+              connection.execute(
+                  sql.SQL("ALTER ROLE {} WITH PASSWORD {}").format(
+                      sql.Identifier("vteki_api"),
+                      sql.Literal(os.environ["VTEKI_API_TEST_PASSWORD"]),
+                  )
+              )
+          print("PASS: E2E API uses the least-privilege runtime login")
+          PY
 
       - name: Bootstrap Administrator
         run: python -m api.bootstrap

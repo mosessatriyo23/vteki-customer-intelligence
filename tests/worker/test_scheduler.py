@@ -81,6 +81,23 @@ def test_pipeline_records_hard_timeout_and_terminates_child(monkeypatch):
     engine.dispose()
 
 
+def test_handler_cancellation_terminates_child_process():
+    import time
+
+    import pytest
+
+    from worker.scheduler import JobCancelledError, _execute_handler_with_timeout
+
+    requested_at = time.monotonic()
+    with pytest.raises(JobCancelledError, match="child process terminated"):
+        _execute_handler_with_timeout(
+            blocking_handler,
+            {},
+            10,
+            lambda: time.monotonic() - requested_at > 0.3,
+        )
+
+
 def test_pipeline_rejects_non_importable_handler(monkeypatch):
     engine, session_factory = make_session_factory()
     monkeypatch.setattr(scheduler, "engine", engine)

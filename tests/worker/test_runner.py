@@ -24,7 +24,7 @@ def make_session_factory():
     return engine, sessionmaker(bind=engine, expire_on_commit=False)
 
 
-def inline_executor(handler, payload, timeout_seconds):
+def inline_executor(handler, payload, timeout_seconds, cancellation_requested):
     """Run handlers directly in unit tests without spawning a subprocess."""
     return handler(payload)
 
@@ -174,6 +174,34 @@ def test_worker_fails_expired_job_after_last_attempt():
     engine.dispose()
 
 
+def test_worker_recovers_expired_cancellation_as_cancelled():
+    engine, session_factory = make_session_factory()
+    now = datetime.now(timezone.utc)
+    with session_factory() as session:
+        session.add(
+            BatchJob(
+                kind="rollup",
+                status="cancel_requested",
+                attempts=1,
+                max_attempts=3,
+                started_at=now - timedelta(minutes=2),
+                lease_until=now - timedelta(seconds=1),
+                claim_token="cancelled-claim",
+                available_at=now - timedelta(minutes=2),
+            )
+        )
+        session.commit()
+
+    assert recover_expired_jobs(session_factory) == 1
+    with session_factory() as session:
+        job = session.get(BatchJob, 1)
+        assert job is not None
+        assert job.status == "cancelled"
+        assert job.claim_token is None
+        assert job.lease_until is None
+    engine.dispose()
+
+
 def test_worker_does_not_recover_active_lease():
     engine, session_factory = make_session_factory()
     now = datetime.now(timezone.utc)
@@ -225,7 +253,7 @@ def test_worker_uses_sixty_minute_timeout():
 
     received = {}
 
-    def checking_executor(handler, payload, timeout_seconds):
+    def checking_executor(handler, payload, timeout_seconds, cancellation_requested):
         received["timeout"] = timeout_seconds
         return handler(payload)
 
@@ -259,7 +287,7 @@ def test_worker_retries_after_executor_timeout():
         )
         session.commit()
 
-    def timeout_executor(handler, payload, timeout_seconds):
+    def timeout_executor(handler, payload, timeout_seconds, cancellation_requested):
         raise TimeoutError("Job exceeded execution timeout")
 
     assert process_one(
@@ -296,7 +324,7 @@ def test_stale_worker_cannot_complete_reclaimed_job():
         )
         session.commit()
 
-    def reclaiming_executor(handler, payload, timeout_seconds):
+    def reclaiming_executor(handler, payload, timeout_seconds, cancellation_requested):
         # Simulate recovery and a newer worker claiming the same job.
         with session_factory() as session:
             job = session.get(BatchJob, 1)
@@ -320,4 +348,42 @@ def test_stale_worker_cannot_complete_reclaimed_job():
         assert job.claim_token == "new-worker-claim"
         assert job.result is None
 
+    engine.dispose()
+
+
+def test_worker_completes_cancelled_job_after_handler_cancellation():
+    from worker.scheduler import JobCancelledError
+
+    engine, session_factory = make_session_factory()
+    with session_factory() as session:
+        session.add(
+            BatchJob(
+                kind="rollup",
+                payload={},
+                max_attempts=2,
+                available_at=datetime.now(timezone.utc),
+            )
+        )
+        session.commit()
+
+    def cancellation_executor(handler, payload, timeout_seconds, is_cancelled):
+        assert not is_cancelled()
+        with session_factory() as session:
+            job = session.get(BatchJob, 1)
+            assert job is not None
+            job.status = "cancel_requested"
+            session.commit()
+        raise JobCancelledError("Job cancellation requested")
+
+    assert process_one(
+        session_factory,
+        {"rollup": lambda _: {"ok": True}},
+        handler_executor=cancellation_executor,
+    )
+    with session_factory() as session:
+        job = session.get(BatchJob, 1)
+        assert job is not None
+        assert job.status == "cancelled"
+        assert job.claim_token is None
+        assert job.lease_until is None
     engine.dispose()

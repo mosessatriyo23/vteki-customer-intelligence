@@ -3,21 +3,48 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from api.models import (
     GoldenCustomer,
+    IdentityHistoryCoverage,
     IdentityMappingHistory,
+    IdentityReviewDecisionHistory,
     MatchDecision,
     RegistryVersion,
     ReviewAuditLog,
     ReviewQueueItem,
     SourceIdentityMapping,
 )
+
+MIGRATION_BASELINE_REASON = "Initial baseline captured during migration 0013"
+
+
+@dataclass(frozen=True)
+class IdentityMappingAsOf:
+    status: Literal["AVAILABLE", "BLOCKED", "UNKNOWN"]
+    mapping: dict[str, str]
+    coverage_started_at: datetime | None
+
+
+@dataclass(frozen=True)
+class IdentityReviewDecisionAsOf:
+    status: Literal["AVAILABLE", "UNKNOWN"]
+    event_type: str | None
+    action: str | None
+    event_id: int | None
+    occurred_at: datetime | None
+    available_at: datetime | None
+    recorded_at: datetime | None
+
+
+class IdentityHistoryCoverageError(ValueError):
+    """Raised when an identity cutoff predates the recorded history coverage."""
 
 
 class PersistentIdentityRegistry:
@@ -65,22 +92,92 @@ class PersistentIdentityRegistry:
         effective_at limits when a mapping was valid in the business domain.
         recorded_at limits what the system had recorded by that point in time.
         """
-        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
-            raise ValueError("effective_at must be timezone-aware")
+        snapshot = self.get_mapping_as_of_result(effective_at, recorded_at)
+        if snapshot.status == "BLOCKED":
+            raise IdentityHistoryCoverageError(
+                "BLOCKED: effective_at predates recorded identity-history coverage"
+            )
+        return snapshot.mapping
 
+    def get_mapping_as_of_result(
+        self,
+        effective_at: datetime,
+        recorded_at: datetime | None = None,
+    ) -> IdentityMappingAsOf:
+        """Return mappings with an explicit identity-history coverage status."""
+        self._validate_cutoffs(effective_at, recorded_at)
         knowledge_cutoff = recorded_at or datetime.now(timezone.utc)
-        if knowledge_cutoff.tzinfo is None or knowledge_cutoff.utcoffset() is None:
-            raise ValueError("recorded_at must be timezone-aware")
+        coverage_marker = self.session.get(IdentityHistoryCoverage, 1)
+        independent_coverage = (
+            coverage_marker.coverage_started_at if coverage_marker is not None else None
+        )
+        if coverage_marker is not None and _as_utc(knowledge_cutoff) < _as_utc(
+            coverage_marker.recorded_at
+        ):
+            return IdentityMappingAsOf(
+                status="UNKNOWN",
+                mapping={},
+                coverage_started_at=None,
+            )
+        migration_baseline = self.session.scalar(
+            select(func.min(IdentityMappingHistory.recorded_at)).where(
+                IdentityMappingHistory.event_type == "BASELINE",
+                IdentityMappingHistory.change_reason == MIGRATION_BASELINE_REASON,
+            )
+        )
+        if independent_coverage is not None:
+            coverage_started_at = _as_utc(independent_coverage)
+            if _as_utc(effective_at) < coverage_started_at:
+                return IdentityMappingAsOf(
+                    status="BLOCKED",
+                    mapping={},
+                    coverage_started_at=coverage_started_at,
+                )
+        elif migration_baseline is not None:
+            coverage_started_at = _as_utc(migration_baseline)
+            if _as_utc(effective_at) < coverage_started_at:
+                return IdentityMappingAsOf(
+                    status="BLOCKED",
+                    mapping={},
+                    coverage_started_at=coverage_started_at,
+                )
+        else:
+            first_history = self.session.scalar(
+                select(func.min(IdentityMappingHistory.effective_at))
+            )
+            if first_history is None:
+                return IdentityMappingAsOf(
+                    status="UNKNOWN",
+                    mapping={},
+                    coverage_started_at=None,
+                )
+            coverage_started_at = _as_utc(first_history)
+            if _as_utc(effective_at) < coverage_started_at:
+                return IdentityMappingAsOf(
+                    status="BLOCKED",
+                    mapping={},
+                    coverage_started_at=coverage_started_at,
+                )
 
+        effective_time = case(
+            (
+                and_(
+                    IdentityMappingHistory.event_type == "BASELINE",
+                    IdentityMappingHistory.change_reason == MIGRATION_BASELINE_REASON,
+                ),
+                IdentityMappingHistory.recorded_at,
+            ),
+            else_=IdentityMappingHistory.effective_at,
+        )
         stmt = (
             select(IdentityMappingHistory)
             .where(
-                IdentityMappingHistory.effective_at <= effective_at,
+                effective_time <= effective_at,
                 IdentityMappingHistory.recorded_at <= knowledge_cutoff,
             )
             .order_by(
                 IdentityMappingHistory.source_customer_id,
-                IdentityMappingHistory.effective_at.desc(),
+                effective_time.desc(),
                 IdentityMappingHistory.recorded_at.desc(),
                 IdentityMappingHistory.id.desc(),
             )
@@ -91,7 +188,242 @@ class PersistentIdentityRegistry:
             if row.source_customer_id not in result:
                 result[row.source_customer_id] = row.golden_customer_id
 
-        return result
+        return IdentityMappingAsOf(
+            status="AVAILABLE" if result else "UNKNOWN",
+            mapping=result,
+            coverage_started_at=coverage_started_at,
+        )
+
+    def get_review_decision_as_of(
+        self,
+        queue_id: int,
+        effective_at: datetime,
+        known_at: datetime,
+    ) -> IdentityReviewDecisionAsOf:
+        """Return a review decision using only events effective and known by cutoffs."""
+        if any(
+            value.tzinfo is None or value.utcoffset() is None
+            for value in (effective_at, known_at)
+        ):
+            raise ValueError("effective_at and known_at must be timezone-aware")
+        rows = list(
+            self.session.scalars(
+                select(IdentityReviewDecisionHistory)
+                .where(
+                    IdentityReviewDecisionHistory.review_queue_id == queue_id,
+                    IdentityReviewDecisionHistory.occurred_at <= effective_at,
+                    IdentityReviewDecisionHistory.available_at <= known_at,
+                    IdentityReviewDecisionHistory.recorded_at <= known_at,
+                )
+                .order_by(
+                    IdentityReviewDecisionHistory.occurred_at,
+                    IdentityReviewDecisionHistory.available_at,
+                    IdentityReviewDecisionHistory.recorded_at,
+                    IdentityReviewDecisionHistory.event_id,
+                )
+            ).all()
+        )
+        if not rows:
+            return IdentityReviewDecisionAsOf(
+                "UNKNOWN", None, None, None, None, None, None
+            )
+
+        visible_ids = {row.event_id for row in rows}
+        superseded: set[int] = set()
+        children: dict[int, int] = {}
+        for row in rows:
+            parent_id = row.supersedes_event_id
+            if parent_id is None:
+                continue
+            if parent_id not in visible_ids:
+                raise ValueError("Visible review correction has no visible parent")
+            if parent_id in children:
+                raise ValueError(
+                    "Identity review decision correction branches are invalid"
+                )
+            children[parent_id] = row.event_id
+            superseded.add(parent_id)
+
+        heads = [row for row in rows if row.event_id not in superseded]
+        if len(heads) != 1:
+            raise ValueError("Identity review decision history must form one chain")
+        head = heads[0]
+        return IdentityReviewDecisionAsOf(
+            status="AVAILABLE",
+            event_type=head.event_type,
+            action=head.action,
+            event_id=head.event_id,
+            occurred_at=head.occurred_at,
+            available_at=head.available_at,
+            recorded_at=head.recorded_at,
+        )
+
+    def get_review_status_by_golden_as_of(
+        self,
+        mapping: dict[str, str],
+        effective_at: datetime,
+        known_at: datetime,
+    ) -> dict[str, str]:
+        """Project review status without consulting mutable queue status fields."""
+        if any(
+            value.tzinfo is None or value.utcoffset() is None
+            for value in (effective_at, known_at)
+        ):
+            raise ValueError("effective_at and known_at must be timezone-aware")
+        queues = self.session.scalars(
+            select(ReviewQueueItem).where(
+                ReviewQueueItem.created_at <= effective_at,
+                ReviewQueueItem.created_at <= known_at,
+            )
+        ).all()
+        statuses: dict[str, set[str]] = defaultdict(set)
+        for queue in queues:
+            goldens = {
+                mapping[source]
+                for source in (queue.left_source_id, queue.right_source_id)
+                if source in mapping
+            }
+            if not goldens:
+                continue
+            decision = self.get_review_decision_as_of(queue.id, effective_at, known_at)
+            if decision.status == "UNKNOWN":
+                if queue.decided_at is not None and queue.decided_at <= effective_at:
+                    status = "UNKNOWN"
+                else:
+                    status = "REVIEW_REQUIRED"
+            elif decision.event_type == "REVOCATION":
+                status = "REVIEW_REQUIRED" if len(goldens) == 2 else "UNKNOWN"
+            elif decision.action == "APPROVE_MERGE":
+                status = "APPROVED" if len(goldens) == 1 else "UNKNOWN"
+            elif decision.action == "REJECT_KEEP_SEPARATE":
+                status = "REJECTED" if len(goldens) == 2 else "UNKNOWN"
+            else:
+                status = "UNKNOWN"
+            for golden in goldens:
+                statuses[golden].add(status)
+        return {
+            golden: next(iter(values)) if len(values) == 1 else "UNKNOWN"
+            for golden, values in statuses.items()
+        }
+
+    def append_review_decision_revision(
+        self,
+        *,
+        queue_id: int,
+        supersedes_event_id: int,
+        event_type: Literal["CORRECTION", "REVOCATION"],
+        action: str | None,
+        actor_id: int,
+        rationale: str,
+        correlation_id: str,
+        occurred_at: datetime | None = None,
+    ) -> IdentityReviewDecisionHistory:
+        """Append a linear correction/revocation without rewriting prior decisions.
+
+        This revises the decision ledger. It deliberately does not rewrite existing
+        identity mappings; a merge correction must use the identity mapping review
+        workflow and publish corresponding mapping history as a separate decision.
+        """
+        if event_type not in {"CORRECTION", "REVOCATION"}:
+            raise ValueError("event_type must be CORRECTION or REVOCATION")
+        if event_type == "CORRECTION" and action not in {
+            "APPROVE_MERGE",
+            "REJECT_KEEP_SEPARATE",
+        }:
+            raise ValueError("CORRECTION requires a supported review action")
+        if event_type == "REVOCATION" and action is not None:
+            raise ValueError("REVOCATION action must be null")
+        event_time = occurred_at or datetime.now(timezone.utc)
+        if event_time.tzinfo is None or event_time.utcoffset() is None:
+            raise ValueError("occurred_at must be timezone-aware")
+        queue_item = self.session.scalars(
+            select(ReviewQueueItem)
+            .where(ReviewQueueItem.id == queue_id)
+            .with_for_update()
+        ).first()
+        if queue_item is None:
+            raise ValueError(f"Review queue item {queue_id} not found")
+        target = self.session.get(IdentityReviewDecisionHistory, supersedes_event_id)
+        if target is None or target.review_queue_id != queue_id:
+            raise ValueError("supersedes_event_id must belong to the same review queue")
+        if _as_utc(event_time) < _as_utc(target.occurred_at):
+            raise ValueError(
+                "A review correction cannot predate the decision it revises"
+            )
+        key = (
+            f"identity-review:{queue_id}:{event_type}:"
+            f"{supersedes_event_id}:{correlation_id}"
+        )
+        existing = self.session.scalar(
+            select(IdentityReviewDecisionHistory).where(
+                IdentityReviewDecisionHistory.idempotency_key == key
+            )
+        )
+        if existing is not None:
+            if (
+                existing.action != action
+                or existing.rationale != rationale
+                or existing.reviewer_id != actor_id
+            ):
+                raise ValueError(
+                    "Review decision idempotency key conflicts with payload"
+                )
+            return existing
+        latest = self.session.scalar(
+            select(IdentityReviewDecisionHistory)
+            .where(IdentityReviewDecisionHistory.review_queue_id == queue_id)
+            .order_by(
+                IdentityReviewDecisionHistory.occurred_at.desc(),
+                IdentityReviewDecisionHistory.recorded_at.desc(),
+                IdentityReviewDecisionHistory.event_id.desc(),
+            )
+            .limit(1)
+        )
+        if latest is None or latest.event_id != supersedes_event_id:
+            raise ValueError(
+                "Only the current review-decision chain head may be revised"
+            )
+        event = IdentityReviewDecisionHistory(
+            review_queue_id=queue_id,
+            event_type=event_type,
+            action=action,
+            supersedes_event_id=supersedes_event_id,
+            occurred_at=event_time,
+            source_batch_id=queue_item.source_batch_id,
+            source_event_id=key,
+            source_version="identity-review-v1",
+            idempotency_key=key,
+            reviewer_id=actor_id,
+            correlation_id=correlation_id,
+            rationale=rationale,
+        )
+        self.session.add(event)
+        self.session.add(
+            ReviewAuditLog(
+                review_queue_id=queue_id,
+                actor_id=actor_id,
+                action=event_type,
+                previous_golden_id=queue_item.right_golden_id,
+                new_golden_id=None,
+                rationale=rationale,
+                correlation_id=correlation_id,
+                performed_at=event_time,
+            )
+        )
+        self.session.flush()
+        return event
+
+    @staticmethod
+    def _validate_cutoffs(
+        effective_at: datetime,
+        recorded_at: datetime | None,
+    ) -> None:
+        if effective_at.tzinfo is None or effective_at.utcoffset() is None:
+            raise ValueError("effective_at must be timezone-aware")
+        if recorded_at is not None and (
+            recorded_at.tzinfo is None or recorded_at.utcoffset() is None
+        ):
+            raise ValueError("recorded_at must be timezone-aware")
 
     def apply_resolution_batch(
         self,
@@ -334,6 +666,27 @@ class PersistentIdentityRegistry:
         item = self.session.scalars(stmt).first()
         if not item:
             raise ValueError(f"Review queue item {queue_id} not found")
+        decision_key = f"identity-review:{item.id}:DECISION:{correlation_id}"
+        existing_event = self.session.scalar(
+            select(IdentityReviewDecisionHistory).where(
+                IdentityReviewDecisionHistory.idempotency_key == decision_key
+            )
+        )
+        if existing_event is not None:
+            if (
+                existing_event.action != action
+                or existing_event.reviewer_id != actor_id
+                or existing_event.rationale != rationale
+            ):
+                raise ValueError(
+                    "Review decision idempotency key conflicts with payload"
+                )
+            return {
+                "queue_id": item.id,
+                "status": item.status,
+                "decision": existing_event.action,
+                "correlation_id": existing_event.correlation_id,
+            }
         if item.status != "PENDING":
             raise ValueError(
                 f"Review queue item {queue_id} is already decided ({item.status})"
@@ -401,6 +754,24 @@ class PersistentIdentityRegistry:
         item.reviewer_note = rationale
         item.decided_at = now
 
+        self.session.add(
+            IdentityReviewDecisionHistory(
+                review_queue_id=item.id,
+                event_type="DECISION",
+                action=action,
+                occurred_at=now,
+                available_at=now,
+                recorded_at=now,
+                source_batch_id=item.source_batch_id,
+                source_event_id=decision_key,
+                source_version="identity-review-v1",
+                idempotency_key=decision_key,
+                reviewer_id=actor_id,
+                correlation_id=correlation_id,
+                rationale=rationale,
+            )
+        )
+
         # Create Immutable Audit Trail
         audit_log = ReviewAuditLog(
             review_queue_id=item.id,
@@ -421,3 +792,9 @@ class PersistentIdentityRegistry:
             "decision": action,
             "correlation_id": correlation_id,
         }
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)

@@ -371,6 +371,7 @@ class PostgresIngestionLoader:
                                 occurred_at,
                                 available_at,
                                 source_batch_id,
+                                source_transaction_batch_id,
                                 idempotency_key,
                                 payload
                             )
@@ -379,6 +380,7 @@ class PostgresIngestionLoader:
                                 'TRANSACTION_RECORDED',
                                 t.transaction_datetime,
                                 t.created_at,
+                                t.source_batch_id,
                                 t.source_batch_id,
                                 t.source_batch_id || ':' ||
                                     t.source_transaction_id ||
@@ -394,6 +396,87 @@ class PostgresIngestionLoader:
                                 )
                             FROM source.transactions AS t
                             WHERE t.source_batch_id = :batch_id
+                            ON CONFLICT (idempotency_key) DO NOTHING
+                            """
+                        ),
+                        {"batch_id": batch_id},
+                    )
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO source.business_event_history (
+                                subject_type,
+                                event_type,
+                                source_event_id,
+                                source_version,
+                                source_customer_ref,
+                                occurred_at,
+                                available_at,
+                                source_batch_id,
+                                idempotency_key,
+                                lineage_reference,
+                                payload
+                            )
+                            SELECT
+                                'VISIT',
+                                'VISIT_COMPLETED',
+                                visit.visit_id,
+                                batch.schema_version,
+                                visit.source_customer_ref,
+                                visit.visit_datetime,
+                                clock_timestamp(),
+                                visit.source_batch_id,
+                                visit.source_batch_id || ':customer_visits:' ||
+                                    visit.visit_id || ':' || batch.schema_version,
+                                visit.source_transaction_id,
+                                to_jsonb(visit)
+                            FROM source.customer_visits AS visit
+                            JOIN stg.ingestion_batches AS batch
+                              ON batch.batch_id = visit.source_batch_id
+                            WHERE visit.source_batch_id = :batch_id
+                              AND visit.status = 'COMPLETED'
+                            ON CONFLICT (idempotency_key) DO NOTHING
+                            """
+                        ),
+                        {"batch_id": batch_id},
+                    )
+                    session.execute(
+                        text(
+                            """
+                            INSERT INTO source.business_event_history (
+                                subject_type,
+                                event_type,
+                                source_event_id,
+                                source_version,
+                                source_customer_ref,
+                                occurred_at,
+                                available_at,
+                                source_batch_id,
+                                idempotency_key,
+                                lineage_reference,
+                                payload
+                            )
+                            SELECT
+                                'MEMBERSHIP',
+                                CASE membership.event_type
+                                    WHEN 'JOIN' THEN 'MEMBERSHIP_JOIN'
+                                    WHEN 'RENEWAL' THEN 'MEMBERSHIP_RENEWAL'
+                                END,
+                                membership.event_id,
+                                batch.schema_version,
+                                membership.source_customer_ref,
+                                membership.occurred_at,
+                                clock_timestamp(),
+                                membership.source_batch_id,
+                                membership.source_batch_id ||
+                                    ':membership_events:' || membership.event_id ||
+                                    ':' || batch.schema_version,
+                                membership.previous_event_id,
+                                to_jsonb(membership)
+                            FROM source.membership_events AS membership
+                            JOIN stg.ingestion_batches AS batch
+                              ON batch.batch_id = membership.source_batch_id
+                            WHERE membership.source_batch_id = :batch_id
                             ON CONFLICT (idempotency_key) DO NOTHING
                             """
                         ),

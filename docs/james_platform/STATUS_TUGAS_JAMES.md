@@ -192,3 +192,262 @@ lintas tim terpenuhi.
 Fondasi transaction event history dan identity as-of telah berkembang,
 tetapi masih ada pekerjaan integrasi sumber, rekonstruksi histori,
 multi-batch, dan runtime yang harus diselesaikan.
+
+## Pembaruan status - 16 November 2026 (follow-up PR #35 untuk PR #33)
+
+Status di bawah ini menggantikan kesimpulan implementasi sebelumnya untuk
+follow-up Gate C. Implementasi ada di commit
+`3ccbc666aaaae04e03ac03a150d72981d579e2bd`, branch
+`fix/historical-data-gate-c-followup`, pada [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35).
+PR masih draft. Gate C tetap **NOT CLOSED**.
+
+### Perubahan James yang sudah dibuat lokal
+
+- Migration 0019 memisahkan batch transaksi asal dan batch penerimaan event
+  pada `source.transaction_event_history`; data lama di-backfill dari
+  transaksi asal dan kolom origin memiliki foreign key ke batch.
+- `append_transaction_event()` menerima event pada batch penerimaan yang
+  berbeda, mensyaratkan batch terkait `PUBLISHED`, mewajibkan
+  `source_event_id`/`source_version`, dan menangani replay/conflict
+  idempotency secara atomik.
+- `project_transaction_as_of()` menambahkan projection status, gross,
+  discount, refund kumulatif, net, actual revenue, cancellation, dan
+  correction chain. Projection menandai `source_coverage` sebagai
+  `OBSERVED_EVENTS_ONLY`; ini bukan bukti feed sumber lengkap.
+- Migration 0020 dan loader menyalin completed visit, membership join, dan
+  renewal dari input dengan occurrence time, source event ID, feed schema
+  version, batch, receipt time DB, dan lineage ke event bisnis asal.
+- As-of event query membatasi data ke batch PUBLISHED dan ordering memiliki
+  tie-break deterministik.
+- Migration 0013 baru merekam baseline pada waktu migrasi. Pembacaan juga
+  membatasi baseline lama berdasarkan `recorded_at` dan melaporkan
+  `AVAILABLE`, `BLOCKED`, atau `UNKNOWN`.
+- `build_profiles_as_of()` didokumentasikan sebagai utility identity-aware
+  terbatas, bukan feature/training snapshot resmi.
+
+### Status item dengan format yang diminta
+
+| Item | Status | Bukti / blocker |
+|---|---|---|
+| Refund/status/cancellation feed historis | **BLOCKED** | Tidak ada feed sumber/connector refund atau status-change di repository. API menerima event dengan provenance eksplisit; timestamp historis tidak dibuat. Perlu feed dan kontrak sumber dari owner. |
+| Completed visit/membership renewal history | **DONE — code + PostgreSQL CI** | Ledger/loader dan bitemporal read ditambahkan; CI PostgreSQL integration 11/11 lulus. Moses tetap perlu review sebelum renewal dipakai untuk churn. |
+| Final-state projection | **IN PROGRESS** | Kode projection dan tes unit ada; PostgreSQL CI lulus. Refund/status source feed masih hilang, jadi coverage hanya `OBSERVED_EVENTS_ONLY`. |
+| Event batch A → B → C | **DONE — code + PostgreSQL CI** | Tes PostgreSQL batch A/B/C, as-of, idempotency/conflict dan status lulus. |
+| Identity as-of merge/split/coverage | **IN PROGRESS** | Merge integration test yang ada, tes split/baseline baru, dan coverage status eksplisit. Review-required history/revocation dan stabilitas snapshot belum lengkap. |
+| Official historical snapshot | **BLOCKED** | Utility C360 masih memakai inbound dan review queue statis; belum boleh menjadi feature/training source. |
+| Multi-batch acceptance | **IN PROGRESS** | PostgreSQL CI membuktikan retry/concurrent duplicate batch, rollback/recovery, katalog per-batch, dan filter PUBLISHED. Overlap/master-data/snapshot immutability masih perlu bukti tambahan. |
+| Kontrak dan status | **DONE — DRAFT diperbarui** | Kontrak v1.1 berisi decision table, feed gaps, acceptance status dan approval eksplisit yang masih pending. |
+| PR/commit/link CI | **DONE — PR draft + CI hijau** | PR #35 dan commit di atas; seluruh checks CI selesai sukses. Belum merge. |
+| Approval Moses/Christ/cross-team | **BLOCKED** | Memerlukan review dan keputusan pihak terkait; James tidak menyatakan approval atas nama mereka. |
+| DB runtime role isolation, worker operations, audit benchmark, frontend E2E, runbook | **IN PROGRESS / VERIFICATION PENDING** | Di luar P0 yang sedang dikerjakan; tetap belum boleh dinyatakan VERIFIED tanpa bukti deployment/runtime. |
+| Physical table partitioning | **NOT APPLICABLE saat ini** | Belum ada workload, retensi, atau partition key yang disetujui untuk membenarkan migrasi fisik. |
+
+### Acceptance test dan hasil yang benar-benar tersedia
+
+- Tes unit projection: transaksi + refund berulang, correction chain, fork
+  correction ditolak, tie ordering, replay-order determinism, dan cutoff
+  knowledge untuk correction terlambat.
+- Tes identity lokal: baseline migration tidak mengklaim pre-migration
+  history; cutoff split mempertahankan mapping lama; unknown source tidak
+  diberi Golden ID.
+- Tes PostgreSQL di
+  `tests/integration/test_postgres_platform.py` untuk batch A/B/C,
+  idempotency/conflict, late event, visit/membership availability,
+  concurrency duplicate-batch, rollback/recovery, katalog per-batch, dan
+  filter batch PUBLISHED.
+- Hasil PostgreSQL lokal follow-up: **tidak dijalankan** karena
+  `VTEKI_TEST_POSTGRES_URL` tidak dikonfigurasi dan Docker/PostgreSQL tidak
+  tersedia. Karena itu tes lokal PG ter-skip.
+- Full local Python suite: **831 passed, 11 skipped**.
+- Ruff: **All checks passed**; Black: **90 files unchanged**; MyPy:
+  **Success, no issues found in 88 source files**; Alembic: satu head,
+  `0020_business_event_history`.
+- [CI PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104):
+  **semua jobs lulus**. Job PostgreSQL menjalankan migration dan
+  `test_postgres_platform.py`: **11 passed**. Frontend build dan RBAC E2E
+  juga lulus. Unit job melaporkan 724 passed dan 11 PostgreSQL tests skipped;
+  kasus PostgreSQL tersebut lulus pada dedicated step setelah migration.
+
+Contoh query/projection as-of:
+
+```python
+state = project_transaction_as_of(
+    session,
+    source_transaction_id="source-tx-id",
+    effective_at=effective_cutoff,
+    known_at=knowledge_cutoff,
+)
+# state.source_coverage == "OBSERVED_EVENTS_ONLY"
+```
+
+Replay event menggunakan idempotency key dan payload sumber yang sama.
+Payload berbeda dengan key yang sama ditolak. Contoh tersebut bukan bukti
+feed historis lengkap.
+
+### Batasan dan keputusan Moses
+
+- Migration 0013 baseline adalah awal cakupan identity; identity sebelum
+  migrasi tidak direkonstruksi. Cutoff yang lebih awal harus menghasilkan
+  `BLOCKED`, bukan mapping seolah-olah historis.
+- Event transaction baseline tidak membuktikan histori refund/status lama.
+- Ground truth tidak boleh menjadi input matching, feature, label, atau
+  training.
+- Sampai P0 selesai, seluruh feed dan acceptance coverage tersedia, dan
+  review lintas tim dicatat:
+  `training_ready=false`, `experiment_ready=false`, `final_model=false`.
+
+## Pembaruan status - 16 November 2026 (platform/runtime follow-up)
+
+Metadata GitHub yang diperiksa ulang melaporkan PR #35 **CLOSED / MERGED**
+ke `main` pada merge commit `30bb4a68794f6551a184e2f0cf7e9902477c6511`.
+Kesimpulan lama OPEN / DRAFT di bawah ini sudah tidak mencerminkan metadata
+tersebut; status approval Gate C tetap pending. James-owned follow-up pada
+riwayat PR mencapai implementation commit `db189b0b7ee15db69cb1ad33175d0c12865c7451`; dokumentasi
+status juga diperbarui setelahnya. CI terbaru yang dicatat pada perubahan itu
+[run 43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746)
+lulus untuk backend/security, PostgreSQL, frontend build, dan E2E.
+
+### Perubahan James yang ditambahkan
+
+- Migration 0021 menambahkan `idempotency_key` nullable dengan unique
+  constraint pada `act.batch_jobs`, kompatibel dengan row lama.
+- API job mendukung replay idempotent, menolak pemakaian key dengan payload,
+  jenis job, atau batas attempt yang berbeda, dan menyediakan cancellation
+  untuk job queued/running.
+- Worker memeriksa cancellation saat handler berjalan, menghentikan proses
+  handler, mencatat status/audit cancellation, dan memulihkan permintaan
+  cancellation yang lease-nya kedaluwarsa.
+- CI menyiapkan kredensial login khusus API/worker dan memverifikasi koneksi
+  runtime non-superuser; E2E API menggunakan role API, bukan administrator.
+- E2E browser menambah alur persetujuan campaign → audit trace dan pembuatan
+  serta keputusan identity review.
+- PostgreSQL test definitions menambah overlap source ID, konflik update
+  master data, replay snapshot immutable, dan uniqueness idempotency job.
+- Script CI memulai dari database populated pada revision 0014, meng-upgrade
+  ke head, lalu memeriksa transaction/visit/membership event lineage dan
+  occurrence time.
+- Runbook deploy, rollback, backup/restore, monitoring, dan recovery tersedia
+  sebagai draft di [RUNBOOK_GATE_C.md](./RUNBOOK_GATE_C.md).
+
+### Bukti validasi
+
+| Pemeriksaan | Hasil |
+|---|---|
+| `pytest -q` lokal | 852 passed, 0 skipped; semua 15 PostgreSQL integration tests ikut berjalan pada database PostgreSQL 15 disposable yang baru |
+| PostgreSQL acceptance CI | [15 passed](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619) |
+| Populated migration upgrade | CI meng-upgrade database berisi data dari revision 0014 sampai Alembic head dan memverifikasi transaction/visit/membership lineage |
+| Runtime DB role | CI memverifikasi login non-superuser API/worker dan grant; E2E memakai login API runtime |
+| Frontend E2E | [CI job lulus](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351), termasuk campaign approval/audit trace dan identity review |
+| Ruff | Lulus |
+| Black | Lulus; 168 file unchanged setelah format script migrasi |
+| MyPy | Lulus; 88 source files |
+| Frontend production build | Lulus (`tsc -b` dan `vite build`) |
+| Alembic | Satu head: `0021_batch_job_idempotency` |
+| CI workflow YAML | Parse lokal berhasil |
+
+Workflow sebelumnya menemukan lalu memperbaiki blocker append-only pada
+migration 0019, query review E2E yang meminta status filter kosong, dan
+selector audit trace yang tidak unik. Hasil CI hijau di atas adalah setelah
+perbaikan tersebut.
+
+### Status terbaru per butir
+
+| Butir | Status |
+|---|---|
+| Worker job idempotency dan cancellation | **DONE — code + unit tests lokal/CI**; penggunaan multi-host dan efek samping eksternal tetap butuh uji operasional |
+| DB runtime login isolation API/worker | **DONE — CI role grants dan login non-superuser terverifikasi**; deployment production belum diverifikasi |
+| Populated-database migration upgrade | **DONE — populated PostgreSQL CI fixture lulus** dari 0014 ke head |
+| PostgreSQL overlap/master-data/snapshot acceptance | **DONE — 15 PostgreSQL tests lulus di CI**; tidak mencakup seluruh skenario Gate C atau equal-availability database stress |
+| Frontend approval, identity review, audit trace E2E | **DONE — 7 Playwright tests lulus di CI** |
+| Deploy/rollback/backup/restore/recovery runbook | **DONE — draft terdokumentasi**; restore drill produksi belum dilakukan |
+| Refund/status/cancellation source feeds | **BLOCKED** — sumber dan kontrak feed eksternal belum tersedia |
+| Historical identity review/revocation dan official feature snapshot | **BLOCKED / INCOMPLETE** — membutuhkan keputusan dan histori input bitemporal |
+| Moses/Christ/cross-team approval | **BLOCKED** — menunggu review pihak terkait; tidak dapat disetujui oleh James |
+| Gate C, training, experiment, final model | **NOT CLOSED** — `training_ready=false`, `experiment_ready=false`, `final_model=false` |
+
+PR #35 masih draft dan belum memiliki approval Moses, Christ, atau lintas
+tim. Runbook dan kontrak tetap berstatus draft. CI hijau membuktikan kode
+dan acceptance tests yang terpasang, bukan source-feed completeness,
+production readiness, atau persetujuan Gate C. Jangan menyimpulkan bahwa
+Gate C telah ditutup.
+
+## Pembaruan identity-as-of — 16 November 2026
+
+Perbaikan lokal terbaru memastikan `build_profiles_as_of()` tidak membaca
+`review_queue.csv` untuk menetapkan status historis. Karena belum ada ledger
+review-decision yang bitemporal, profil as-of kini menyatakan
+`identity_status=UNKNOWN` alih-alih menganggap status review terkini berlaku
+secara retroaktif. `UNKNOWN` juga dapat disimpan oleh adapter snapshot tanpa
+mengklaim status yang tidak diketahui.
+
+| Butir | Status | Bukti / blocker |
+|---|---|---|
+| Static review queue tidak memengaruhi status profil as-of | **DONE — lokal** | Regression test membuktikan queue yang menandai `REVIEW` menghasilkan `UNKNOWN` pada profile as-of; `build_profiles()` non-as-of tetap mempertahankan perilaku saat ini. |
+| Persistensi status historis yang tidak diketahui | **DONE — lokal** | Persistence test menerima serta menyimpan status `UNKNOWN`. |
+| Review-decision history bitemporal, correction/revocation | **BLOCKED / INCOMPLETE** | Perlu ledger append-only, aturan koreksi/revokasi identity, migration, dan acceptance test PostgreSQL; belum ada pada patch ini. |
+| Hasil validasi patch terbaru | **DONE — CI + lokal** | Full `pytest -q`: 852 passed, 0 skipped, termasuk 15 PostgreSQL acceptance tests pada database baru; CI pada head PR terverifikasi melalui run 43756508746. |
+
+Perubahan itu memperjelas batas identity-as-of, tetapi belum menutup Gate C.
+Pembaruan James berikutnya dicatat di bawah.
+
+## Pembaruan James — identity review history follow-up, 16 November 2026
+
+Branch kerja: `fix/gate-c-bitemporal-identity-review` dari `main` commit
+`30bb4a68794f6551a184e2f0cf7e9902477c6511`.
+
+### Implementasi yang ditambahkan
+
+- Migration `0022_identity_review_decision_history` menambah ledger append-only
+  bitemporal untuk review decision. Keputusan legacy dari `review_audit_log`
+  dibackfill memakai `performed_at` asli dan `available_at` saat migration;
+  ketersediaan sebelum backfill tidak direka.
+- `get_review_decision_as_of()` memproyeksikan keputusan sesuai effective dan
+  knowledge cutoff. Correction/revocation linear append-only; fork, koreksi
+  yang mendahului event induk, dan konflik retry ditolak.
+- Keputusan baru mencatat source event ID/version, batch asal, idempotency key,
+  reviewer, correlation ID, rationale, serta waktu receipt database.
+- `build_profiles_as_of()` membaca status review dari ledger bitemporal dan
+  tidak memakai status `review_queue` terkini atau `review_queue.csv`. Status
+  merge/reject hanya diakui bila cocok dengan identity mapping pada cutoff;
+  konflik tetap `UNKNOWN`.
+- Migration `0023_identity_history_coverage_marker` mencatat batas coverage
+  tanpa bergantung pada ada/tidaknya baseline mapping. Database kosong saat
+  baseline mendapat coverage mulai waktu migration marker, bukan timestamp
+  historis rekaan.
+- Tes PostgreSQL ditambah untuk append-only dan pencegahan backdate `available_at`
+  pada review ledger serta tie ordering event transaksi pada `available_at`
+  identik. Role `vteki_identity_reviewer` mendapat SELECT/INSERT ledger.
+
+### Validasi lokal pada branch
+
+| Pemeriksaan | Hasil |
+|---|---|
+| Full local `pytest -q` | 839 passed, 16 skipped; skipped tests require PostgreSQL |
+| `pytest tests/data/test_persistence.py tests/data/test_customer360.py tests/integration/test_postgres_platform.py` | 15 passed, 16 skipped |
+| Ruff pada file yang berubah | Lulus |
+| MyPy untuk identity/customer360 dan `api/models.py` | Lulus, 10 source files |
+| Black pada file yang berubah | Lulus setelah format |
+| PostgreSQL lokal | Tidak tersedia; 16 tes integrasi PostgreSQL ter-skip |
+| CI branch follow-up | Belum dijalankan |
+
+Tes lokal membuktikan chain projection, status cutoff, correction/revocation,
+idempotent replay, serta BLOCKED saat identity coverage marker ada walau tabel
+baseline kosong. Hasil itu belum membuktikan migrasi PostgreSQL 0022/0023 atau
+tes PostgreSQL baru; CI harus menjalankannya.
+
+### Status setelah follow-up ini
+
+| Butir James | Status | Batas |
+|---|---|---|
+| Bitemporal identity decision history + as-of read | **IMPLEMENTED — LOCAL TESTED** | Butuh CI PostgreSQL untuk migration dan trigger. |
+| Correction / revocation ledger | **IMPLEMENTED — LOCAL TESTED** | Tidak otomatis mengubah identity mapping; perubahan merge/split tetap perlu event mapping yang sesuai. |
+| Identity coverage saat baseline kosong | **IMPLEMENTED — LOCAL TESTED** | Migration 0023 menetapkan awal coverage pada waktunya bila tidak ada baseline yang dapat dibuktikan. |
+| Equal-availability PostgreSQL ordering | **TEST ADDED — CI PENDING** | Butuh dedicated PostgreSQL CI. |
+| Refund/status/cancellation feed historis | **BLOCKED** | Source feed/contract belum tersedia. Timestamp tidak disintesis. |
+| Official historical feature snapshot | **NOT IMPLEMENTED / OUT OF CURRENT UTILITY SCOPE** | Profile builder tetap bukan training source. Immutable `known_at`/checksum/version registry perlu desain bila disetujui. |
+| Review identity merge/split lintas tim | **PENDING** | Moses/Christ/cross-team perlu meninjau semantik dan approval. |
+| Gate C dan Moses training readiness | **NOT CLOSED** | Tetap `training_ready=false`, `experiment_ready=false`, `final_model=false`. |
+
+PR #35 sudah berstatus merged menurut metadata GitHub. Perubahan branch follow-up
+ini belum dipush/di-PR dan belum memiliki hasil CI. Approval Gate C tetap belum
+ada; jangan menandai kontrak APPROVED.

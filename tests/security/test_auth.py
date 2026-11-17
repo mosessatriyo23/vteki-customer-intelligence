@@ -27,7 +27,7 @@ from worker import tasks as worker_tasks
 from worker.runner import process_one
 
 
-def inline_executor(handler, payload, timeout_seconds):
+def inline_executor(handler, payload, timeout_seconds, cancellation_requested):
     """Run the handler in-process for the SQLite TestClient database."""
     return handler(payload)
 
@@ -446,6 +446,56 @@ def test_job_create_accepts_integral_float_max_attempts(client: TestClient):
     )
     assert response.status_code == 202
     assert response.json()["max_attempts"] == 2
+
+
+def test_job_idempotency_replay_and_conflicting_payload(client: TestClient):
+    headers = {"Authorization": f"Bearer {token_for(client, 'admin@example.com')}"}
+    payload = {
+        "kind": "idempotency-test",
+        "payload": {"source": "batch-a"},
+        "idempotency_key": "job:test:batch-a",
+    }
+
+    created = client.post("/jobs", headers=headers, json=payload)
+    replay = client.post("/jobs", headers=headers, json=payload)
+    conflict = client.post(
+        "/jobs",
+        headers=headers,
+        json={**payload, "payload": {"source": "batch-b"}},
+    )
+
+    assert created.status_code == 202
+    assert replay.status_code == 202
+    assert replay.json()["id"] == created.json()["id"]
+    assert conflict.status_code == 409
+    assert "different job content" in conflict.json()["detail"]
+
+
+def test_queued_job_can_be_cancelled_and_running_job_can_request_cancellation(
+    client: TestClient,
+):
+    headers = {"Authorization": f"Bearer {token_for(client, 'admin@example.com')}"}
+    queued = client.post("/jobs", headers=headers, json={"kind": "queued-cancel"})
+    assert queued.status_code == 202
+    cancelled = client.post(f"/jobs/{queued.json()['id']}/cancel", headers=headers)
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    with app.state.audit_session_factory() as db:
+        running_job = BatchJob(
+            kind="running-cancel",
+            status="running",
+            claim_token="active-claim",
+            payload={},
+            created_by=1,
+        )
+        db.add(running_job)
+        db.commit()
+        running_id = running_job.id
+
+    requested = client.post(f"/jobs/{running_id}/cancel", headers=headers)
+    assert requested.status_code == 200
+    assert requested.json()["status"] == "cancel_requested"
 
 
 def test_identity_manual_review_requires_reviewer_role(client: TestClient):
