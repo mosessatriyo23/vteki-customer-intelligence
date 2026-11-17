@@ -1,10 +1,10 @@
-# Historical Data Contract v1.3
+# Historical Data Contract v1.5
 
 **Status:** DRAFT — implementation changes require review; Gate C is not closed
 **Owner:** James — Platform & Historical Data
 **Approver:** Pending: Moses (point-in-time review), Christ (business value semantics, if applicable), and cross-team Gate C reviewers
 **Approval date:** Not approved
-**Updated:** 16 November 2026
+**Updated:** 17 November 2026
 
 ## Changelog
 
@@ -15,6 +15,8 @@
 | 1.2 | 16 November 2026 | Add worker job idempotency and cancellation contract; expand PostgreSQL overlap/master-data/snapshot tests, frontend workflow tests, populated-database migration verification, and deploy/recovery runbook. Approval remains pending. |
 | 1.3 | 16 November 2026 | Prevent `build_profiles_as_of()` from deriving historical identity status from the static review queue; emit `UNKNOWN` until bitemporal review-decision history exists. |
 | 1.4 | 16 November 2026 | Add append-only bitemporal identity review decision history with correction/revocation, as-of projection, independent identity coverage marker, PostgreSQL tie-order test, and role grants. |
+| 1.5 | 17 November 2026 | Reconcile status statements with merged main, record latest merged acceptance CI, and make remaining verified/blocked conditions and snapshot readiness explicit. |
+| 1.6 | 17 November 2026 | Add PostgreSQL acceptance coverage for review-decision correction/revocation as-of cutoffs; local PostgreSQL execution remains pending. |
 
 ## 1. Time and provenance
 
@@ -130,7 +132,7 @@ Migration 0013 creates a `BASELINE` at migration time. It does **not** reconstru
 - `BLOCKED`: requested effective cutoff predates known history coverage;
 - `UNKNOWN`: no usable mapping history exists at the requested cutoff.
 
-`get_mapping_as_of()` raises `IdentityHistoryCoverageError` for a blocked cutoff. Unresolved sources are not assigned a fabricated Golden ID. Current `review_queue` is not an as-of review history; it must not be used to claim historical review status.
+`get_mapping_as_of()` raises `IdentityHistoryCoverageError` for a blocked cutoff. Unresolved sources are not assigned a fabricated Golden ID. Current `review_queue` is not an as-of review history; it must not be used to claim historical review status. Review status comes from the bitemporal decision journal described below.
 
 Migration 0023 persists `identity.identity_history_coverage` independently of
 the number of baseline rows. If migration 0013 found no mappings, coverage
@@ -174,13 +176,7 @@ effective_at <= feature_cutoff
 available_at <= known_at
 ```
 
-The function therefore does not guarantee historical refund, status, or review state. The non-as-of `build_profiles()` path still reads the static review queue for
-its current development status. The as-of path deliberately emits
-`identity_status="UNKNOWN"` because bitemporal review decisions are not
-implemented. Official historical snapshots still need registry/rule versions,
-source batch, `known_at`, checksum, immutable publication semantics, and
-acceptance tests. Until then: `training_ready=false`, `experiment_ready=false`,
-`final_model=false`.
+The function therefore does not guarantee historical refund/status values or completeness of inbound sources. The non-as-of `build_profiles()` path reads the static review queue for current development status. The as-of path uses bitemporal review decisions when suitable history exists and emits `UNKNOWN` otherwise. It is not an official historical feature/training source: immutable snapshot publication with registry/rule versions, source batch, `known_at`, checksum, and complete point-in-time inputs is not implemented. Until a reviewed official snapshot contract exists: `training_ready=false`, `experiment_ready=false`, `final_model=false`.
 
 ## 8. Acceptance test matrix
 
@@ -198,23 +194,22 @@ Implemented test coverage in the follow-up:
 - Frontend E2E definitions: campaign approval followed by audit trace reconstruction, plus identity review creation/decision. Existing cases cover login, role-gated navigation, and NBA override.
 - A PostgreSQL migration-upgrade fixture starts from revision 0014 with populated transaction, visit, and membership tables, upgrades to head, and checks event lineage and preserved occurrence times.
 
-CI run [43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746)
-on the latest verified PR head passed all jobs. Its
-[PostgreSQL acceptance job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619)
-passed all 15 `test_postgres_platform.py` tests; the populated-database
-migration fixture upgraded rows from revision 0014 through head. The
-[frontend E2E job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351)
-also passed. Local verification then ran the same 15 PostgreSQL tests and
-the full suite with zero skips against a disposable PostgreSQL 15 database.
+PR #36 acceptance CI at commit `1082182c738283973ff11f9cf2f564b180d4ada2`
+passed backend/quality, frontend build, and frontend RBAC E2E jobs in
+[run 44051345769](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769).
+The tests added by PR #36 validate event effective/knowledge boundaries,
+idempotency conflict rejection, and timezone-aware inputs. These checks ran on
+the PR head before merge; they do not prove external refund/status feed
+completeness, production operation, or cross-team approval. Earlier runs cited
+in the history below validate earlier commits only.
 
 Still required before Gate C:
 
-- Test equal database `available_at` values in PostgreSQL; current tie-order
-  acceptance is covered by the pure deterministic projection test.
+- Review-decision correction/revocation has unit coverage and a new PostgreSQL
+  as-of acceptance test on `james/gate-c-p0-finalize`; the test has not run
+  locally because `VTEKI_TEST_POSTGRES_URL` is unset. CI execution is pending.
 - Integrate actual refund/status/cancellation/correction source feeds and
   prove coverage completeness. Do not synthesize missing events.
-- Verify migration 0022/0023 and the new PostgreSQL acceptance cases in CI; the local environment used for this follow-up has no PostgreSQL service.
-- Add PostgreSQL end-to-end review-decision correction/revocation tests. Unit tests cover the chain and as-of behavior; the current PostgreSQL case covers receipt-time enforcement and append-only mutation rejection.
 - Extend identity tests for unresolved state and merge/split stability of
   published snapshots.
 - Publish immutable snapshot checksums/`known_at` and complete all feature
@@ -233,32 +228,31 @@ not implemented without an approved design.
 | Evidence / review | Status |
 |---|---|
 | PR #33 merge and its CI | Reported by reviewer; historical PR reference: [PR #33](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/33). It does not validate this follow-up change. |
-| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35); GitHub currently reports it closed/merged at merge commit `30bb4a68794f6551a184e2f0cf7e9902477c6511`. This metadata is not cross-team approval. |
-| Latest PR-head CI | [Workflow run 43756508746](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746): backend, frontend build, and frontend E2E jobs all passed. |
-| PostgreSQL acceptance result | [PostgreSQL CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666619): 15 tests passed; populated migration upgrade from 0014 to head passed; API/worker login-role checks passed. |
-| Frontend E2E | [E2E CI job](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43756508746/job/132941666351): passed, including campaign approval/audit trace and identity review. |
-| Local full test suite | Latest full run against a fresh isolated PostgreSQL 15 database: 852 passed, 0 skipped, including all 15 PostgreSQL acceptance tests. |
-| Local PostgreSQL acceptance | `tests/integration/test_postgres_platform.py`: 15 passed against a newly migrated disposable PostgreSQL database with project permission scripts applied. |
-| Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
-| Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
-| James | Draft owner; implementation submitted for review in PR #35. |
-| Moses | Reviewed 2026-11-17 against `main` `40f5096`: ACCEPT WITH LIMITATIONS for development/dev-only semantics, REQUEST CHANGES for training-source use (correction ordering, identity end-to-end stability, coverage evidence). See [`docs/moses_data_ai/MOSES_REVIEW_JAMES_HANDOFF_2026-11-17.md`](../../moses_data_ai/MOSES_REVIEW_JAMES_HANDOFF_2026-11-17.md) §1–3. |
-| Christ | Business-value review pending if definitions affect targets; proposed decision items C1–C6 in the Moses handoff above are PENDING Christ's response. |
+| Follow-up implementation PR | [PR #35](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/35), merged. It does not represent cross-team approval. |
+| Latest relevant merged acceptance PR | [PR #36](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/36), commit `1082182c738283973ff11f9cf2f564b180d4ada2`; PR #37 subsequently fixed migration query qualification. Both are included in main at `5da8c02`. |
+| PR #36 CI | [Workflow run 44051345769](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769): backend/quality, frontend production build, and frontend RBAC E2E passed. |
+| PR #37 migration-fix CI | [Workflow run 43822247224](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43822247224): backend/quality, frontend production build, and frontend RBAC E2E passed for migration query qualification. |
+| Earlier PostgreSQL acceptance | PR #35 [run 43747326104](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/43747326104) ran 11 tests at that earlier migration head; it does not validate migrations 0022/0023 or the current complete test tree. |
+| Earlier local full suite | Historical result on the preceding implementation branch: 852 passed, 0 skipped against disposable PostgreSQL 15. Not verification of current `main` or this update. |
+| Earlier local PostgreSQL acceptance | Historical result: `tests/integration/test_postgres_platform.py` 15 passed; not verification of current `main` or this update. |
+| Earlier local patch checks | Historical result: focused tests 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
+| Ruff / Black / MyPy / Alembic | Earlier local results are historical; verify current head before making a release claim. Alembic head is `0023_identity_history_coverage_marker`. |
+| James | Owner; implementation is on main. This contract remains DRAFT. |
+| Moses | Point-in-time review pending. |
+| Christ | Business-value review pending if definitions affect targets. |
 | Cross-team Gate C | Pending. |
 
 Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
 
-This v1.4 follow-up is being prepared on a new branch after the PR #35 merge
-metadata above. It is not included in the cited PR #35 CI run until a new PR
-and CI run verify it.
+The repository main branch contains the v1.4 implementation and subsequent PR
+#36 acceptance tests and PR #37 migration fix. The current task branch is based
+on main commit `5da8c02`; linked CI is existing merged-PR evidence and does not
+run against this update. Local relevant tests on the task branch: 16 passed
+and 18 PostgreSQL tests skipped because `VTEKI_TEST_POSTGRES_URL` is unset;
+Ruff and Black passed for the changed integration test. PostgreSQL execution
+and CI for a PR containing this update remain pending.
 
-Local verification on the follow-up branch: `pytest -q` reports **839 passed,
-16 skipped**. The skipped cases require a PostgreSQL service; therefore the
-new migrations and PostgreSQL acceptance additions remain **CI pending**.
-Ruff, Black, and MyPy passed locally, and Alembic reports one head at
-`0023_identity_history_coverage_marker`.
-
-The CI run above validates the current implementation but does not close
+The CI evidence listed above does not close
 remaining feed-coverage, historical identity, official-snapshot, production
 operations, or approval gaps. See
 [James deploy and recovery runbook](../RUNBOOK_GATE_C.md).

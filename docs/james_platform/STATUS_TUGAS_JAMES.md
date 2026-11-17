@@ -456,7 +456,8 @@ ada; jangan menandai kontrak APPROVED.
 
 Bagian ini menggantikan status historis yang lebih lama di atas. Branch
 `james/gate-c-p0-finalize` dibuat dari `origin/main` commit `5da8c02` setelah
-fetch. Update dokumen ini belum di-commit atau mendapat CI sendiri.
+fetch. Commit dokumen awal `06aeaf1` belum di-push atau mendapat CI; kode
+acceptance tambahan di bawah ini juga belum di-commit.
 
 | Item | Status | Bukti / blocker |
 |---|---|---|
@@ -465,19 +466,21 @@ fetch. Update dokumen ini belum di-commit atau mendapat CI sendiri.
 | Transaction batch A, event receiving batch B/C | **DONE — code + PostgreSQL CI at PR #35 head** | Origin batch dan receiving batch dipisah, lineage dipertahankan, kedua batch harus PUBLISHED. Bukti PR #35 CI run 43747326104 berlaku pada head PR tersebut. |
 | Idempotency, replay, late availability, timezone-aware cutoffs | **DONE — acceptance CI on PR #36 head** | PR #36 head commit `1082182c738283973ff11f9cf2f564b180d4ada2`; run 44051345769 hijau untuk backend/quality, frontend build, E2E. Tidak mengklaim pengujian ulang atas semua migration 0022/0023 di run tersebut. |
 | Identity mapping as-of dan migration 0013 boundary | **DONE — implementation; coverage history incomplete before migration 0013** | Merge/split mapping journal dan coverage `AVAILABLE/BLOCKED/UNKNOWN` tersedia. Migration 0013 hanya menangkap baseline saat migrasi dan tidak merekonstruksi identity sebelumnya. |
-| Identity review decision as-of, correction/revocation | **IMPLEMENTED; PostgreSQL acceptance INCOMPLETE** | Migration 0022/0023 dan unit test chain tersedia. PostgreSQL menguji receipt timestamp dan append-only, tetapi correction/revocation end-to-end, unresolved identity, dan stabilitas snapshot merge/split masih perlu acceptance. |
+| Identity review decision as-of, correction/revocation | **IMPLEMENTED; new PostgreSQL test ADDED, execution PENDING** | Migration 0022/0023 dan unit test chain tersedia. Test baru memproyeksikan keputusan sebelum/sesudah correction dan revocation dengan `known_at`; tidak dapat dijalankan lokal karena `VTEKI_TEST_POSTGRES_URL` belum dikonfigurasi. Unresolved identity dan stabilitas snapshot merge/split masih perlu acceptance. |
 | `build_profiles_as_of()` sebagai sumber resmi Moses | **NOT APPLICABLE / OUT OF SCOPE** | Utility identity-aware terbatas; input inbound belum seluruhnya bitemporal dan belum ada immutable snapshot manifest/checksum + publication contract. Jangan gunakan untuk training. |
 | Batch semantics | **PARTIALLY VERIFIED** | Decision table dan tes mencakup duplicate/retry, overlap, concurrency, rollback, published visibility, catalogue batch reference, snapshot replay. Per-feed recovery/operational failure injection dan snapshot non-mutation untuk keseluruhan integrasi tetap perlu review bukti per CI head. |
 | CI terbaru yang relevan untuk acceptance historis | **DONE — PR #36 checks passed** | [Run 44051345769](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769) untuk commit PR #36 `1082182c738283973ff11f9cf2f564b180d4ada2`. Bukan CI untuk perubahan dokumen branch ini. |
-| Contract approval / Gate C | **BLOCKED** | Contract v1.5 masih **DRAFT**. Moses point-in-time review, Christ review bila definisi nilai memengaruhi target, serta approval lintas tim belum tercatat. Folder `approved/` bukan bukti approval. |
+| Contract approval / Gate C | **BLOCKED** | Contract v1.6 masih **DRAFT**. Moses point-in-time review, Christ review bila definisi nilai memengaruhi target, serta approval lintas tim belum tercatat. Folder `approved/` bukan bukti approval. |
 | Moses readiness | **BLOCKED** | `training_ready=false`, `experiment_ready=false`, `final_model=false`; no new labels/features/model, campaign, atau production scoring dari projection ini. Synthetic ground truth tetap dilarang untuk matching, feature, label, dan training. |
 
 ### Output dan bukti
 
-- Kontrak terkini: `docs/james_platform/approved/historical_data_contract_v1.x.md` (v1.5 DRAFT).
+- Kontrak terkini: `docs/james_platform/approved/historical_data_contract_v1.x.md` (v1.6 DRAFT).
 - Decision table batch/correction ada di bagian 5 kontrak.
 - Acceptance test kode ada di `tests/data/test_transaction_events.py`,
   `tests/data/test_persistence.py`, dan `tests/integration/test_postgres_platform.py`.
+- Test PostgreSQL correction/revocation as-of baru ditambahkan di branch ini;
+  eksekusi CI masih pending karena branch belum ter-push.
 - Contoh query/replay as-of ada di bagian 3 kontrak; replay harus menggunakan
   source identity, version, batch, idempotency key, dan payload yang sama.
 - Bukti CI: [PR #36 workflow](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769).
@@ -490,3 +493,14 @@ development. Lanjutkan hanya setelah feed historis tersedia atau sumber
 ditetapkan missing secara eksplisit, acceptance PostgreSQL untuk identity
 review correction/revocation dan merge/split snapshot dilengkapi, lalu
 Moses/Christ/cross-team menyetujui kontrak serta feature snapshot resmi.
+
+### Validasi branch revisi lokal
+
+- Tes relevan (`test_persistence.py`, `test_transaction_events.py`, dan
+  `test_postgres_platform.py`): **16 passed, 18 skipped**.
+- PostgreSQL integration skipped karena
+  `VTEKI_TEST_POSTGRES_URL` tidak tersedia di lingkungan ini.
+- Ruff dan Black untuk `tests/integration/test_postgres_platform.py`: lulus.
+- `git diff --check`: lulus.
+- Acceptance PostgreSQL baru dan CI branch ini: **PENDING** sampai branch
+  ter-push dan workflow berjalan.

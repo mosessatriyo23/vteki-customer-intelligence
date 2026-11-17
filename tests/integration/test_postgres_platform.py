@@ -34,6 +34,7 @@ from generator.generate import run as generate
 from services.data.customer360.persistence import save_profile_snapshots
 from services.data.customer360.profile import build_profiles_as_of
 from services.data.identity.cli import run as resolve
+from services.data.identity.registry import PersistentIdentityRegistry
 from services.data.ingestion import pg_loader as pg_loader_module
 from services.data.ingestion.business_events import get_business_events_as_of
 from services.data.ingestion.pg_loader import PostgresIngestionLoader
@@ -353,6 +354,150 @@ def test_postgres_identity_review_decision_history_is_bitemporal_and_append_only
                     connection.execute(
                         event_table.delete().where(event_table.c.event_id == event_id)
                     )
+        finally:
+            if outer.is_active:
+                outer.rollback()
+
+
+def test_postgres_identity_review_correction_and_revocation_are_as_of(
+    pg_engine: Engine,
+):
+    batch_id = f"ci-{uuid4().hex}"
+    version_tag = f"ci-{uuid4().hex[:24]}"
+    now = datetime.now(timezone.utc)
+
+    with pg_engine.connect() as connection:
+        outer = connection.begin()
+        try:
+            connection.execute(
+                IngestionBatch.__table__.insert().values(
+                    batch_id=batch_id,
+                    schema_version="2.0.0",
+                    seed=None,
+                    as_of_date=date.today(),
+                    manifest_payload={},
+                    table_checksums={},
+                    status="STAGED",
+                    rejection_reasons=None,
+                    row_counts={},
+                    loaded_at=now,
+                    published_at=None,
+                )
+            )
+            connection.execute(
+                RegistryVersion.__table__.insert().values(
+                    version_tag=version_tag,
+                    algorithm="ci-review-asof",
+                    parameters={},
+                    status="ACTIVE",
+                    description="Identity review correction as-of acceptance",
+                    created_at=now,
+                )
+            )
+            queue_id = connection.execute(
+                ReviewQueueItem.__table__.insert()
+                .values(
+                    source_batch_id=batch_id,
+                    registry_version=version_tag,
+                    left_source_id=f"left-{uuid4().hex[:12]}",
+                    right_source_id=f"right-{uuid4().hex[:12]}",
+                    left_golden_id=None,
+                    right_golden_id=None,
+                    heuristic_score=0.5,
+                    reason="ci_review_asof",
+                    status="PENDING",
+                    created_at=now - timedelta(minutes=2),
+                )
+                .returning(ReviewQueueItem.__table__.c.id)
+            ).scalar_one()
+            actor_id = connection.execute(
+                User.__table__.insert()
+                .values(
+                    email=f"ci-{uuid4().hex}@example.com",
+                    password_hash="not-a-real-password-hash",
+                    is_active=True,
+                    created_at=now,
+                )
+                .returning(User.__table__.c.id)
+            ).scalar_one()
+
+            with Session(bind=connection) as session:
+                decision = IdentityReviewDecisionHistory(
+                    review_queue_id=queue_id,
+                    event_type="DECISION",
+                    action="REJECT_KEEP_SEPARATE",
+                    occurred_at=now - timedelta(minutes=1),
+                    source_batch_id=batch_id,
+                    source_event_id=f"ci-review:{uuid4().hex}",
+                    source_version="identity-review-v1",
+                    idempotency_key=f"ci-review:{uuid4().hex}",
+                    reviewer_id=actor_id,
+                    correlation_id=f"ci-{uuid4().hex}",
+                    rationale="Initial decision for as-of test",
+                )
+                session.add(decision)
+                session.flush()
+                session.refresh(decision)
+                initial_id = decision.event_id
+                initial_available_at = decision.available_at
+
+                registry = PersistentIdentityRegistry(session)
+                correction = registry.append_review_decision_revision(
+                    queue_id=queue_id,
+                    supersedes_event_id=initial_id,
+                    event_type="CORRECTION",
+                    action="APPROVE_MERGE",
+                    actor_id=actor_id,
+                    rationale="Corrected decision for as-of test",
+                    correlation_id=f"ci-correction:{uuid4().hex}",
+                    occurred_at=now,
+                )
+                session.flush()
+                session.refresh(correction)
+                correction_id = correction.event_id
+                correction_available_at = correction.available_at
+
+                # The old known_at sees the original decision only; the new one
+                # sees the correction, even though both occurred by the cutoff.
+                before_correction = registry.get_review_decision_as_of(
+                    queue_id,
+                    now + timedelta(minutes=1),
+                    correction_available_at - timedelta(microseconds=1),
+                )
+                assert before_correction.event_id == initial_id
+                assert before_correction.action == "REJECT_KEEP_SEPARATE"
+                after_correction = registry.get_review_decision_as_of(
+                    queue_id,
+                    now + timedelta(minutes=1),
+                    correction_available_at + timedelta(microseconds=1),
+                )
+                assert after_correction.event_id == correction_id
+                assert after_correction.action == "APPROVE_MERGE"
+
+                revocation = registry.append_review_decision_revision(
+                    queue_id=queue_id,
+                    supersedes_event_id=correction_id,
+                    event_type="REVOCATION",
+                    action=None,
+                    actor_id=actor_id,
+                    rationale="Revoked decision for as-of test",
+                    correlation_id=f"ci-revocation:{uuid4().hex}",
+                    occurred_at=now + timedelta(seconds=1),
+                )
+                session.flush()
+                session.refresh(revocation)
+                after_revocation = registry.get_review_decision_as_of(
+                    queue_id,
+                    now + timedelta(minutes=2),
+                    revocation.available_at + timedelta(microseconds=1),
+                )
+                assert after_revocation.event_id == revocation.event_id
+                assert after_revocation.event_type == "REVOCATION"
+                assert after_revocation.action is None
+
+                # A knowledge cutoff before receipt excludes even a backdated
+                # correction; database receipt timestamps are authoritative.
+                assert correction_available_at > initial_available_at
         finally:
             if outer.is_active:
                 outer.rollback()
