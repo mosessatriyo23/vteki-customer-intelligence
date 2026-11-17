@@ -74,7 +74,7 @@ These are test scenarios and expected outcomes, not new business decisions. Exac
 |---|---|---|
 | J-A01 | Event `occurred_at=2026-03-01`, `available_at=2026-03-05`; query `effective_at=2026-03-02`, `known_at=2026-03-02` | Event excluded |
 | J-A02 | Same event; query `known_at=2026-03-05` | Event can be included if effective cutoff allows it |
-| J-A03 | Late event arrives after an old snapshot is published | Existing snapshot is unchanged; new output/version is required |
+| J-A03 | Late event arrives after an old snapshot is published | Existing snapshot is unchanged; publish a new output/version |
 | J-A04 | Naive timestamp or caller-supplied receipt timestamp | Reject; authoritative receipt time is platform/database assigned |
 
 ### B. Idempotency and provenance
@@ -176,9 +176,9 @@ Status separates test presence from execution evidence. Historical CI evidence o
 | Scenario | Test/evidence | Execution evidence and remaining gap |
 |---|---|---|
 | J-A01/A02/A04 | `test_postgres_transaction_event_bitemporal_correction`; `test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time` | Defined; earlier merged CI covered related acceptance at PR #36 head. Not rerun on rebased head `6fd6118`. |
-| J-A03 | `test_postgres_customer360_snapshot_replay_is_immutable`; old-knowledge replay assertions in `test_postgres_customer360_uses_identity_mapping_as_of` | Replay immutability is covered. A business event arriving after a published snapshot and producing a new snapshot/version is still **MISSING**. |
+| J-A03 | `test_postgres_customer360_snapshot_replay_is_immutable`; old-knowledge replay assertions in `test_postgres_customer360_uses_identity_mapping_as_of` | Test now verifies original profile stays unchanged and a recomputed profile is published under a new version. It models late-arrival at the snapshot input boundary; the transaction-ledger-to-profile consumer path is still not end-to-end covered. PostgreSQL execution pending. |
 | J-B01/B02/B03 | Replay/conflict/source provenance assertions in `test_postgres_transaction_event_bitemporal_correction` and `test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time` | Test definitions exist; earlier CI evidence is from prior commits. Exact rebased head has no CI result. |
-| J-B04/B05 | `append_transaction_event()` validation; unpublished-event visibility assertions in `test_postgres_transaction_event_bitemporal_correction` | Partial: visibility is tested, but isolated append rejection with no partial write for absent transaction and unpublished receipt batch still needs explicit assertions. |
+| J-B04/B05 | New assertions in `test_postgres_transaction_event_bitemporal_correction` append for a missing transaction and a STAGED receipt batch, then assert no ledger row was written. | Test definitions now cover both rejection/no-partial-write cases; PostgreSQL execution pending. |
 | J-C01/C02 | `test_postgres_transaction_event_bitemporal_correction` | Origin/receipt batch separation and correction lineage are covered in the test; earlier PR #35 CI evidence applies only to that tested head. |
 | J-C03/C05 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers`; `test_postgres_multi_batch_ingestion_isolated_and_idempotent` | Batch rollback/retry and isolation are defined; earlier CI evidence is tied to older commits, not `6fd6118`. |
 | J-C04 | `test_postgres_concurrent_duplicate_batch_is_idempotent`; `test_postgres_concurrent_duplicate_transaction_event_is_idempotent` | Both concurrency cases are defined. Event-append concurrency has not run on PostgreSQL CI. |
@@ -194,10 +194,7 @@ Status separates test presence from execution evidence. Historical CI evidence o
 | J-F02/F03 | `test_postgres_multi_batch_ingestion_isolated_and_idempotent`; catalogue child-batch foreign-key assertion | PostgreSQL coverage exists; no CI result tied to current rebased head. |
 | J-F04 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers` | Recovery case exists; CI evidence must be rerun/tied to the exact commit before claiming current-head verification. |
 
-The most recent local focused run recorded **28 passed, 19 skipped** on the
-pre-rebase commit `1d94ee4` (based on `5da8c02`); all 19 skips require PostgreSQL. The
-current branch was subsequently rebased onto `origin/main` `a2516c2` and now
-ends at `6fd6118`. No test run or CI result is recorded for that exact head.
+The pre-rebase run recorded **28 passed, 19 skipped** at commit `1d94ee4` (based on `5da8c02`). After rebasing onto `origin/main` `a2516c2`, the current acceptance-test working tree was checked with `pytest`: **8 passed, 19 skipped**; all skips require PostgreSQL. Ruff lint and format checks passed for `tests/integration/test_postgres_platform.py`. The new J-A03 and J-B04/B05 PostgreSQL assertions are among the skipped tests, so their execution is still pending CI.
 ### PIT query/replay example for Moses
 
 This is a query shape for review, not customer data or a completeness claim.

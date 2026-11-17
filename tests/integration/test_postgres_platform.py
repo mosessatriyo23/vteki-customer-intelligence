@@ -1501,6 +1501,74 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
                     now = datetime.now(timezone.utc)
                     effective_cutoff = now + timedelta(days=1)
                     publication_known_at = now
+
+                    # J-B04: an event for a transaction absent from any
+                    # published source batch is rejected before a ledger row
+                    # can be created.
+                    missing_transaction_event_key = f"ci-missing-tx-{uuid4().hex}"
+                    with pytest.raises(
+                        ValueError,
+                        match="Source transaction does not exist in a PUBLISHED batch",
+                    ):
+                        append_transaction_event(
+                            session,
+                            source_transaction_id=f"missing-{uuid4().hex}",
+                            event_type="REFUND_RECORDED",
+                            occurred_at=now,
+                            source_batch_id=receiving_batch_id,
+                            idempotency_key=missing_transaction_event_key,
+                            payload={"refund_amount": 1},
+                            actor_type="SYSTEM",
+                            source_event_id=f"ci-missing-tx-source-{uuid4().hex}",
+                            source_version="1",
+                        )
+                    assert (
+                        session.query(TransactionEventHistory)
+                        .filter_by(idempotency_key=missing_transaction_event_key)
+                        .count()
+                        == 0
+                    )
+
+                    # J-B05: a known transaction cannot receive an event into
+                    # an unpublished batch; rejection must leave no event row.
+                    unpublished_event_batch_id = correction_batch_id
+                    session.execute(
+                        text(
+                            "UPDATE stg.ingestion_batches SET status = 'STAGED' "
+                            "WHERE batch_id = :batch_id"
+                        ),
+                        {"batch_id": unpublished_event_batch_id},
+                    )
+                    unpublished_event_key = f"ci-unpublished-{uuid4().hex}"
+                    with pytest.raises(
+                        ValueError, match="Event batch must already be PUBLISHED"
+                    ):
+                        append_transaction_event(
+                            session,
+                            source_transaction_id=transaction_id,
+                            event_type="REFUND_RECORDED",
+                            occurred_at=now,
+                            source_batch_id=unpublished_event_batch_id,
+                            idempotency_key=unpublished_event_key,
+                            payload={"refund_amount": 1},
+                            actor_type="SYSTEM",
+                            source_event_id=f"ci-unpublished-source-{uuid4().hex}",
+                            source_version="1",
+                        )
+                    assert (
+                        session.query(TransactionEventHistory)
+                        .filter_by(idempotency_key=unpublished_event_key)
+                        .count()
+                        == 0
+                    )
+                    session.execute(
+                        text(
+                            "UPDATE stg.ingestion_batches SET status = 'PUBLISHED' "
+                            "WHERE batch_id = :batch_id"
+                        ),
+                        {"batch_id": unpublished_event_batch_id},
+                    )
+
                     before_late_event = project_transaction_as_of(
                         session,
                         source_transaction_id=transaction_id,
@@ -2550,6 +2618,49 @@ def test_postgres_customer360_snapshot_replay_is_immutable(pg_engine: Engine):
                 persisted = session.query(ProfileSnapshot).one()
                 assert persisted.retained_revenue == 25_000
                 assert persisted.source_batch_id == batch_a
+
+                # J-A03: model a late-arriving business event by publishing the
+                # recomputed profile under a new rule version. The original
+                # publication must remain unchanged while the new version is
+                # independently stored.
+                late_event_profile = {
+                    **row,
+                    "transaction_count": 3,
+                    "retained_revenue": 26_000,
+                }
+                assert (
+                    save_profile_snapshots(
+                        [late_event_profile],
+                        batch_b,
+                        version_tag,
+                        session,
+                        "ci-rule-v2",
+                        commit=False,
+                    )
+                    == 1
+                )
+                session.expire_all()
+                versions = (
+                    session.query(ProfileSnapshot)
+                    .filter_by(golden_customer_id=golden_id)
+                    .order_by(ProfileSnapshot.rule_version)
+                    .all()
+                )
+                assert len(versions) == 2
+                original_version = next(
+                    snapshot
+                    for snapshot in versions
+                    if snapshot.rule_version == "ci-rule-v1"
+                )
+                late_event_version = next(
+                    snapshot
+                    for snapshot in versions
+                    if snapshot.rule_version == "ci-rule-v2"
+                )
+                assert original_version.retained_revenue == 25_000
+                assert original_version.source_batch_id == batch_a
+                assert late_event_version.retained_revenue == 26_000
+                assert late_event_version.source_batch_id == batch_b
         finally:
             if outer.is_active:
                 outer.rollback()
