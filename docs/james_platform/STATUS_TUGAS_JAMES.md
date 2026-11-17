@@ -451,3 +451,42 @@ tes PostgreSQL baru; CI harus menjalankannya.
 PR #35 sudah berstatus merged menurut metadata GitHub. Perubahan branch follow-up
 ini belum dipush/di-PR dan belum memiliki hasil CI. Approval Gate C tetap belum
 ada; jangan menandai kontrak APPROVED.
+
+## Status otoritatif Gate C — 17 November 2026
+
+Bagian ini menggantikan status historis yang lebih lama di atas. Branch
+`james/gate-c-p0-finalize` dibuat dari `origin/main` commit `5da8c02` setelah
+fetch. Update dokumen ini belum di-commit atau mendapat CI sendiri.
+
+| Item | Status | Bukti / blocker |
+|---|---|---|
+| Refund, partial refund, perubahan status, cancellation, correction dari feed sumber | **BLOCKED** | Event API dan projection tersedia, tetapi repo tidak memiliki konektor/feed historis refund atau status. Data kosong tetap `MISSING`; timestamp tidak boleh dibuat. Owner sumber perlu menyediakan kontrak/feed. |
+| Transaction final-state projection pada `effective_at` + `known_at` | **DONE — implementation; source completeness BLOCKED** | `project_transaction_as_of()` mengimplementasikan status/amount/refund/correction chain dari event yang terlihat. Hasil hanya `OBSERVED_EVENTS_ONLY`; acceptance unit dan integrasi di PR #35/36 tidak membuktikan feed sumber lengkap. |
+| Transaction batch A, event receiving batch B/C | **DONE — code + PostgreSQL CI at PR #35 head** | Origin batch dan receiving batch dipisah, lineage dipertahankan, kedua batch harus PUBLISHED. Bukti PR #35 CI run 43747326104 berlaku pada head PR tersebut. |
+| Idempotency, replay, late availability, timezone-aware cutoffs | **DONE — acceptance CI on PR #36 head** | PR #36 head commit `1082182c738283973ff11f9cf2f564b180d4ada2`; run 44051345769 hijau untuk backend/quality, frontend build, E2E. Tidak mengklaim pengujian ulang atas semua migration 0022/0023 di run tersebut. |
+| Identity mapping as-of dan migration 0013 boundary | **DONE — implementation; coverage history incomplete before migration 0013** | Merge/split mapping journal dan coverage `AVAILABLE/BLOCKED/UNKNOWN` tersedia. Migration 0013 hanya menangkap baseline saat migrasi dan tidak merekonstruksi identity sebelumnya. |
+| Identity review decision as-of, correction/revocation | **IMPLEMENTED; PostgreSQL acceptance INCOMPLETE** | Migration 0022/0023 dan unit test chain tersedia. PostgreSQL menguji receipt timestamp dan append-only, tetapi correction/revocation end-to-end, unresolved identity, dan stabilitas snapshot merge/split masih perlu acceptance. |
+| `build_profiles_as_of()` sebagai sumber resmi Moses | **NOT APPLICABLE / OUT OF SCOPE** | Utility identity-aware terbatas; input inbound belum seluruhnya bitemporal dan belum ada immutable snapshot manifest/checksum + publication contract. Jangan gunakan untuk training. |
+| Batch semantics | **PARTIALLY VERIFIED** | Decision table dan tes mencakup duplicate/retry, overlap, concurrency, rollback, published visibility, catalogue batch reference, snapshot replay. Per-feed recovery/operational failure injection dan snapshot non-mutation untuk keseluruhan integrasi tetap perlu review bukti per CI head. |
+| CI terbaru yang relevan untuk acceptance historis | **DONE — PR #36 checks passed** | [Run 44051345769](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769) untuk commit PR #36 `1082182c738283973ff11f9cf2f564b180d4ada2`. Bukan CI untuk perubahan dokumen branch ini. |
+| Contract approval / Gate C | **BLOCKED** | Contract v1.5 masih **DRAFT**. Moses point-in-time review, Christ review bila definisi nilai memengaruhi target, serta approval lintas tim belum tercatat. Folder `approved/` bukan bukti approval. |
+| Moses readiness | **BLOCKED** | `training_ready=false`, `experiment_ready=false`, `final_model=false`; no new labels/features/model, campaign, atau production scoring dari projection ini. Synthetic ground truth tetap dilarang untuk matching, feature, label, dan training. |
+
+### Output dan bukti
+
+- Kontrak terkini: `docs/james_platform/approved/historical_data_contract_v1.x.md` (v1.5 DRAFT).
+- Decision table batch/correction ada di bagian 5 kontrak.
+- Acceptance test kode ada di `tests/data/test_transaction_events.py`,
+  `tests/data/test_persistence.py`, dan `tests/integration/test_postgres_platform.py`.
+- Contoh query/replay as-of ada di bagian 3 kontrak; replay harus menggunakan
+  source identity, version, batch, idempotency key, dan payload yang sama.
+- Bukti CI: [PR #36 workflow](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769).
+- Batas histori: migration 0013 membuat baseline saat migrasi; histori identity
+  sebelumnya tidak direkonstruksi. Backfill event visit/membership hanya
+  membuktikan first capture ledger, bukan waktu platform mengetahui event.
+
+**Rekomendasi:** Moses belum boleh memakai data historis ini untuk training
+development. Lanjutkan hanya setelah feed historis tersedia atau sumber
+ditetapkan missing secara eksplisit, acceptance PostgreSQL untuk identity
+review correction/revocation dan merge/split snapshot dilengkapi, lalu
+Moses/Christ/cross-team menyetujui kontrak serta feature snapshot resmi.
