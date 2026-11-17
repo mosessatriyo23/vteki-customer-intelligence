@@ -157,6 +157,51 @@ def test_late_correction_does_not_change_earlier_known_projection():
     assert after.refund_amount == 70
 
 
+def test_transaction_baseline_correction_preserves_intervening_refund_and_status():
+    events = [
+        recorded(),
+        event(
+            2,
+            "REFUND_RECORDED",
+            occurred_minutes=1,
+            available_minutes=1,
+            payload={"refund_amount": 125},
+        ),
+        event(
+            3,
+            "STATUS_CHANGED",
+            occurred_minutes=2,
+            available_minutes=2,
+            payload={"status": "PARTIAL_REFUND"},
+        ),
+        event(
+            4,
+            "CORRECTION",
+            occurred_minutes=3,
+            available_minutes=3,
+            payload={
+                "status": "COMPLETED",
+                "gross_amount": 1_200,
+                "discount_amount": 100,
+                "net_amount": 1_100,
+                "refund_amount": 0,
+            },
+            corrects_event_id=1,
+        ),
+    ]
+
+    state = project(events)
+
+    assert state == project(list(reversed(events)))
+    assert state.gross_amount == 1_200
+    assert state.discount_amount == 100
+    assert state.net_amount == 1_100
+    assert state.refund_amount == 125
+    assert state.status == "PARTIAL_REFUND"
+    assert state.actual_revenue == 975
+    assert state.event_ids == (4, 2, 3)
+
+
 def test_equal_availability_order_is_deterministic_for_status_changes():
     available_at = BASE + timedelta(minutes=1)
     events = [

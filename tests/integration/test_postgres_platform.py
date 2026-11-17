@@ -648,8 +648,7 @@ def test_postgres_role_groups_obey_least_privilege(pg_engine: Engine):
         ).scalar_one()
         assert not connection.execute(
             text(
-                "SELECT has_schema_privilege("
-                "'vteki_serving_reader', 'source', 'USAGE')"
+                "SELECT has_schema_privilege('vteki_serving_reader', 'source', 'USAGE')"
             )
         ).scalar_one()
         assert not connection.execute(
@@ -869,6 +868,53 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                         session,
                         recorded_after,
                     )
+                    save_profile_snapshots(
+                        before,
+                        batch_id,
+                        version_tag,
+                        session,
+                        commit=False,
+                    )
+                    published_before = session.scalar(
+                        select(ProfileSnapshot).where(
+                            ProfileSnapshot.golden_customer_id == target_golden,
+                            ProfileSnapshot.cutoff_at == cutoff,
+                            ProfileSnapshot.identity_registry_version == version_tag,
+                            ProfileSnapshot.rule_version == "c360-development-v1",
+                        )
+                    )
+                    assert published_before is not None
+                    published_generated_at = published_before.generated_at
+                    published_source_batch = published_before.source_batch_id
+
+                    # A later-known merge must not rewrite the already-published
+                    # old-knowledge profile. Replaying that exact PIT snapshot is
+                    # an immutable no-op under its composite key.
+                    old_knowledge_replay = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        recorded_before,
+                    )
+                    save_profile_snapshots(
+                        old_knowledge_replay,
+                        batch_id,
+                        version_tag,
+                        session,
+                        commit=False,
+                    )
+                    replayed_snapshot = session.scalar(
+                        select(ProfileSnapshot).where(
+                            ProfileSnapshot.golden_customer_id == target_golden,
+                            ProfileSnapshot.cutoff_at == cutoff,
+                            ProfileSnapshot.identity_registry_version == version_tag,
+                            ProfileSnapshot.rule_version == "c360-development-v1",
+                        )
+                    )
+                    assert replayed_snapshot is not None
+                    assert replayed_snapshot.generated_at == published_generated_at
+                    assert replayed_snapshot.source_batch_id == published_source_batch
 
                 before_by_id = {row["golden_customer_id"]: row for row in before}
                 after_by_id = {row["golden_customer_id"]: row for row in after}
@@ -1395,6 +1441,58 @@ def test_postgres_transaction_event_bitemporal_correction(pg_engine: Engine):
                     assert after_status.actual_revenue == 0
                     assert refund.payload["refund_amount"] == 1
                     assert loader.ingest(receipt_batch)["status"] == "ALREADY_LOADED"
+
+                    baseline_event = next(
+                        item
+                        for item in get_transaction_events_as_of(
+                            session,
+                            source_transaction_id=transaction_id,
+                            effective_at=effective_cutoff,
+                            known_at=status_change.available_at
+                            + timedelta(microseconds=1),
+                        )
+                        if item.event_type == "TRANSACTION_RECORDED"
+                    )
+                    prior_to_baseline_correction = project_transaction_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=effective_cutoff,
+                        known_at=status_change.available_at + timedelta(seconds=1),
+                    )
+                    corrected_gross = baseline_event.payload["gross_amount"] + 10
+                    corrected_discount = baseline_event.payload["discount_amount"]
+                    baseline_correction = append_transaction_event(
+                        session,
+                        source_transaction_id=transaction_id,
+                        event_type="CORRECTION",
+                        occurred_at=now,
+                        source_batch_id=correction_batch_id,
+                        idempotency_key=f"ci-baseline-correction-{uuid4().hex}",
+                        payload={
+                            "status": "COMPLETED",
+                            "gross_amount": corrected_gross,
+                            "discount_amount": corrected_discount,
+                            "net_amount": corrected_gross - corrected_discount,
+                            "refund_amount": 0,
+                        },
+                        actor_type="WORKER",
+                        source_event_id=f"ci-baseline-correction-{uuid4().hex}",
+                        source_version="2",
+                        corrects_event_id=baseline_event.event_id,
+                    )
+                    after_baseline_correction = project_transaction_as_of(
+                        session,
+                        source_transaction_id=transaction_id,
+                        effective_at=effective_cutoff,
+                        known_at=baseline_correction.available_at
+                        + timedelta(microseconds=1),
+                    )
+                    assert prior_to_baseline_correction.status == "CANCELLED"
+                    assert prior_to_baseline_correction.refund_amount == 6
+                    assert after_baseline_correction.gross_amount == corrected_gross
+                    assert after_baseline_correction.status == "CANCELLED"
+                    assert after_baseline_correction.refund_amount == 6
+                    assert after_baseline_correction.actual_revenue == 0
 
                     tie_time = now - timedelta(seconds=30)
                     connection.execute(

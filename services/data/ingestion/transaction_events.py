@@ -297,9 +297,13 @@ def project_transaction_events(
         return current
 
     corrected_ids = set(correction_children)
-    state: dict[str, Any] | None = None
-    applied_ids: list[int] = []
-
+    # A correction replaces its target at the target's original logical
+    # position. It becomes usable only after the correction itself passes both
+    # cutoffs above; replaying later events after the revised base preserves
+    # intervening refunds/status changes instead of silently erasing them.
+    logical_events: list[
+        tuple[TransactionEventHistory, TransactionEventHistory, str]
+    ] = []
     for event in visible:
         if event.event_id in corrected_ids:
             continue
@@ -307,10 +311,22 @@ def project_transaction_events(
             root = root_event(event)
             if root is None:
                 continue
-            effect_type = root.event_type
+            logical_events.append((root, event, root.event_type))
         else:
-            effect_type = event.event_type
+            logical_events.append((event, event, event.event_type))
+    logical_events.sort(
+        key=lambda item: (
+            item[0].occurred_at,
+            item[0].available_at,
+            item[0].recorded_at,
+            item[0].event_id,
+        )
+    )
 
+    state: dict[str, Any] | None = None
+    applied_ids: list[int] = []
+
+    for _, event, effect_type in logical_events:
         payload = event.payload
         if effect_type == "TRANSACTION_RECORDED":
             gross = _money(payload, "gross_amount")

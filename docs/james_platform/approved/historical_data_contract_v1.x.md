@@ -1,4 +1,4 @@
-# Historical Data Contract v1.5
+# Historical Data Contract v1.7
 
 **Status:** DRAFT — implementation changes require review; Gate C is not closed
 **Owner:** James — Platform & Historical Data
@@ -17,6 +17,7 @@
 | 1.4 | 16 November 2026 | Add append-only bitemporal identity review decision history with correction/revocation, as-of projection, independent identity coverage marker, PostgreSQL tie-order test, and role grants. |
 | 1.5 | 17 November 2026 | Reconcile status statements with merged main, record latest merged acceptance CI, and make remaining verified/blocked conditions and snapshot readiness explicit. |
 | 1.6 | 17 November 2026 | Add PostgreSQL acceptance coverage for review-decision correction/revocation as-of cutoffs; local PostgreSQL execution remains pending. |
+| 1.7 | 17 November 2026 | Define replacement ordering for correction of a transaction baseline and preserve later refund/status effects; add unit and PostgreSQL regressions plus published-profile stability coverage. |
 
 ## 1. Time and provenance
 
@@ -68,6 +69,19 @@ state = project_transaction_as_of(
     known_at=knowledge_cutoff,
 )
 
+# Identity and review use the same effective and knowledge cutoffs.
+identity = registry.get_mapping_as_of_result(
+    effective_at=effective_cutoff,
+    recorded_at=knowledge_cutoff,
+)
+profiles = build_profiles_as_of(
+    inbound_dir,
+    resolution_dir,
+    effective_cutoff,
+    session,
+    recorded_at=knowledge_cutoff,
+)
+
 # Retry only with the same source identity, version, batch, and payload.
 event = append_transaction_event(
     session,
@@ -97,9 +111,16 @@ Rules:
 2. `REFUND_RECORDED.refund_amount` is a positive integer increment. Multiple visible refunds add; cumulative refund cannot exceed net amount.
 3. `STATUS_CHANGED.status` is the latest visible status in deterministic event order. `CANCELLED` and `REFUNDED` have zero actual revenue; otherwise actual revenue is `net_amount - refund_amount`.
 4. A correction replaces the effect of its referenced event; it is not an additional refund or status update. A correction of a correction replaces the same root effect. A correction must reference an event for the same transaction. Each event may have at most one visible correcting child; forks are invalid.
-5. An event superseded by a visible correction is excluded from financial/status application. A correction not yet visible at the requested cutoffs has no effect.
+5. The replacement effect is replayed at the corrected root event's original logical position. The correction itself must still satisfy both cutoffs (`occurred_at <= effective_at`, `available_at <= known_at`). Later visible refund/status events are then replayed over the corrected base; a later correction to `TRANSACTION_RECORDED` must not erase those intervening events. A correction not yet visible at the requested cutoffs has no effect.
 6. Projection is over **observed events only**. Since the source refund/status feeds are not integrated, the returned arithmetic is not proof of complete historical revenue and must not be used as a training label/feature.
 7. Replaying an identical idempotency key and payload returns the original event. Reusing the key with different content is rejected. PostgreSQL uniqueness arbitrates concurrent insert races.
+
+For independent PIT review, pass the same pair of cutoffs to every consumer:
+`effective_at` bounds business occurrence; `known_at` (named `recorded_at` in
+the identity mapping API) bounds platform knowledge. The identity result must
+be `AVAILABLE`; `BLOCKED` or `UNKNOWN` must stop the build. A profile result
+from `build_profiles_as_of()` remains an identity-aware utility only and is
+not a training snapshot.
 
 ## 5. Batch and correction decision table
 
@@ -119,7 +140,7 @@ Rules:
 | Partial failure | Ingestion writes raw, typed, event, and publish state in one database transaction. Any failure rolls the transaction back; a failed batch must not appear PUBLISHED. |
 | Recovery | Retry an uncommitted identical batch. A persisted non-PUBLISHED batch is an investigation blocker, not an automatic success-shaped retry. |
 | Publish order | Each batch publishes atomically after its rows and event history are written. No global ordering between independent batches is implied. |
-| Correction | Append a new event referencing the event it replaces. Corrections do not mutate old rows; correction branches are rejected. |
+| Correction | Append a new event referencing the event it replaces. The replacement is applied at the root event's original logical position after the correction becomes visible; subsequent events are replayed over it. Corrections do not mutate old rows; correction branches are rejected. |
 | Snapshot replay | Identical versioned payload is a no-op; a different payload under the same composite key is rejected by snapshot persistence. |
 
 ## 6. Identity history boundary
@@ -182,11 +203,11 @@ The function therefore does not guarantee historical refund/status values or com
 
 Implemented test coverage in the follow-up:
 
-- Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`.
+- Pure projection: transaction + partial/multiple refunds; correction chain; correction fork rejection; status ordering with equal availability; replay order independence; late correction excluded at earlier `known_at`; correction to the transaction baseline preserves refunds/status events between the original baseline and correction.
 - PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable; source-ID overlap and master-data update rejection; snapshot replay immutability; unique worker idempotency key.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
 - Identity review unit tests: decision as-of, late correction visibility, linear correction/revocation, idempotent retry, correction/mapping consistency, and coverage marker behavior when baseline rows are empty.
-- PostgreSQL acceptance: identity review receipt timestamp cannot be backdated, history rejects update/delete, and transaction event ordering is deterministic when database availability timestamps tie.
+- PostgreSQL acceptance: identity review receipt timestamp cannot be backdated, history rejects update/delete, and transaction event ordering is deterministic when database availability timestamps tie. The current task branch adds review correction/revocation as-of coverage, baseline-correction-after-refund/status coverage, and old-profile replay stability; these new PostgreSQL cases have not yet run because no test PostgreSQL URL is configured.
 - Customer360 regression: changing the static review queue cannot make
   `build_profiles_as_of()` claim historical `REVIEW_REQUIRED`; status is
   `UNKNOWN` until review history is available.
@@ -211,7 +232,9 @@ Still required before Gate C:
 - Integrate actual refund/status/cancellation/correction source feeds and
   prove coverage completeness. Do not synthesize missing events.
 - Extend identity tests for unresolved state and merge/split stability of
-  published snapshots.
+  published snapshots. The branch adds an unresolved-profile unit test and a
+  PostgreSQL old-knowledge profile replay assertion; full PostgreSQL merge/split
+  correction coverage remains pending.
 - Publish immutable snapshot checksums/`known_at` and complete all feature
   inputs only if/when an official historical training snapshot is approved.
 - Build official end-to-end feature snapshots or keep the current utility
@@ -247,9 +270,9 @@ Approval date remains **not approved**. The `approved/` directory name is not ap
 The repository main branch contains the v1.4 implementation and subsequent PR
 #36 acceptance tests and PR #37 migration fix. The current task branch is based
 on main commit `5da8c02`; linked CI is existing merged-PR evidence and does not
-run against this update. Local relevant tests on the task branch: 16 passed
+run against this update. Local relevant tests on the task branch: 26 passed
 and 18 PostgreSQL tests skipped because `VTEKI_TEST_POSTGRES_URL` is unset;
-Ruff and Black passed for the changed integration test. PostgreSQL execution
+Ruff lint and format checks passed for changed Python files. PostgreSQL execution
 and CI for a PR containing this update remain pending.
 
 The CI evidence listed above does not close

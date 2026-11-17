@@ -38,11 +38,12 @@ Jangan mencetak URL lengkap atau password ke log/terminal rekaman.
 ## 2. Deploy
 
 1. Pastikan PR sudah direview, seluruh CI wajib hijau, dan approval rilis
-   tercatat. PR #35 adalah draft selama Gate C belum disetujui.
+   tercatat. Historical contract tetap DRAFT sampai review lintas tim dicatat.
 2. Pastikan backup terakhir berhasil dan restore drill masih valid.
 3. Hentikan worker sementara agar tidak memproses pipeline saat schema berubah.
 4. Jalankan `alembic upgrade head` dengan `MIGRATION_DATABASE_URL`.
-   Untuk rangkaian follow-up Gate C, target saat ini adalah migration 0021.
+   Alembic head pada branch ini adalah `0023_identity_history_coverage_marker`;
+   selalu cek `alembic heads` pada commit yang akan dirilis sebelum deploy.
 5. Verifikasi satu Alembic head dan jalankan acceptance tests PostgreSQL pada
    database rilis/lingkungan verifikasi.
 6. Deploy API dengan `API_DATABASE_URL`; cek `/health`, login, RBAC, pembacaan

@@ -8,6 +8,10 @@
 
 **Tujuan:** Mempercepat verifikasi Gate A–C dengan satu paket evidence yang dapat ditinjau lintas tim.
 
+**Addendum James — 2026-11-17:** Inventory dan scenario disposition di §6
+diperbarui dari branch terbaru `james/gate-c-p0-finalize`, berbasis main
+`5da8c02`. Isi ini mendokumentasikan bukti dan gap; tidak memberi approval.
+
 ## 1. Keputusan status saat ini
 
 PR #33 James sudah merged ke `main` dan CI GitHub pada commit merge lulus. PR tersebut menyediakan fondasi identity mapping history, transaction event history, provenance, batch versioning, dan sebagian PostgreSQL tests.
@@ -48,9 +52,9 @@ Status meanings: `AVAILABLE` = exists and has stated semantics; `PARTIAL` = impl
 | Membership renewal | `membership_events.csv.occurred_at` | James/Christ | BLOCKED for new PIT training | availability contract and approved label semantics |
 | Consent timing | `consent_events.csv.captured_at`, `expires_at` | Christ/James | BLOCKED for commercial use | approved suppression policy + as-known semantics |
 | Identity current mapping | `artifacts/identity/v11/mapping.csv` | Moses | AVAILABLE only for old dev baseline | do not call historical/as-of |
-| Identity as-of | `get_mapping_as_of()` and `build_profiles_as_of()` | James | PARTIAL | pre-baseline scope, split/unresolved/review-as-of tests |
-| Review status as-of | current static `review_queue.csv` used by profile builder | James/Moses | BLOCKED | bitemporal review decision history |
-| Multi-batch transaction lineage | batch IDs and transaction event baseline | James | PARTIAL | cross-batch event, overlap, retry, rollback tests |
+| Identity as-of | `get_mapping_as_of()` and `build_profiles_as_of()` | James | PARTIAL | PostgreSQL consumer tests for split/unresolved/late review correction and immutable published profile |
+| Review status as-of | bitemporal `identity.review_decision_history`; current queue is not used retroactively | James/Moses | PARTIAL | PostgreSQL profile consumer tests for correction/revocation and published-profile stability |
+| Multi-batch transaction lineage | origin/receipt batch IDs and transaction event ledger | James | PARTIAL | event concurrency, source coverage, batch recovery mapping and exact current-head CI evidence |
 | Catalogue version | batch-versioned catalogue references | James | PARTIAL | consumer selection rule and tests |
 | Churn target | `christ-churn90-three-events-dev-1.1` | Christ/Moses | DEV ONLY | approved versioned target contract |
 | CLV gross source/retention | `clv90` development aggregate; business formula unresolved | Christ/Moses | BLOCKED | approved value definition and retention method |
@@ -99,7 +103,7 @@ These are test scenarios and expected outcomes, not new business decisions. Exac
 |---|---|---|
 | J-D01 | Recorded transaction then partial refund | Projection follows approved gross/refund/status rule |
 | J-D02 | Multiple refunds | No double-counting; total bounded by approved contract |
-| J-D03 | Correction of refund | Projection changes only according to deterministic correction rule |
+| J-D03 | Correction of refund or transaction baseline | Correction substitutes the root effect at its original logical position; later visible effects are replayed after it |
 | J-D04 | Correction chain A → B → C | Same final state regardless of valid replay order |
 | J-D05 | Query before correction availability | Correction excluded; earlier known state returned |
 | J-D06 | Query after correction availability | Corrected state returned; raw lineage remains auditable |
@@ -113,7 +117,7 @@ These are test scenarios and expected outcomes, not new business decisions. Exac
 | J-E03 | Unresolved/review-required decision recorded after cutoff | Earlier snapshot does not use future review decision |
 | J-E04 | Cutoff before history baseline | Explicit unavailable/blocked result; no invented historical mapping |
 | J-E05 | New review queue row after cutoff | Old profile status unchanged |
-| J-E06 | Replay same profile composite key/payload | No metadata replacement |
+| J-E06 | Replay same profile composite key/payload, including after a later identity correction | Old published payload and publication metadata remain unchanged; a changed payload under the same key is rejected |
 
 ### F. Multi-batch and catalogue
 
@@ -148,18 +152,88 @@ These are test scenarios and expected outcomes, not new business decisions. Exac
 
 ## 6. Data coverage inventory to complete
 
-James and Moses should fill the following table from actual source/platform evidence. `UNKNOWN` is a valid answer; it must not be replaced with an assumption.
+Inventory checked against source contracts, models, migrations, and event
+services on branch `james/gate-c-p0-finalize` at base `5da8c02`. `UNKNOWN`
+and `MISSING` are deliberate coverage findings. For legacy rows, database
+capture time is not evidence of when an external source first made a fact
+available.
 
 | Dataset/event | Occurred field | Available field | Recorded field | Source batch | Correction lineage | Earliest reliable time | Evidence/link |
 |---|---|---|---|---|---|---|---|
-| Transactions | `transaction_datetime` | UNKNOWN for old CSV / platform event for new records | platform event | yes | partial | UNKNOWN | pending |
-| Refunds | UNKNOWN/source feed pending | UNKNOWN | platform event | pending | pending | UNKNOWN | pending |
-| Status changes | `status` snapshot only | UNKNOWN | platform event | pending | pending | UNKNOWN | pending |
-| Completed visits | `visit_datetime` | UNKNOWN | UNKNOWN | pending | no current lineage | UNKNOWN | pending |
-| Membership renewals | `occurred_at` | UNKNOWN | UNKNOWN | pending | `previous_event_id` source relation | UNKNOWN | pending |
-| Identity mapping | effective history partial | `recorded_at` partial | `recorded_at` | batch | decision history partial | migration baseline | pending |
-| Review decisions | current queue only | UNKNOWN | UNKNOWN | pending | pending | UNKNOWN | pending |
-| Consent | `captured_at`/`expires_at` | UNKNOWN | UNKNOWN | pending | pending | UNKNOWN | pending |
+| Transactions | `transaction_datetime` in source row; copied as `occurred_at` for `TRANSACTION_RECORDED` baseline | Legacy migration-0015 baseline uses transaction row `created_at`; original source `available_at` is **UNKNOWN**. New ledger events receive database `available_at`. | Ledger database `recorded_at`; legacy value is not proof of source arrival. | Transaction origin batch and event receipt batch are separate for events. | `corrects_event_id` for ledger corrections; no corrections reconstructed from the legacy transaction row. | Source occurrence can be read from stored transaction dates; trustworthy point-in-time availability begins with actual ledger receipt capture. Pre-ledger availability is **UNKNOWN**. | `migrations/versions/0015_transaction_event_history.py`, `0016_transaction_event_provenance.py`; `source.transaction_event_history` |
+| Refund / partial refund | Source event `occurred_at` required; feed not present | **MISSING** from source; platform DB receipt time only when an event is explicitly appended | DB-assigned `recorded_at` on appended event | Required receiving batch; origin transaction batch retained | `corrects_event_id` supported by ledger | No reliable external-feed start date: **UNKNOWN / BLOCKED** for new PIT training | Contract §2 and `services/data/ingestion/transaction_events.py`; no refund connector in repository |
+| Status changes / cancellation | Feed `occurred_at` required; current transaction `status` is a snapshot, not history | **MISSING** from source; DB receipt time only for appended events | DB-assigned `recorded_at` on appended event | Required receiving batch; transaction origin retained | `corrects_event_id` supported by ledger | No reliable source-history start date: **UNKNOWN / BLOCKED** for new PIT training | Contract §2; current status enum in `services/data/ingestion/transaction_events.py` |
+| Completed visits | `customer_visits.csv.visit_datetime` | DB `available_at` when first copied to business-event ledger; original source availability **UNKNOWN** | DB `recorded_at` when ledger captures event | `source_batch_id` retained | `lineage_reference` points to source transaction where present; no correction chain | Ledger first-capture boundary starts at migration 0020 for existing rows; exact per-row receipt is stored; prior availability **UNKNOWN** | `migrations/versions/0020_business_event_history.py`; `source.business_event_history` |
+| Membership join / renewal | `membership_events.csv.occurred_at` | DB `available_at` when first copied to ledger; original source availability **UNKNOWN** | DB `recorded_at` at ledger capture | `source_batch_id` retained | Source `previous_event_id` retained as lineage; no correction chain | Ledger first-capture boundary starts at migration 0020 for existing rows; exact per-row receipt is stored; prior availability **UNKNOWN** | `migrations/versions/0020_business_event_history.py`; `source.business_event_history` |
+| Identity mapping | `identity_mapping_history.effective_at` | **UNKNOWN** as a separate source-availability field; journal `recorded_at` is when platform recorded the decision | `recorded_at` | `source_batch_id` stored per mapping history row | Merge/split are appended mapping events; no generic `supersedes` pointer | Migration-0013 baseline / `identity_history_coverage.coverage_started_at`; no reconstruction before migration 0013 | `migrations/versions/0013_identity_mapping_history.py`, `0023_identity_history_coverage_marker.py`; `services/data/identity/registry.py` |
+| Identity review decisions | `review_decision_history.occurred_at` (legacy audit backfill uses `performed_at`) | Database-assigned `available_at`; legacy availability starts only at migration-0022 backfill | Database-assigned `recorded_at` | Receiving/source batch retained from review queue | `supersedes_event_id` links correction/revocation chain | New journal availability begins at receipt; legacy exact first-availability before backfill is **UNKNOWN** | `migrations/versions/0022_identity_review_decision_history.py`; `services/data/identity/registry.py` |
+| Consent | `consent_events.captured_at`; `expires_at` is expiry, not availability | **UNKNOWN**; CSV contract has no `available_at` | Table has `created_at` at ingestion, but it is not a source-availability timestamp | `source_batch_id` exists | No correction-lineage field; later consent rows do not identify which event they supersede | **UNKNOWN** for PIT availability and source history start | `services/data/ingestion/contracts.py`; `migrations/versions/0009_data_contracts_and_persistent_identity.py`; business policy owner is Christ |
+
+### Scenario-to-test disposition
+
+Status separates test presence from execution evidence. PostgreSQL cases added
+on this branch remain unexecuted until a PostgreSQL CI run is available.
+
+| Scenario | Test/evidence | Current disposition |
+|---|---|---|
+| J-A01/A02 | `test_postgres_transaction_event_bitemporal_correction`; J-A04 also `test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time` | Implemented; previous merged CI evidence exists; rerun for this branch pending. |
+| J-A03 | `test_postgres_customer360_snapshot_replay_is_immutable` checks replay immutability, not late-event end-to-end publication | Partial; explicit event-arrival-after-published-snapshot case remains missing. |
+| J-B01/B02/B03 | `test_postgres_transaction_event_bitemporal_correction`, `test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time` | Implemented; prior PR CI evidence, not rerun on this branch. |
+| J-B04/B05 | `append_transaction_event()` checks transaction existence and PUBLISHED receipt batch; no dedicated isolated failure/no-partial-publication assertion for both cases | Partial; add PostgreSQL assertions if used as Gate C close evidence. |
+| J-C01/C02 | `test_postgres_transaction_event_bitemporal_correction` | Implemented: origin/receipt batch separation, correction lineage and as-of visibility; prior PR #35 CI evidence. |
+| J-C03/C05 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers`, `test_postgres_multi_batch_ingestion_isolated_and_idempotent` | Implemented for ingestion batches; prior CI evidence is tied to its tested head. |
+| J-C04 | `test_postgres_concurrent_duplicate_batch_is_idempotent` covers same-batch concurrency; no concurrent duplicate transaction-event append test | Partial; event unique-key conflict behavior is implemented, concurrency acceptance remains missing. |
+| J-D01/D02 | `test_postgres_transaction_event_bitemporal_correction`; `test_projection_sums_multiple_refunds_without_double_counting` | Implemented for observed event arithmetic; feed completeness is `MISSING`, so not label-ready. |
+| J-D03/D04/D05/D06 | `test_correction_chain_replaces_original_refund_independent_of_input_order`, `test_late_correction_does_not_change_earlier_known_projection`, `test_postgres_transaction_event_bitemporal_correction`; new baseline-correction regression in `test_transaction_events.py` | Unit cases run locally; PostgreSQL baseline-correction case added in this branch and pending CI. Raw ledger rows remain append-only. |
+| J-E01 | `test_postgres_customer360_uses_identity_mapping_as_of` | PostgreSQL merge/as-of test exists; prior CI evidence at earlier head. |
+| J-E02 | `test_identity_split_as_of_preserves_prior_mapping_without_forcing_unknowns` | Unit test only; PostgreSQL split and profile consumer coverage remain missing. |
+| J-E03/E05 | `test_build_profiles_as_of_does_not_use_static_review_queue_status`, review decision journal unit test, and new `test_postgres_identity_review_correction_and_revocation_are_as_of` | Static queue isolation and decision correction/revocation logic have unit/PG test definitions; new PG case is unexecuted. PostgreSQL end-to-end `build_profiles_as_of()` test for late review correction and unresolved/review-required stability remains missing. |
+| J-E04 | `test_migration_baseline_does_not_claim_pre_migration_identity_history`, `test_identity_coverage_marker_blocks_even_when_baseline_table_is_empty` | Unit-tested; migration marker PostgreSQL migration execution is in migration CI, but full consumer boundary needs additional evidence. |
+| J-E06 / J-A03 | `test_postgres_customer360_snapshot_replay_is_immutable` | Same composite-key replay is covered; unchanged previously published profile after a later identity correction is **not** yet proven. |
+| J-F01 | `test_postgres_rejects_source_id_overlap_across_batches_atomically` | PostgreSQL test exists; prior CI evidence at earlier head. |
+| J-F02/F03 | `test_postgres_multi_batch_ingestion_isolated_and_idempotent`, catalogue child batch foreign-key assertion | PostgreSQL coverage exists; current CI must be tied to exact run/commit before claiming complete. |
+| J-F04 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers` | Batch recovery test exists; verify CI run for current branch before release claim. |
+
+Latest locally-run focused tests on the current branch: **26 passed, 18
+skipped**; skipped tests require `VTEKI_TEST_POSTGRES_URL`. The new PostgreSQL
+tests therefore have no execution result yet.
+
+### PIT query/replay example for Moses
+
+This is a query shape for review, not customer data or a completeness claim.
+Use identical cutoffs for feature inputs; old knowledge `K1` must not include
+an event first received after `K1`.
+
+```python
+state_k1 = project_transaction_as_of(
+    session,
+    source_transaction_id=synthetic_test_transaction_id,
+    effective_at=effective_cutoff,
+    known_at=knowledge_cutoff_k1,
+)
+state_k2 = project_transaction_as_of(
+    session,
+    source_transaction_id=synthetic_test_transaction_id,
+    effective_at=effective_cutoff,
+    known_at=knowledge_cutoff_k2,
+)
+
+identity_k1 = registry.get_mapping_as_of_result(
+    effective_at=effective_cutoff,
+    recorded_at=knowledge_cutoff_k1,
+)
+profile_k1 = build_profiles_as_of(
+    inbound_dir, resolution_dir, effective_cutoff, session,
+    recorded_at=knowledge_cutoff_k1,
+)
+```
+
+Review the returned `status`, `event_ids`, amounts, `source_coverage`, mapping
+coverage status, and profile composite key. Expected safety properties: the
+late event is absent at `K1`; it may appear at `K2`; `source_coverage` remains
+`OBSERVED_EVENTS_ONLY`; profile replay at the same effective/knowledge cutoff
+retains its original published payload and metadata. The current profile
+builder is identity-aware only and is **not** a model feature source.
 
 ## 7. Gate tracker
 

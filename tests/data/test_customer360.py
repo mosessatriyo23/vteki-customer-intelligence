@@ -24,7 +24,6 @@ def read_mapping(path):
 
 
 class Customer360Tests(unittest.TestCase):
-
     def test_build_profiles_as_of_uses_registry_mapping(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -170,6 +169,52 @@ class Customer360Tests(unittest.TestCase):
                     cutoff,
                     session=object(),
                 )
+
+    def test_build_profiles_as_of_rejects_unresolved_identity(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            inbound = root / "inbound"
+            output = root / "resolution"
+            generate(
+                argparse.Namespace(
+                    seed=20260906,
+                    customers=20,
+                    as_of_date=date(2026, 9, 6),
+                    output_dir=inbound,
+                    ground_truth_dir=root / "truth",
+                )
+            )
+            resolve(inbound / "crm_customers.csv", output, synthetic_aliases=True)
+            mapping_rows = read_mapping(output / "mapping.csv")
+            mapping = {
+                row["source_customer_id"]: row["golden_customer_id"]
+                for row in mapping_rows[:-1]
+            }
+            cutoff = datetime.fromisoformat("2026-06-01T00:00:00+07:00")
+
+            with (
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_mapping_as_of_result",
+                    return_value=IdentityMappingAsOf(
+                        status="AVAILABLE",
+                        mapping=mapping,
+                        coverage_started_at=cutoff,
+                    ),
+                ),
+                patch.object(
+                    PersistentIdentityRegistry,
+                    "get_review_status_by_golden_as_of",
+                    return_value={},
+                ),
+            ):
+                with self.assertRaisesRegex(ValueError, "UNKNOWN: identity history"):
+                    build_profiles_as_of(
+                        inbound,
+                        output,
+                        cutoff,
+                        session=object(),
+                    )
 
     def test_generated_snapshot_cutoff_and_integrity(self):
         with tempfile.TemporaryDirectory() as temp:
