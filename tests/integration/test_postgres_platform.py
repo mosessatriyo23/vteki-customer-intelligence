@@ -983,7 +983,9 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                         heuristic_score=0.5,
                         reason="ci_review_correction_profile",
                         status="PENDING",
-                        created_at=now - timedelta(days=1),
+                        # The queue is inserted after the older-known snapshot;
+                        # do not backdate its creation ahead of that cutoff.
+                        created_at=now,
                     )
                     reviewer = User(
                         email=f"ci-{uuid4().hex}@example.com",
