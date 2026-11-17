@@ -242,8 +242,8 @@ not implemented without an approved design.
 | Latest local patch checks | Focused tests: 13 passed; Ruff, Black, and MyPy for `services/data/customer360` passed. |
 | Ruff / Black / MyPy / Alembic | Ruff passed; Black passed (168 Python files); MyPy passed for 88 source files; Alembic has one head, `0021_batch_job_idempotency`. |
 | James | Draft owner; implementation submitted for review in PR #35. |
-| Moses | Point-in-time review pending. |
-| Christ | Business-value review pending if definitions affect targets. |
+| Moses | Reviewed 2026-11-17 against `main` `40f5096`: ACCEPT WITH LIMITATIONS for development/dev-only semantics, REQUEST CHANGES for training-source use (correction ordering, identity end-to-end stability, coverage evidence). See [`docs/moses_data_ai/MOSES_REVIEW_JAMES_HANDOFF_2026-11-17.md`](../../moses_data_ai/MOSES_REVIEW_JAMES_HANDOFF_2026-11-17.md) §1–3. |
+| Christ | Business-value review pending if definitions affect targets; proposed decision items C1–C6 in the Moses handoff above are PENDING Christ's response. |
 | Cross-team Gate C | Pending. |
 
 Approval date remains **not approved**. The `approved/` directory name is not approval evidence.
