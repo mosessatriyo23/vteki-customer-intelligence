@@ -1348,6 +1348,7 @@ def test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time(
                 factory = sessionmaker(bind=connection, expire_on_commit=False)
                 with factory() as session:
                     occurred_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+                    source_event_id = f"ci-status-{uuid4().hex}"
                     event = append_transaction_event(
                         session,
                         source_transaction_id=transaction_id,
@@ -1355,6 +1356,8 @@ def test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time(
                         occurred_at=occurred_at,
                         source_batch_id=batch_id,
                         idempotency_key=f"ci-conflict-{uuid4().hex}",
+                        source_event_id=source_event_id,
+                        source_version="acceptance-v1",
                         payload={"status": "COMPLETED"},
                         actor_type="SYSTEM",
                     )
@@ -1366,6 +1369,8 @@ def test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time(
                             occurred_at=occurred_at,
                             source_batch_id=batch_id,
                             idempotency_key=event.idempotency_key,
+                            source_event_id=source_event_id,
+                            source_version="acceptance-v1",
                             payload={"status": "CANCELLED"},
                             actor_type="SYSTEM",
                         )
@@ -1377,6 +1382,8 @@ def test_postgres_transaction_event_rejects_conflicting_replay_and_naive_time(
                             occurred_at=occurred_at.replace(tzinfo=None),
                             source_batch_id=batch_id,
                             idempotency_key=f"ci-naive-{uuid4().hex}",
+                            source_event_id=f"ci-status-{uuid4().hex}",
+                            source_version="acceptance-v1",
                             payload={"status": "COMPLETED"},
                             actor_type="SYSTEM",
                         )
