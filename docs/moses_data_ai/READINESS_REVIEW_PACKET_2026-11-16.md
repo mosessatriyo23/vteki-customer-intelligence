@@ -182,20 +182,20 @@ on this branch remain unexecuted until a PostgreSQL CI run is available.
 | J-B04/B05 | `append_transaction_event()` checks transaction existence and PUBLISHED receipt batch; no dedicated isolated failure/no-partial-publication assertion for both cases | Partial; add PostgreSQL assertions if used as Gate C close evidence. |
 | J-C01/C02 | `test_postgres_transaction_event_bitemporal_correction` | Implemented: origin/receipt batch separation, correction lineage and as-of visibility; prior PR #35 CI evidence. |
 | J-C03/C05 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers`, `test_postgres_multi_batch_ingestion_isolated_and_idempotent` | Implemented for ingestion batches; prior CI evidence is tied to its tested head. |
-| J-C04 | `test_postgres_concurrent_duplicate_batch_is_idempotent` covers same-batch concurrency; no concurrent duplicate transaction-event append test | Partial; event unique-key conflict behavior is implemented, concurrency acceptance remains missing. |
+| J-C04 | `test_postgres_concurrent_duplicate_batch_is_idempotent` and new `test_postgres_concurrent_duplicate_transaction_event_is_idempotent` | Batch and event append concurrency test definitions exist; event test has not run on PostgreSQL CI yet. |
 | J-D01/D02 | `test_postgres_transaction_event_bitemporal_correction`; `test_projection_sums_multiple_refunds_without_double_counting` | Implemented for observed event arithmetic; feed completeness is `MISSING`, so not label-ready. |
 | J-D03/D04/D05/D06 | `test_correction_chain_replaces_original_refund_independent_of_input_order`, `test_late_correction_does_not_change_earlier_known_projection`, `test_postgres_transaction_event_bitemporal_correction`; new baseline-correction regression in `test_transaction_events.py` | Unit cases run locally; PostgreSQL baseline-correction case added in this branch and pending CI. Raw ledger rows remain append-only. |
 | J-E01 | `test_postgres_customer360_uses_identity_mapping_as_of` | PostgreSQL merge/as-of test exists; prior CI evidence at earlier head. |
 | J-E02 | `test_identity_split_as_of_preserves_prior_mapping_without_forcing_unknowns`; split assertion added to `test_postgres_customer360_uses_identity_mapping_as_of` | Unit case ran locally; new PostgreSQL profile split case is defined but unexecuted. |
-| J-E03 | `test_postgres_identity_review_correction_and_revocation_are_as_of` and review correction assertion added to `test_postgres_customer360_uses_identity_mapping_as_of` | Decision ledger and profile consumer corrections have PostgreSQL test definitions; both new cases are unexecuted pending CI. Profile revocation consumer case remains missing. |
-| J-E05 | `test_build_profiles_as_of_does_not_use_static_review_queue_status` | Unit regression exists; PostgreSQL profile test for a queue/decision created after the historical cutoff remains missing. |
+| J-E03 | `test_postgres_identity_review_correction_and_revocation_are_as_of` and correction/revocation assertions added to `test_postgres_customer360_uses_identity_mapping_as_of` | Decision ledger and profile consumer correction/revocation have PostgreSQL test definitions; both new cases are unexecuted pending CI. |
+| J-E05 | `test_build_profiles_as_of_does_not_use_static_review_queue_status` and late-queue assertions added to `test_postgres_customer360_uses_identity_mapping_as_of` | Unit regression exists; PostgreSQL profile cutoff assertion is defined but unexecuted pending CI. |
 | J-E04 | `test_migration_baseline_does_not_claim_pre_migration_identity_history`, `test_identity_coverage_marker_blocks_even_when_baseline_table_is_empty` | Unit-tested; migration marker PostgreSQL migration execution is in migration CI, but full consumer boundary needs additional evidence. |
 | J-E06 / J-A03 | `test_postgres_customer360_snapshot_replay_is_immutable`; old-knowledge profile replay assertion added to `test_postgres_customer360_uses_identity_mapping_as_of` | Generic composite-key replay was previously covered; new test asserts old profile metadata/payload replay remains unchanged after later merge/split events. New assertion is unexecuted pending PostgreSQL CI. |
 | J-F01 | `test_postgres_rejects_source_id_overlap_across_batches_atomically` | PostgreSQL test exists; prior CI evidence at earlier head. |
 | J-F02/F03 | `test_postgres_multi_batch_ingestion_isolated_and_idempotent`, catalogue child batch foreign-key assertion | PostgreSQL coverage exists; current CI must be tied to exact run/commit before claiming complete. |
 | J-F04 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers` | Batch recovery test exists; verify CI run for current branch before release claim. |
 
-Latest locally-run focused tests on the current branch: **26 passed, 18
+Latest locally-run focused tests on the current branch: **26 passed, 19
 skipped**; skipped tests require `VTEKI_TEST_POSTGRES_URL`. The new PostgreSQL
 tests therefore have no execution result yet.
 

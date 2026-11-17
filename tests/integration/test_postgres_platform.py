@@ -1058,6 +1058,86 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                         == "APPROVED"
                     )
 
+                    review_revocation = registry.append_review_decision_revision(
+                        queue_id=queue.id,
+                        supersedes_event_id=review_correction.event_id,
+                        event_type="REVOCATION",
+                        action=None,
+                        actor_id=reviewer.id,
+                        rationale="Revoked review decision for profile test",
+                        correlation_id=f"ci-review-revocation:{uuid4().hex}",
+                        occurred_at=now + timedelta(seconds=2),
+                    )
+                    session.flush()
+                    session.refresh(review_revocation)
+                    profile_after_review_revocation = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        review_revocation.available_at + timedelta(microseconds=1),
+                    )
+                    revoked_by_id = {
+                        row["golden_customer_id"]: row
+                        for row in profile_after_review_revocation
+                    }
+                    assert revoked_by_id[target_golden]["identity_status"] == "UNKNOWN"
+
+                    # A later-created review queue must not appear in a profile
+                    # whose effective cutoff predates that queue, even when the
+                    # query is made with knowledge from after queue creation.
+                    late_review_source = next(
+                        source_id
+                        for source_id, golden_id in mapping.items()
+                        if golden_id != target_golden and source_id != moved_source
+                    )
+                    late_review_golden = mapping[late_review_source]
+                    late_queue = ReviewQueueItem(
+                        source_batch_id=batch_id,
+                        registry_version=version_tag,
+                        left_source_id=late_review_source,
+                        right_source_id=f"unmapped-{uuid4().hex[:12]}",
+                        left_golden_id=late_review_golden,
+                        right_golden_id=None,
+                        heuristic_score=0.5,
+                        reason="ci_late_review_queue_cutoff",
+                        status="PENDING",
+                        created_at=cutoff + timedelta(seconds=30),
+                    )
+                    session.add(late_queue)
+                    session.flush()
+                    late_queue_knowledge = cutoff + timedelta(minutes=2)
+                    profile_before_late_queue = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff,
+                        session,
+                        late_queue_knowledge,
+                    )
+                    profile_after_late_queue = build_profiles_as_of(
+                        inbound,
+                        resolution,
+                        cutoff + timedelta(minutes=1),
+                        session,
+                        late_queue_knowledge,
+                    )
+                    before_late_queue_by_id = {
+                        row["golden_customer_id"]: row
+                        for row in profile_before_late_queue
+                    }
+                    after_late_queue_by_id = {
+                        row["golden_customer_id"]: row
+                        for row in profile_after_late_queue
+                    }
+                    assert (
+                        before_late_queue_by_id[late_review_golden]["identity_status"]
+                        == "UNKNOWN"
+                    )
+                    assert (
+                        after_late_queue_by_id[late_review_golden]["identity_status"]
+                        == "REVIEW_REQUIRED"
+                    )
+
                 split_effective_at = cutoff + timedelta(days=1)
                 split_recorded_at = merge_recorded_at + timedelta(seconds=2)
                 connection.execute(
@@ -2230,6 +2310,71 @@ def test_postgres_batch_job_idempotency_key_is_unique(pg_engine: Engine):
         finally:
             if outer.is_active:
                 outer.rollback()
+
+
+def test_postgres_concurrent_duplicate_transaction_event_is_idempotent(
+    pg_engine: Engine,
+):
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        inbound = root / "inbound"
+        generate(
+            argparse.Namespace(
+                seed=int(uuid4().hex[:8], 16) % 2_147_483_647,
+                customers=20,
+                as_of_date=date(2026, 11, 15),
+                output_dir=inbound,
+                ground_truth_dir=root / "truth",
+            )
+        )
+        loader = PostgresIngestionLoader(sessionmaker(bind=pg_engine))
+        batch = loader.ingest(inbound)
+        assert batch["status"] == "LOADED"
+        with pg_engine.connect() as connection:
+            transaction_id = connection.execute(
+                text(
+                    "SELECT source_transaction_id FROM source.transactions "
+                    "WHERE source_batch_id = :batch_id AND status = 'COMPLETED' "
+                    "AND refund_amount = 0 LIMIT 1"
+                ),
+                {"batch_id": batch["batch_id"]},
+            ).scalar_one()
+
+        source_event_id = f"ci-concurrent-refund:{uuid4().hex}"
+        idempotency_key = f"ci-concurrent-refund:{uuid4().hex}"
+        occurred_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        factory = sessionmaker(bind=pg_engine)
+
+        def append_replay() -> int:
+            with factory() as session:
+                event = append_transaction_event(
+                    session,
+                    source_transaction_id=transaction_id,
+                    event_type="REFUND_RECORDED",
+                    occurred_at=occurred_at,
+                    source_batch_id=batch["batch_id"],
+                    idempotency_key=idempotency_key,
+                    payload={"refund_amount": 1},
+                    actor_type="SOURCE",
+                    source_event_id=source_event_id,
+                    source_version="synthetic-feed-v1",
+                )
+                session.commit()
+                return event.event_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            event_ids = list(pool.map(lambda _: append_replay(), range(2)))
+
+        assert event_ids[0] == event_ids[1]
+        with pg_engine.connect() as connection:
+            count = connection.execute(
+                text(
+                    "SELECT count(*) FROM source.transaction_event_history "
+                    "WHERE idempotency_key = :idempotency_key"
+                ),
+                {"idempotency_key": idempotency_key},
+            ).scalar_one()
+        assert count == 1
 
 
 def test_postgres_ingestion_failure_rolls_back_and_retry_recovers(

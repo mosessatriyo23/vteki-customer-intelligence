@@ -134,7 +134,7 @@ not a training snapshot.
 | Event for a transaction from a later receiving batch | Keep original `source_transaction_batch_id`; set `source_batch_id` to the new receiving batch. Both batches must be published before as-of query returns it. |
 | Late event | Preserve the source `occurred_at`; set availability/recording to database receipt time. Earlier `known_at` excludes it. |
 | Master-data update | Current loader treats shared branch data as immutable and validates equality. Versioned catalogue references use `(item_code, source_batch_id)`; a child uses the catalogue version from its own batch. |
-| Retry / concurrency | Per-batch advisory lock plus checksum lookup; event idempotency uses a database unique key and atomic conflict handling. |
+| Retry / concurrency | Per-batch advisory lock plus checksum lookup; event idempotency uses a database unique key and atomic conflict handling. A concurrent duplicate-event PostgreSQL acceptance test is defined on the current branch; it still needs CI execution. |
 | Worker job retry | Use an optional stable `idempotency_key`; identical kind/payload/attempt limit returns the existing job, while changed content with that key is rejected. |
 | Worker cancellation | Queued jobs become `cancelled`; running jobs become `cancel_requested`, then the worker terminates its handler process and records `cancelled`. Cancellation cannot reverse an external side effect already completed; handlers must be retry-safe/idempotent. |
 | Partial failure | Ingestion writes raw, typed, event, and publish state in one database transaction. Any failure rolls the transaction back; a failed batch must not appear PUBLISHED. |
@@ -207,7 +207,7 @@ Implemented test coverage in the follow-up:
 - PostgreSQL test definitions: event from transaction batch A received in B and corrected/status-changed in C; origin/receipt batch lineage; late-event visibility; idempotent retry; conflicting idempotency payload; correction chain; status before/after effective cutoff; visit/membership source provenance and as-of visibility; only PUBLISHED business-event batches are readable; source-ID overlap and master-data update rejection; snapshot replay immutability; unique worker idempotency key.
 - Identity unit test: migration baseline is BLOCKED before coverage and available from migration time.
 - Identity review unit tests: decision as-of, late correction visibility, linear correction/revocation, idempotent retry, correction/mapping consistency, and coverage marker behavior when baseline rows are empty.
-- PostgreSQL acceptance: identity review receipt timestamp cannot be backdated, history rejects update/delete, and transaction event ordering is deterministic when database availability timestamps tie. The current task branch adds review correction/revocation as-of coverage, review correction through the profile consumer, baseline-correction-after-refund/status coverage, unresolved identity rejection, merge/split profile coverage, and old-profile replay stability; these new PostgreSQL cases have not yet run because no test PostgreSQL URL is configured. Review revocation through the profile consumer and queue-created-after-cutoff remain gaps.
+- PostgreSQL acceptance: identity review receipt timestamp cannot be backdated, history rejects update/delete, and transaction event ordering is deterministic when database availability timestamps tie. The current task branch adds review correction/revocation as-of coverage, review correction/revocation through the profile consumer, queue-created-after-cutoff coverage, baseline-correction-after-refund/status coverage, unresolved identity rejection, merge/split profile coverage, old-profile replay stability, and concurrent duplicate-event coverage; these new PostgreSQL cases have not yet run because no test PostgreSQL URL is configured.
 - Customer360 regression: changing the static review queue cannot make
   `build_profiles_as_of()` claim historical `REVIEW_REQUIRED`; status is
   `UNKNOWN` until review history is available.
@@ -235,7 +235,8 @@ Still required before Gate C:
   published snapshots. The branch adds an unresolved-profile unit test plus
   PostgreSQL unresolved, split, and old-knowledge profile replay assertions.
   These assertions need CI execution. PostgreSQL profile assertions for review
-  revocation and a review queue created after the old cutoff remain pending.
+  revocation and a review queue created after the old cutoff are defined on the
+  current branch but have no execution result yet.
 - Publish immutable snapshot checksums/`known_at` and complete all feature
   inputs only if/when an official historical training snapshot is approved.
 - Build official end-to-end feature snapshots or keep the current utility
@@ -272,7 +273,7 @@ The repository main branch contains the v1.4 implementation and subsequent PR
 #36 acceptance tests and PR #37 migration fix. The current task branch is based
 on main commit `5da8c02`; linked CI is existing merged-PR evidence and does not
 run against this update. Local relevant tests on the task branch: 26 passed
-and 18 PostgreSQL tests skipped because `VTEKI_TEST_POSTGRES_URL` is unset;
+and 19 PostgreSQL tests skipped because `VTEKI_TEST_POSTGRES_URL` is unset;
 Ruff lint and format checks passed for changed Python files. PostgreSQL execution
 and CI for a PR containing this update remain pending.
 
