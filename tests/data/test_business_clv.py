@@ -62,6 +62,41 @@ class BusinessCLVTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             calculate_business_clv(0, 0, 0, 1.01, 2)
 
+    def test_retention_endpoints_and_hand_calculated_projection(self):
+        self.assertEqual(
+            calculate_business_clv(120_000, 50_000, 2, 0, 2)["clv"], 120_000
+        )
+        self.assertEqual(
+            calculate_business_clv(120_000, 50_000, 2, 1, 2)["clv"], 1_320_000
+        )
+        self.assertEqual(
+            calculate_business_clv(120_000, 50_000, 2, 0.5, 2)["clv"], 720_000
+        )
+
+    def test_projected_tier_boundaries_and_history_rule(self):
+        for projection, expected in (
+            (200_000, "SILVER"),
+            (500_000, "GOLD"),
+            (1_000_000, "PLATINUM"),
+        ):
+            with self.subTest(projection=projection):
+                result = calculate_business_clv(0, projection / 12, 1, 1, 2)
+                self.assertEqual(result["tier"], expected)
+                self.assertEqual(
+                    calculate_business_clv(0, projection / 12, 1, 1, 1)["tier"],
+                    "INSUFFICIENT_HISTORY",
+                )
+
+    def test_huge_values_fail_with_value_error_not_overflow_or_infinity(self):
+        for position in range(4):
+            args = [0, 0, 0, 0]
+            args[position] = 10**400
+            with self.subTest(position=position):
+                with self.assertRaises(ValueError):
+                    calculate_business_clv(*args, 2)
+        with self.assertRaisesRegex(ValueError, "calculated CLV must be finite"):
+            calculate_business_clv(0, 1e308, 1e308, 1, 2)
+
     def test_transaction_count_is_nonnegative_int_and_rejects_bool(self):
         for value in (-1, 1.5, "2", True, False):
             with self.subTest(value=value):
