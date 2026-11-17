@@ -85,9 +85,10 @@ def _normalise_profile(
     else:
         raise ValueError("first_join_date must be an ISO date")
 
+    last_transaction_value = profile.get("last_transaction_at")
     last_transaction = (
-        _timestamp(profile["last_transaction_at"], "last_transaction_at")
-        if profile.get("last_transaction_at") is not None
+        _timestamp(last_transaction_value, "last_transaction_at")
+        if last_transaction_value not in (None, "")
         else None
     )
 

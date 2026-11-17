@@ -157,6 +157,32 @@ def test_customer360_replay_is_noop_and_versioned_payload_cannot_be_overwritten(
         engine.dispose()
 
 
+def test_customer360_persistence_accepts_empty_last_transaction_timestamp():
+    engine, session = make_session()
+    try:
+        assert (
+            save_profile_snapshots(
+                [
+                    c360_row(
+                        transaction_count=0,
+                        retained_revenue=0,
+                        last_transaction_at="",
+                    )
+                ],
+                "batch-empty-activity",
+                "identity-v1",
+                session,
+                "rule-1",
+            )
+            == 1
+        )
+        snapshot = session.scalars(select(ProfileSnapshot)).one()
+        assert snapshot.last_transaction_at is None
+    finally:
+        session.close()
+        engine.dispose()
+
+
 def test_segmentation_validates_entire_batch_before_mutating_existing_snapshot():
     engine, session = make_session()
     try:
