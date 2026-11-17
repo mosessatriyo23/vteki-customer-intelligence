@@ -24,13 +24,13 @@ Business source: `docs/christ_business/reference/Requirement_Capstone.md`, espec
 
 ## Local evidence versus historical artifacts
 
-The actual local regression command passed **54 tests in 13.420s**:
+The historical local regression command passed **54 tests in 13.420s** (not rerun for this refresh):
 
 ```powershell
 python -m unittest tests.data.test_ingestion tests.data.test_ingestion_negative tests.data.test_data_leakage tests.data.test_pit_features tests.data.test_model_baseline tests.data.test_model_diagnostics tests.data.test_model_evaluator tests.data.test_business_clv tests.data.test_clv_features tests.data.test_model_label_readiness tests.data.test_drift_monitoring
 ```
 
-This validates development contracts, not candidate predictive performance. Historical metric runs above were not rerun for this report. For an existing compatible three-event baseline output, the inspected evaluator API is:
+This validates development contracts, not candidate predictive performance. Historical metric runs above were not rerun for this report or the 2026-11-17 CI refresh. PR #38 has since merged (`885b675`, final-head checks SUCCESS); its `main` merge-commit push [CI run 44050705428](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44050705428) succeeded. This does not constitute an experiment or gate approval. For an existing compatible three-event baseline output, the inspected evaluator API is:
 
 ```powershell
 python -m services.data.models.evaluator --source <baseline-output-dir> --output-dir <new-empty-evaluation-dir>

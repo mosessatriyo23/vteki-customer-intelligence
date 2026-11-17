@@ -13,7 +13,7 @@ status=BLOCKED_FOR_NEW_MODEL
 
 `services/data/ingestion/validator.py` validates source schema, required values, cross-table references, arithmetic, chronology, duplicate primary keys, manifest row counts and SHA-256 checksums; it rejects invalid batches. `services/data/ingestion/contracts.py` describes the synthetic CSV contract. These checks do not measure real-world accuracy, complete refunds or business definitions. No `ground_truth` was used for matching, feature construction, labels or model inputs.
 
-Executed on checkout containing `main` `7e09616` and Moses PR #38 `aa2a23d`:
+Historical local execution on checkout containing `main` `7e09616` and Moses PR #38 `aa2a23d` (not rerun during this refresh):
 
 ```powershell
 python -m unittest tests.data.test_ingestion tests.data.test_ingestion_negative tests.data.test_data_leakage tests.data.test_pit_features tests.data.test_model_baseline tests.data.test_model_diagnostics tests.data.test_model_evaluator tests.data.test_business_clv tests.data.test_clv_features tests.data.test_model_label_readiness tests.data.test_drift_monitoring
@@ -34,3 +34,7 @@ python -m unittest tests.data.test_ingestion tests.data.test_ingestion_negative 
 This is an inventory of evidence, not a claim that unavailable timestamps can be inferred. For field-by-field source coverage and James acceptance scenarios use `../READINESS_REVIEW_PACKET_2026-11-16.md` and `docs/james_platform/approved/historical_data_contract_v1.x.md` (DRAFT). Those older inventories are historical snapshots; prefer current James contract for updated implementation details, while preserving unknown/unproven source semantics.
 
 **Closure needs:** James's feed/lineage coverage and cross-team historical sign-off; Christ's explicit target and gross-value decisions and signed version; then re-run quality/lineage checks over the proposed immutable input version. CI and synthetic checks do not constitute data-owner approval.
+
+## CI evidence refresh (2026-11-17, GitHub CLI)
+
+`gh pr view 38 --json state,mergedAt,headRefOid,mergeCommit,statusCheckRollup` confirms PR #38 is **MERGED** (merge commit `885b675`, 08:54:10Z) with its final head commit `f97fe51` showing SUCCESS on backend/quality, frontend-build and RBAC E2E checks; the `main`-branch push run for the merge commit ([run 44050705428](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44050705428)) is also SUCCESS. This confirms recorded CI status only, no approvals are inferred, and the 54-test local count above is a historical, not re-executed, result.

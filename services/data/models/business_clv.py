@@ -35,7 +35,11 @@ def calculate_business_clv(
     if transaction_count < 0:
         raise ValueError("transaction_count must be a nonnegative integer")
 
-    clv = historical + average * frequency * 12 * retention
+    # Zero retention has zero projected revenue even for very large inputs.
+    projected = 0.0 if retention == 0 else average * frequency * 12 * retention
+    clv = historical + projected
+    if not math.isfinite(clv):
+        raise ValueError("calculated CLV must be finite")
     if transaction_count < 2 or clv < 200_000:
         tier = "INSUFFICIENT_HISTORY"
     elif clv >= 1_000_000:
@@ -50,7 +54,10 @@ def calculate_business_clv(
 def _finite_nonnegative(name: str, value: int | float) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise ValueError(f"{name} must be a finite nonnegative number")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite nonnegative number") from exc
     if not math.isfinite(number) or number < 0:
         raise ValueError(f"{name} must be a finite nonnegative number")
     return number

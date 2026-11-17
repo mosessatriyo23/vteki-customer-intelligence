@@ -24,9 +24,21 @@ Status legend: **VERIFIED (bounded)** = evidence reviewed for the specific state
 | Gate | Status | Next required owner evidence |
 |---|---|---|
 | A — business | **BLOCKED** | Christ: resolve Capstone's 180-day-forward churn vs 90-day horizon, measurable active cohort, CLV gross/retention/window, lifecycle fallback and approved version with reviewer/date. Verbal direction allows technical development but is not sign-off. |
-| B — engineering | **PARTIAL** | Existing merged PRs have green CI. Moses PR #38/validation reports need green checks on the final commit; no CI result is business approval. |
+| B — engineering | **PARTIAL; merged CI verified** | PRs #38, #36 and #40 are merged with successful final-head checks and merge-commit CI (refresh below). Engineering CI is not business/historical approval or Gate B sign-off. |
 | C — historical | **BLOCKED** | James: complete original-source refund/status availability, as-of aggregation and provenance/identity acceptance; DRAFT contract review by James/Christ/Moses. |
 | D — model review | **NOT OPEN** | Gates A–C close, then versioned proposal and explicit reviewers/approval before a new label/feature/model or experiment. |
+
+## CI evidence refresh — 2026-11-17 (GitHub CLI; not approval)
+
+`gh pr view <number> --json state,mergedAt,headRefOid,mergeCommit,statusCheckRollup` and `gh run view <run-id> --json headSha,event,conclusion,jobs` show:
+
+| PR | Merge (UTC) / commit | Final PR-head checks | `main` merge-commit push CI |
+|---|---|---|---|
+| [#38](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/38) | 08:54:10 · `885b675` | `f97fe51`: backend/quality, frontend build, RBAC E2E SUCCESS | [run 44050705428](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44050705428) SUCCESS, three jobs |
+| [#36](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/36) | 09:02:12 · `5da8c02` | `1082182`: same three checks SUCCESS | [run 44051870098](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051870098) SUCCESS, three jobs |
+| [#40](https://github.com/mosessatriyo23/vteki-customer-intelligence/pull/40) | 09:32:17 · `cad7364` | `036398c`: same three checks SUCCESS | [run 44056472864](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44056472864) SUCCESS, three jobs |
+
+This refresh verifies recorded GitHub CI only; no local tests or historical metrics were rerun. CI does not resolve Gates A/C, certify availability-aware features, or supply reviewer sign-off; Gate D remains NOT OPEN.
 
 ## Review sign-off form (leave blank until real decision)
 

@@ -23,7 +23,7 @@ Targeted reproduction command:
 python -m unittest tests.data.test_data_leakage tests.data.test_pit_features
 ```
 
-Both included in the broader 54-test run reported in `01_DATA_READINESS.md`; all passed.
+Both included in the historical broader 54-test run reported in `01_DATA_READINESS.md`; all passed then, not rerun for this refresh. PR #38 is now merged with successful final-head and merge-commit CI; see the [2026-11-17 CI refresh](06_AI_READINESS_CHECKLIST.md#ci-evidence-refresh--2026-11-17-github-cli-not-approval). This does not expand the event-time-only scope.
 
 ## What is not proven
 
