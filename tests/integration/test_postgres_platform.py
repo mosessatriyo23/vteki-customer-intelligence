@@ -1181,7 +1181,10 @@ def test_postgres_customer360_uses_identity_mapping_as_of(pg_engine: Engine):
                     == after_split_by_id[target_golden]["source_identity_count"] + 1
                 )
                 assert (
-                    before_split_by_id[old_golden]["source_identity_count"] + 1
+                    before_split_by_id.get(old_golden, {}).get(
+                        "source_identity_count", 0
+                    )
+                    + 1
                     == after_split_by_id[old_golden]["source_identity_count"]
                 )
 
