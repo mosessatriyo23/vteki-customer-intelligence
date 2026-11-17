@@ -195,7 +195,7 @@ on this branch remain unexecuted until a PostgreSQL CI run is available.
 | J-F02/F03 | `test_postgres_multi_batch_ingestion_isolated_and_idempotent`, catalogue child batch foreign-key assertion | PostgreSQL coverage exists; current CI must be tied to exact run/commit before claiming complete. |
 | J-F04 | `test_postgres_ingestion_failure_rolls_back_and_retry_recovers` | Batch recovery test exists; verify CI run for current branch before release claim. |
 
-Latest locally-run focused tests on the current branch: **26 passed, 19
+Latest locally-run focused tests on the current branch: **28 passed, 19
 skipped**; skipped tests require `VTEKI_TEST_POSTGRES_URL`. The new PostgreSQL
 tests therefore have no execution result yet.
 

@@ -1,4 +1,4 @@
-# Historical Data Contract v1.7
+# Historical Data Contract v1.8
 
 **Status:** DRAFT — implementation changes require review; Gate C is not closed
 **Owner:** James — Platform & Historical Data
@@ -18,6 +18,7 @@
 | 1.5 | 17 November 2026 | Reconcile status statements with merged main, record latest merged acceptance CI, and make remaining verified/blocked conditions and snapshot readiness explicit. |
 | 1.6 | 17 November 2026 | Add PostgreSQL acceptance coverage for review-decision correction/revocation as-of cutoffs; local PostgreSQL execution remains pending. |
 | 1.7 | 17 November 2026 | Define replacement ordering for correction of a transaction baseline and preserve later refund/status effects; add unit and PostgreSQL regressions plus published-profile stability coverage. |
+| 1.8 | 17 November 2026 | Add local unit coverage for late refund availability and status effective cutoffs; expand concurrent-event and identity-profile PostgreSQL acceptance definitions. |
 
 ## 1. Time and provenance
 
@@ -272,7 +273,7 @@ Approval date remains **not approved**. The `approved/` directory name is not ap
 The repository main branch contains the v1.4 implementation and subsequent PR
 #36 acceptance tests and PR #37 migration fix. The current task branch is based
 on main commit `5da8c02`; linked CI is existing merged-PR evidence and does not
-run against this update. Local relevant tests on the task branch: 26 passed
+run against this update. Local relevant tests on the task branch: 28 passed
 and 19 PostgreSQL tests skipped because `VTEKI_TEST_POSTGRES_URL` is unset;
 Ruff lint and format checks passed for changed Python files. PostgreSQL execution
 and CI for a PR containing this update remain pending.

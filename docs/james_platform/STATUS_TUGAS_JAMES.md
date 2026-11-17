@@ -472,12 +472,12 @@ push dan CI.
 | `build_profiles_as_of()` sebagai sumber resmi Moses | **NOT APPLICABLE / OUT OF SCOPE — pilihan (a)** | Utility identity-aware terbatas; input inbound belum seluruhnya bitemporal dan belum ada immutable snapshot manifest/checksum + publication contract. Jangan gunakan untuk training. |
 | Batch semantics | **PARTIALLY VERIFIED; concurrent event test ADDED, execution PENDING** | Decision table dan tes mencakup duplicate/retry, overlap, batch concurrency, rollback, published visibility, catalogue batch reference, snapshot replay. Test baru menjalankan dua append event identik serentak dan memeriksa satu row; belum dapat dijalankan lokal tanpa PostgreSQL. Per-feed recovery/operational failure injection tetap perlu review bukti per CI head. |
 | CI terbaru yang relevan untuk acceptance historis | **DONE — PR #36 checks passed** | [Run 44051345769](https://github.com/mosessatriyo23/vteki-customer-intelligence/actions/runs/44051345769) untuk commit PR #36 `1082182c738283973ff11f9cf2f564b180d4ada2`. Bukan CI untuk perubahan dokumen branch ini. |
-| Contract approval / Gate C | **BLOCKED** | Contract v1.7 masih **DRAFT**. Moses point-in-time review, Christ review bila definisi nilai memengaruhi target, serta approval lintas tim belum tercatat. Folder `approved/` bukan bukti approval. |
+| Contract approval / Gate C | **BLOCKED** | Contract v1.8 masih **DRAFT**. Moses point-in-time review, Christ review bila definisi nilai memengaruhi target, serta approval lintas tim belum tercatat. Folder `approved/` bukan bukti approval. |
 | Moses readiness | **BLOCKED** | `training_ready=false`, `experiment_ready=false`, `final_model=false`; no new labels/features/model, campaign, atau production scoring dari projection ini. Synthetic ground truth tetap dilarang untuk matching, feature, label, dan training. |
 
 ### Output dan bukti
 
-- Kontrak terkini: `docs/james_platform/approved/historical_data_contract_v1.x.md` (v1.7 DRAFT).
+- Kontrak terkini: `docs/james_platform/approved/historical_data_contract_v1.x.md` (v1.8 DRAFT).
 - Decision table batch/correction ada di bagian 5 kontrak.
 - Acceptance test kode ada di `tests/data/test_transaction_events.py`,
   `tests/data/test_persistence.py`, dan `tests/integration/test_postgres_platform.py`.
@@ -501,7 +501,7 @@ Moses/Christ/cross-team menyetujui kontrak serta feature snapshot resmi.
 
 - Tes relevan (`test_persistence.py`, `test_transaction_events.py`,
   `test_customer360.py`, `test_snapshot_atomicity.py`, dan
-  `test_postgres_platform.py`): **26 passed, 19 skipped**.
+  `test_postgres_platform.py`): **28 passed, 19 skipped**.
 - PostgreSQL integration skipped karena
   `VTEKI_TEST_POSTGRES_URL` tidak tersedia di lingkungan ini.
 - Ruff lint dan format checks untuk file Python yang diubah: lulus.

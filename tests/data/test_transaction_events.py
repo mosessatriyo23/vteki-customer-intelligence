@@ -157,6 +157,44 @@ def test_late_correction_does_not_change_earlier_known_projection():
     assert after.refund_amount == 70
 
 
+def test_late_refund_is_excluded_until_platform_knows_it():
+    refund = event(
+        2,
+        "REFUND_RECORDED",
+        occurred_minutes=1,
+        available_minutes=5,
+        payload={"refund_amount": 100},
+    )
+    events = [recorded(), refund]
+
+    before_receipt = project(events, effective_minutes=10, known_minutes=4)
+    after_receipt = project(events, effective_minutes=10, known_minutes=6)
+
+    assert before_receipt.refund_amount == 0
+    assert refund.event_id not in before_receipt.event_ids
+    assert after_receipt.refund_amount == 100
+    assert refund.event_id in after_receipt.event_ids
+
+
+def test_status_change_is_excluded_before_its_effective_cutoff():
+    status = event(
+        2,
+        "STATUS_CHANGED",
+        occurred_minutes=5,
+        available_minutes=1,
+        payload={"status": "CANCELLED"},
+    )
+    events = [recorded(), status]
+
+    before_effective = project(events, effective_minutes=4, known_minutes=10)
+    at_effective = project(events, effective_minutes=5, known_minutes=10)
+
+    assert before_effective.status == "COMPLETED"
+    assert status.event_id not in before_effective.event_ids
+    assert at_effective.status == "CANCELLED"
+    assert at_effective.cancelled
+
+
 def test_transaction_baseline_correction_preserves_intervening_refund_and_status():
     events = [
         recorded(),
