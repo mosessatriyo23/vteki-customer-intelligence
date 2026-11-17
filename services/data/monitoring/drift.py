@@ -69,10 +69,12 @@ def _distribution(baseline, current, bin_edges, epsilon: float, metric: str) -> 
     ]
     labels.append({"lower": None, "upper": None, "missing": True})
     bins_report = []
+    contributions: list[float] = []
     for label, base_count, now_count in zip(labels, base, now):
         base_share = (base_count + smoothing) / (sum(base) + smoothing * len(base))
         now_share = (now_count + smoothing) / (sum(now) + smoothing * len(now))
         contribution = (now_share - base_share) * math.log(now_share / base_share)
+        contributions.append(contribution)
         bins_report.append(
             {
                 **label,
@@ -83,7 +85,7 @@ def _distribution(baseline, current, bin_edges, epsilon: float, metric: str) -> 
                 "contribution": contribution,
             }
         )
-    value = math.fsum(bin_["contribution"] for bin_ in bins_report)
+    value = math.fsum(contributions)
     return {
         "metric": metric,
         "value": value,

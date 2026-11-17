@@ -1,5 +1,13 @@
 # Moses — Weekly Requirement Gap Audit (Minggu 1–16)
 
+> **SUPERSEDED sebagai acuan prioritas.** User mengklarifikasi bahwa baseline bisnis
+> adalah `Requirement_Capstone.txt` yang ditentukan Christ, bukan panduan mingguan.
+> Audit ini dipertahankan sebagai catatan historis, bukan daftar kewajiban tambahan.
+> Gunakan `CAPSTONE_REQUIREMENT_ALIGNMENT.md` untuk prioritas dan gap aktif.
+> PSI/CSI pada PR #38 adalah pekerjaan pendukung, bukan acceptance criterion yang
+> tertulis di Requirement_Capstone. Nomor minggu dan konflik antardokumen di bawah
+> tidak lagi dipakai untuk meminta keputusan bisnis ulang.
+
 **Tanggal:** 17 November 2026
 **Sumber:** `requirements/extracted_text/` (lokal, tidak di-commit) dan bukti repository di `main` commit `6f1c3db`.
 **Status:** `training_ready=false`, `experiment_ready=false`, `final_model=false`.
