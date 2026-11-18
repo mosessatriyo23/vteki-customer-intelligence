@@ -506,3 +506,76 @@ class TestK07Contract:
         jsonschema = pytest.importorskip("jsonschema")
         schema = json.loads(K07_PATH.read_text(encoding="utf-8"))
         jsonschema.validate(_decide(**self.CASES[case]).to_dict(), schema)
+
+
+# --------------------------- OverflowError Guard (PR #39) -------------------
+
+
+class TestScoresAreValidOverflowGuard:
+    """
+    Memastikan scores_are_valid() TIDAK melempar OverflowError untuk input integer
+    ekstrem (mis. 10**400) — engine harus memakai default konservatif, bukan crash.
+
+    Perbaikan PR #39: math.isfinite(10**400) melempar OverflowError pada beberapa
+    platform; guard try/except di scores_are_valid() harus menangkap ini dan
+    mengembalikan False agar NBAEngine meneruskan ke _conservative_scores().
+    """
+
+    from services.decision.nba.engine import scores_are_valid as _scores_valid
+
+    @pytest.mark.parametrize(
+        "clv",
+        [
+            10**400,  # integer Python sangat besar — overflow saat di-cast ke float
+            10**308 * 10,  # satu langkah di atas float max
+            -(10**400),  # negatif ekstrem
+        ],
+    )
+    def test_extreme_integer_clv_returns_false_no_crash(self, clv):
+        """CLV integer di luar rentang float → scores_are_valid harus False, bukan crash."""
+        from services.decision.nba.engine import scores_are_valid
+
+        s = AIScores(
+            customer_id="CUST-OVERFLOW",
+            churn_score=0.5,
+            churn_risk_band="HIGH",
+            propensity_purchase=0.5,
+            propensity_renew=0.5,
+            clv_amount=clv,
+            clv_tier="PLATINUM",
+            lifecycle_stage="AT_RISK",
+            score_generated_at=NOW,
+            reason_codes=["R1", "R2", "R3"],
+        )
+        # Tidak boleh melempar OverflowError atau exception apapun
+        result = scores_are_valid(s)
+        assert result is False, f"clv={clv!r} seharusnya invalid, bukan {result}"
+
+    def test_extreme_clv_causes_conservative_default_in_decide(self):
+        """
+        Ketika CLV = 10**400, engine.decide() harus berhasil (degraded_input=True)
+        dan memilih NO_ACTION — bukan melempar exception.
+        """
+        engine = NBAEngine()
+        record = engine.decide(
+            customer_id=CID,
+            ai_scores=_scores(clv_amount=10**400),
+            consent=CustomerConsent(CID),
+            complaint_tickets=[],
+            contact_history=[],
+            eligibility=_elig(),
+            product_suitability=ProductSuitability(),
+            evaluation_date=NOW,
+            correlation_id="corr-overflow-test",
+        )
+        assert record.degraded_input is True, "Harus degraded karena CLV tidak valid"
+        assert (
+            record.selected_action_id == "NO_ACTION"
+        ), "Skor tidak valid → default konservatif → semua propensity 0 → NO_ACTION"
+
+    def test_valid_large_but_finite_clv_is_accepted(self):
+        """CLV besar tapi dalam rentang float yang valid (mis. 999_999_999) diterima."""
+        from services.decision.nba.engine import scores_are_valid
+
+        s = _scores(clv_amount=999_999_999.0)
+        assert scores_are_valid(s) is True, "CLV float valid seharusnya diterima"
