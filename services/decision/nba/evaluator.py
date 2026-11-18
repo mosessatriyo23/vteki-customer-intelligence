@@ -115,6 +115,14 @@ def check_business_eligibility(
     clv_tier = ai_scores.clv_tier
     churn_band = ai_scores.churn_risk_band
 
+    # A churned customer may only receive the protective NO_ACTION fallback.
+    if lifecycle == "CHURNED" and action_id != "NO_ACTION":
+        return "CHURNED: no proactive action"
+    # Education/onboarding only; no commercial action for a customer with
+    # no transaction history (v1.3 lifecycle treatment).
+    if lifecycle == "NEVER_TRANSACTED" and action_id not in ("EDUCATION", "NO_ACTION"):
+        return "NEVER_TRANSACTED: education only"
+
     rules: Dict[str, Callable[[], Optional[str]]] = {
         "RELATIONSHIP_MANAGER_CONTACT": lambda: (
             None
@@ -134,12 +142,15 @@ def check_business_eligibility(
         ),
         "CROSS_SELL": lambda: (
             None
-            if lifecycle in ("ACTIVE", "LOYAL")
+            if lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
             else "Lifecycle bukan ACTIVE/LOYAL untuk CROSS_SELL"
         ),
         "UPSELL": lambda: (
             None
-            if (lifecycle in ("ACTIVE", "LOYAL") and eligibility.tenure_days >= 60)
+            if (
+                lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
+                and eligibility.tenure_days >= 60
+            )
             else "Lifecycle atau tenure tidak memenuhi syarat UPSELL"
         ),
         "RENEWAL_REMINDER": lambda: (
@@ -169,7 +180,7 @@ def check_business_eligibility(
         "SERVICE_REMINDER": lambda: (
             None
             if (
-                lifecycle in ("ACTIVE", "LOYAL")
+                lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
                 and eligibility.days_until_replenishment is not None
                 and eligibility.days_until_replenishment <= SERVICE_REMINDER_WINDOW_DAYS
             )
@@ -183,8 +194,11 @@ def check_business_eligibility(
         ),
         "EDUCATION": lambda: (
             None
-            if (lifecycle == "NEW" and churn_band == "LOW")
-            else "Lifecycle bukan NEW atau Churn Risk bukan LOW untuk EDUCATION"
+            if (
+                lifecycle in ("OCCASIONAL", "NEVER_TRANSACTED")
+                or (lifecycle == "NEW" and churn_band == "LOW")
+            )
+            else "Lifecycle bukan NEW (LOW), OCCASIONAL, atau NEVER_TRANSACTED untuk EDUCATION"
         ),
     }
 

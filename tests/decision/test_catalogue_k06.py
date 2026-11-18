@@ -38,6 +38,8 @@ SCORE_DOMAIN = {
         "DORMANT",
         "CHURNED",
         "OCCASIONAL",
+        "REACTIVATED",
+        "NEVER_TRANSACTED",
     ],
 }
 ELIG_DOMAIN = {

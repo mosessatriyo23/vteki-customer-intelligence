@@ -168,6 +168,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "churn_score",
             "clv_amount",
             "clv_tier",
+            "lifecycle_stage",
         ],
     ),
     # 4. RETENTION_OUTREACH — Upaya Retensi Standar
@@ -271,6 +272,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "has_active_membership",
             "membership_days_remaining",
             "propensity_renew",
+            "lifecycle_stage",
         ],
     ),
     # 8. SERVICE_REMINDER — Pengingat Jadwal Layanan
@@ -316,7 +318,8 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         allowed_channels=["email", "push"],
         incentive_band=IncentiveBand.NONE,
         action_weight=0.8,
-        is_commercial=True,
+        # v1.3: awareness/onboarding only, never a commercial offer.
+        is_commercial=False,
         required_fact_package=[
             "churn_risk_band",
             "churn_score",

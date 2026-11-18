@@ -62,6 +62,9 @@ def _doc_matrix():
             rows[m.group(1)] = {
                 a for a in re.findall(r"`([A-Z_]+)`", cells) if a in ACTION_CATALOGUE
             }
+    # v1.3 expresses REACTIVATED as an explicit reference, not an action list.
+    if "| `REACTIVATED` | Perlakuan seperti `ACTIVE` |" in section:
+        rows["REACTIVATED"] = rows["ACTIVE"].copy()
     return rows
 
 
@@ -102,10 +105,49 @@ def test_engine_matches_doc_matrix(segment):
     assert _engine_actions(segment) == _doc_matrix()[segment] & SEGMENT_ACTIONS
 
 
-@pytest.mark.parametrize(
-    "segment", ["CHURNED", "REACTIVATED", "OCCASIONAL", "NEVER_TRANSACTED"]
-)
-def test_undecided_segments_have_no_segment_specific_action(segment):
-    """Segmen 'Belum ditetapkan' di dokumen: tidak ada aksi proaktif segmen-spesifik."""
-    assert _doc_matrix()[segment] == set()
-    assert _engine_actions(segment) == set()
+def test_churned_has_no_proactive_segment_action():
+    """NO_ACTION is a fallback, never a proactive candidate."""
+    assert _doc_matrix()["CHURNED"] == {"NO_ACTION"}
+    assert _engine_actions("CHURNED") == set()
+
+
+@pytest.mark.parametrize("segment", ["OCCASIONAL", "NEVER_TRANSACTED"])
+def test_education_only_for_noncommercial_segments(segment):
+    assert _doc_matrix()[segment] == {"EDUCATION"}
+    assert _engine_actions(segment) == {"EDUCATION"}
+    assert ACTION_CATALOGUE["EDUCATION"].is_commercial is False
+
+
+def test_reactivated_treated_like_active():
+    assert _engine_actions("REACTIVATED") == _engine_actions("ACTIVE")
+
+
+@pytest.mark.parametrize("segment", ["CHURNED", "NEVER_TRANSACTED"])
+def test_restricted_segments_block_all_other_proactive_candidates(segment):
+    scores = AIScores(
+        customer_id="C",
+        churn_score=0.9,
+        churn_risk_band="VERY_HIGH",
+        propensity_purchase=0.8,
+        propensity_renew=0.8,
+        clv_amount=2_000_000.0,
+        clv_tier="PLATINUM",
+        lifecycle_stage=segment,
+        score_generated_at=NOW,
+    )
+    eligibility = EligibilityProfile(
+        customer_id="C",
+        tenure_days=300,
+        membership_days_remaining=1,
+        has_active_membership=True,
+        days_until_replenishment=3,
+    )
+    allowed = (
+        {"NO_ACTION", "EDUCATION"} if segment == "NEVER_TRANSACTED" else {"NO_ACTION"}
+    )
+    for action_id in ACTION_CATALOGUE:
+        if action_id not in allowed:
+            assert (
+                check_business_eligibility(action_id, scores, eligibility) is not None
+            )
+    assert check_business_eligibility("NO_ACTION", scores, eligibility) is None
