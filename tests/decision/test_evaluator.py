@@ -170,8 +170,9 @@ class TestServiceReminderRule:
     def test_missing_schedule_data_is_not_eligible_fail_closed(self):
         assert check_business_eligibility("SERVICE_REMINDER", _scores(), _elig())
 
-    @pytest.mark.parametrize("lifecycle", ["ACTIVE", "LOYAL"])
+    @pytest.mark.parametrize("lifecycle", ["ACTIVE", "LOYAL", "REACTIVATED"])
     def test_active_and_loyal_allowed(self, lifecycle):
+        """v1.3: REACTIVATED is treated like ACTIVE once the customer has returned."""
         s = _scores(lifecycle_stage=lifecycle)
         e = _elig(days_until_replenishment=3)
         assert check_business_eligibility("SERVICE_REMINDER", s, e) is None
@@ -183,7 +184,6 @@ class TestServiceReminderRule:
             "DORMANT",
             "AT_RISK",
             "NEW",
-            "REACTIVATED",
             "OCCASIONAL",
             "NEVER_TRANSACTED",
         ],

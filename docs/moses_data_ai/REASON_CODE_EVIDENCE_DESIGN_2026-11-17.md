@@ -2,6 +2,8 @@
 
 **Status:** DRAFT / NOT RUN — 17 November 2026. No candidate model, SHAP output, or approved explanation taxonomy exists. Requirement baseline: `docs/christ_business/reference/Requirement_Capstone.md`; consumer shape: `services/decision/nba/engine.py::AIScores.reason_codes` (minimum three described, not enforced by the consumer).
 
+See the [2026-11-18 unblock handoff](MOSES_UNBLOCK_HANDOFF_2026-11-18.md) §"Propensity and explanation boundary": fewer than three distinct substantiated reasons is `INSUFFICIENT_EXPLANATION`, never a fabricated third code.
+
 ## Proposed handoff
 
 For each as-of customer score, carry (1) stable `reason_code` identifier, (2) feature name and **version**, (3) feature value and unit, (4) feature `effective_at`/`known_at` and source/coverage marker, (5) explanation direction and evidence method/version, (6) customer ID, score ID, and cutoff. A display message may be generated only from an approved, localized template; it is **not** itself evidence. No reason may use `ground_truth`, post-cutoff observations, mutable current-state fields presented as historical facts, or unapproved business thresholds. Explanations must be faithful to the actual score producer; a hypothetical feature name is not evidence of model influence.

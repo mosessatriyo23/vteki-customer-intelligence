@@ -21,6 +21,12 @@ def calculate_business_clv(
 
     Retention is mandatory and must be an explicitly supplied estimate in [0, 1].
     This pure function performs no ingestion, fitting, or ground-truth access.
+
+    Returns the historical and forward-looking components separately (TRD
+    section 9.3: observed and projected revenue must be shown apart), plus
+    their sum as ``clv``. The forward component is a 12-month projection
+    derived from observed frequency/average spend and the caller-supplied
+    retention factor; it is not an observed value.
     """
     historical = _finite_nonnegative("historical_spend_12m", historical_spend_12m)
     average = _finite_nonnegative(
@@ -48,7 +54,12 @@ def calculate_business_clv(
         tier = "GOLD"
     else:
         tier = "SILVER"
-    return {"clv": clv, "tier": tier}
+    return {
+        "clv": clv,
+        "tier": tier,
+        "historical_component": historical,
+        "forward_component": projected,
+    }
 
 
 def _finite_nonnegative(name: str, value: int | float) -> float:

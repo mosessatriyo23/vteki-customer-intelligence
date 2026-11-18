@@ -2,6 +2,8 @@
 
 **Date:** 2026-11-17 · **Status:** plan only, **not run**. No training, no new result numbers, no new model/label version, no approval. `training_ready=false`, `experiment_ready=false`, `final_model=false`. Assumes `docs/christ_business/reference/Requirement_Capstone.md` as baseline business reference and the current development baseline (`services/data/models`, `docs/moses_data_ai/model_development_baseline.md`, `sprint_gate_status_2026-11-14.md`) as the comparator to beat, not the target. Pairs with [`RETENTION_METHOD_PROPOSAL_2026-11-17.md`](RETENTION_METHOD_PROPOSAL_2026-11-17.md) for CLV; this plan covers churn/propensity and CLV candidate evaluation mechanics generically and does not resolve the open Bab 2.1/2.2 questions itself.
 
+See the [2026-11-18 unblock handoff](MOSES_UNBLOCK_HANDOFF_2026-11-18.md) for independent churn decisions and the three distinct, unimplemented propensity outcomes. It does not open this plan's entry gate.
+
 ## Entry gate before any candidate is evaluated
 
 1. Christ-approved, versioned target contract: unambiguous churn outcome window and active cohort (Bab 2.1 180 vs 90-day conflict resolved), CLV gross-revenue convention and retention method/factor source, lifecycle thresholds without overlap/gap ambiguity (Bab 1), reason-code allowlist.
