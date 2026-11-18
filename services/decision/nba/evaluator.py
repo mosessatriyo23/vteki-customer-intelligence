@@ -67,6 +67,22 @@ GATE_TO_K07_CATEGORY: Dict[str, str] = {
 SERVICE_REMINDER_WINDOW_DAYS: int = 7
 """SERVICE_REMINDER eligible jika produk habis pakai dalam <= 7 hari (keputusan tim)."""
 
+SERVICE_REMINDER_OVERDUE_FLOOR_DAYS: int = -14
+"""Batas bawah keterlambatan: lewat jatuh tempo > 14 hari = pengingat basi, tidak eligible
+(target_definitions v1.4 §6.4; PROVISIONAL sampai ada data replenishment)."""
+
+PROPENSITY_HIGH_THRESHOLD: float = 0.6
+"""Ambang 'Propensity Tinggi' untuk CROSS_SELL/UPSELL (target_definitions v1.4 §3.2.C;
+PROVISIONAL — placeholder kebijakan, belum dikalibrasi dari data)."""
+
+CONSENT_GATED_CHANNELS: Dict[str, List[str]] = {
+    # RM_CONTACT = kontak komersial ke pelanggan; membuat task internal (task_rm/branch)
+    # TIDAK cukup. Wajib ada consent kanal pelanggan `phone` (target_definitions v1.4 §4.3).
+    "RELATIONSHIP_MANAGER_CONTACT": ["phone"],
+}
+"""Kanal yang HARUS lolos consent untuk aksi tertentu (menggantikan allowed_channels
+pada pemeriksaan consent; kanal internal tidak dihitung)."""
+
 STATUS_PASSED = "PASSED"
 STATUS_SCORE_EXPIRED = "SCORE_EXPIRED"
 STATUS_NOT_ELIGIBLE = "NOT_ELIGIBLE"
@@ -115,22 +131,14 @@ def check_business_eligibility(
     clv_tier = ai_scores.clv_tier
     churn_band = ai_scores.churn_risk_band
 
-    # A churned customer may only receive the protective NO_ACTION fallback.
-    if lifecycle == "CHURNED" and action_id != "NO_ACTION":
-        return "CHURNED: no proactive action"
-    # Education/onboarding only; no commercial action for a customer with
-    # no transaction history (v1.3 lifecycle treatment).
-    if lifecycle == "NEVER_TRANSACTED" and action_id not in ("EDUCATION", "NO_ACTION"):
-        return "NEVER_TRANSACTED: education only"
-
     rules: Dict[str, Callable[[], Optional[str]]] = {
         "RELATIONSHIP_MANAGER_CONTACT": lambda: (
             None
             if (clv_tier == "PLATINUM" and churn_band in ("HIGH", "VERY_HIGH"))
             else "CLV bukan PLATINUM atau Churn Risk tidak HIGH/VERY_HIGH"
         ),
-        # Policy v1.3: Churn Risk HIGH ATAU VERY_HIGH (sesuai target_definitions §3.1 dan
-        # Requirement Bab 4). Kode lama hanya HIGH — diperbaiki agar sesuai dokumen.
+        # Policy v1.4: Churn Risk HIGH ATAU VERY_HIGH. Requirement Bab 4 hanya menulis HIGH;
+        # ini penyimpangan yang disengaja (menunggu konfirmasi dosen), lihat target_definitions §3.2.B.
         "RETENTION_OUTREACH": lambda: (
             None
             if (
@@ -142,16 +150,20 @@ def check_business_eligibility(
         ),
         "CROSS_SELL": lambda: (
             None
-            if lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
-            else "Lifecycle bukan ACTIVE/LOYAL untuk CROSS_SELL"
+            if (
+                lifecycle in ("ACTIVE", "LOYAL")
+                and ai_scores.propensity_purchase >= PROPENSITY_HIGH_THRESHOLD
+            )
+            else "Lifecycle bukan ACTIVE/LOYAL atau Propensity Purchase < 0.6 untuk CROSS_SELL"
         ),
         "UPSELL": lambda: (
             None
             if (
-                lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
+                lifecycle in ("ACTIVE", "LOYAL")
                 and eligibility.tenure_days >= 60
+                and ai_scores.propensity_renew >= PROPENSITY_HIGH_THRESHOLD
             )
-            else "Lifecycle atau tenure tidak memenuhi syarat UPSELL"
+            else "Lifecycle, tenure, atau Propensity Renew (>= 0.6) tidak memenuhi syarat UPSELL"
         ),
         "RENEWAL_REMINDER": lambda: (
             None
@@ -180,11 +192,13 @@ def check_business_eligibility(
         "SERVICE_REMINDER": lambda: (
             None
             if (
-                lifecycle in ("ACTIVE", "LOYAL", "REACTIVATED")
+                lifecycle in ("ACTIVE", "LOYAL")
                 and eligibility.days_until_replenishment is not None
-                and eligibility.days_until_replenishment <= SERVICE_REMINDER_WINDOW_DAYS
+                and SERVICE_REMINDER_OVERDUE_FLOOR_DAYS
+                <= eligibility.days_until_replenishment
+                <= SERVICE_REMINDER_WINDOW_DAYS
             )
-            else "Bukan ACTIVE/LOYAL atau jadwal habis pakai tidak diketahui / > 7 hari"
+            else "Bukan ACTIVE/LOYAL atau jadwal habis pakai tidak diketahui / di luar jendela -14..+7 hari"
         ),
         # COMPLAINT_RESOLUTION hanya dipilih lewat jalur suppression (tiket
         # OPEN_SEVERE_COMPLAINT aktif), BUKAN sebagai kandidat EV biasa.
@@ -194,11 +208,8 @@ def check_business_eligibility(
         ),
         "EDUCATION": lambda: (
             None
-            if (
-                lifecycle in ("OCCASIONAL", "NEVER_TRANSACTED")
-                or (lifecycle == "NEW" and churn_band == "LOW")
-            )
-            else "Lifecycle bukan NEW (LOW), OCCASIONAL, atau NEVER_TRANSACTED untuk EDUCATION"
+            if (lifecycle in ("NEW", "OCCASIONAL") and churn_band == "LOW")
+            else "Lifecycle bukan NEW/OCCASIONAL atau Churn Risk bukan LOW untuk EDUCATION"
         ),
     }
 
