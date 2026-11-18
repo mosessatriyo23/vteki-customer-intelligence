@@ -153,10 +153,9 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         trigger_conditions=[
             "CLV Tier = PLATINUM (CLV >= Rp 1.000.000)",
             "Churn Risk = HIGH atau VERY_HIGH",
-            # Lifecycle dibatasi AT_RISK/DORMANT sesuai target_definitions v1.3 §5 (Item 5).
-            # Requirement Bab 4 menyebut 'keluhan aktif' juga memicu — tetapi keluhan aktif
-            # diarahkan ke COMPLAINT_RESOLUTION (jalur suppression), bukan ke sini.
-            "Lifecycle = AT_RISK atau DORMANT",
+            # Tidak ada batasan lifecycle (sesuai Requirement Bab 4 dan perilaku evaluator;
+            # target_definitions v1.4 §3.2.A). Keluhan aktif diarahkan ke COMPLAINT_RESOLUTION
+            # (jalur suppression, kanal task_rm/branch), bukan ke aksi ini.
             "Consent = Opt-In pada kanal yang relevan",
         ],
         allowed_channels=["task_rm", "branch", "phone"],
@@ -180,7 +179,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "dengan nilai tinggi, berupa penawaran diskon berbatas waktu atau penawaran khusus."
         ),
         trigger_conditions=[
-            "Churn Risk = HIGH",
+            "Churn Risk = HIGH atau VERY_HIGH",
             "CLV Tier = GOLD atau PLATINUM",
             "Lifecycle = AT_RISK atau DORMANT",
             "Consent = Opt-In",
@@ -209,8 +208,9 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         ),
         trigger_conditions=[
             "Lifecycle = ACTIVE atau LOYAL",
-            "Propensity Purchase tinggi (>= 0.6)",
-            "Pelanggan belum memiliki produk di kategori yang ditawarkan",
+            "Propensity Purchase >= 0.6 (ditegakkan; PROVISIONAL)",
+            # TIDAK DITEGAKKAN di kode: butuh data kategori yang sudah dimiliki (belum ada).
+            "[TIDAK DITEGAKKAN] Pelanggan belum memiliki produk di kategori yang ditawarkan",
             "Consent = Opt-In",
             "Frequency Cap belum tercapai",
         ],
@@ -232,7 +232,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         trigger_conditions=[
             "Lifecycle = ACTIVE atau LOYAL",
             "Tenure >= 60 hari",
-            "Propensity Renew/Upgrade tinggi (>= 0.6)",
+            "Propensity Renew >= 0.6 (ditegakkan; PROVISIONAL)",
             "Consent = Opt-In",
             "Frequency Cap belum tercapai",
         ],
@@ -259,7 +259,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         trigger_conditions=[
             "Sisa masa keanggotaan <= 15 hari",
             "Membership belum diperpanjang",
-            "Propensity Renew tinggi",
+            "Propensity Renew dipakai sebagai peringkat EV (tanpa ambang keras)",
             "Consent = Opt-In",
         ],
         allowed_channels=["email", "push"],
@@ -284,7 +284,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         ),
         trigger_conditions=[
             "Lifecycle = ACTIVE atau LOYAL",
-            "Produk habis pakai / jadwal pembelian ulang <= 7 hari (days_until_replenishment)",
+            "Jadwal pembelian ulang -14..+7 hari (days_until_replenishment; data belum ada = tidak eligible)",
             "Tidak ada keluhan aktif",
             "Consent = Opt-In pada kanal yang relevan",
         ],
@@ -308,7 +308,7 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "pelanggan baru atau pelanggan dengan risiko churn rendah."
         ),
         trigger_conditions=[
-            "Lifecycle = NEW",
+            "Lifecycle = NEW atau OCCASIONAL",
             "Churn Risk = LOW",
             "Consent = Opt-In",
             "Frequency Cap belum tercapai",
@@ -363,9 +363,9 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             # Bab 1 lifecycle: DORMANT = 181-365 hari pasif (bukan 91-180 hari).
             # Bab 4 katalog menulis 91-180 hari — TEKS ITU SALAH; Bab 1 yang berlaku.
             # Perbaikan v1.3: teks trigger diselaraskan dengan definisi lifecycle Bab 1.
-            "Lifecycle = DORMANT (181-365 hari pasif, belum ada transaksi)",
+            "Lifecycle = DORMANT (>= 181 hari tanpa aktivitas)",
             "CLV historis = GOLD atau PLATINUM",
-            "Belum ada tawaran win-back aktif dalam 30 hari terakhir",
+            "Tidak ada tawaran win-back yang masih berlaku (has_active_win_back_offer = False)",
             "Consent = Opt-In",
             "Frequency Cap belum tercapai",
         ],

@@ -102,10 +102,13 @@ def test_engine_matches_doc_matrix(segment):
     assert _engine_actions(segment) == _doc_matrix()[segment] & SEGMENT_ACTIONS
 
 
-@pytest.mark.parametrize(
-    "segment", ["CHURNED", "REACTIVATED", "OCCASIONAL", "NEVER_TRANSACTED"]
-)
-def test_undecided_segments_have_no_segment_specific_action(segment):
-    """Segmen 'Belum ditetapkan' di dokumen: tidak ada aksi proaktif segmen-spesifik."""
-    assert _doc_matrix()[segment] == set()
+@pytest.mark.parametrize("segment", ["CHURNED", "REACTIVATED", "NEVER_TRANSACTED"])
+def test_no_action_segments_have_no_segment_specific_action(segment):
+    """v1.4 §3.1: segmen ini DIPUTUSKAN NO_ACTION (bukan 'belum ditetapkan')."""
+    assert _doc_matrix()[segment] == {"NO_ACTION"}
     assert _engine_actions(segment) == set()
+
+
+def test_occasional_gets_education_only():
+    assert _doc_matrix()["OCCASIONAL"] == {"EDUCATION"}
+    assert _engine_actions("OCCASIONAL") == {"EDUCATION"}

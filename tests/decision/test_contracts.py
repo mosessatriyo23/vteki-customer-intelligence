@@ -273,7 +273,7 @@ def test_churn_label_window_is_90_days_forward():
     assert c["PREDICTION_HORIZON_DAYS"] == 90
     assert "CHURN_DEFINITION_DAYS" not in c  # 180 hari ke belakang dicabut (v1.1)
     text = TARGET_DEFS.read_text(encoding="utf-8")
-    definition = text.split("### 1.1")[1].split("> **Sumber v1.1")[0]
+    definition = text.split("### 1.1")[1].split("### 1.2")[0]
     assert "90 hari ke depan" in definition
     # definisi v1.0 yang keliru (ke belakang + sirkular) tidak boleh kembali
     assert "ke belakang" not in definition

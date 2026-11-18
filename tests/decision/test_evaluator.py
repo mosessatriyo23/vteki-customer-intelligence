@@ -344,3 +344,75 @@ class TestComplaintResolutionNotNormalCandidate:
     def test_not_eligible_as_regular_candidate(self):
         """COMPLAINT_RESOLUTION hanya lewat jalur komplain aktif, bukan kandidat EV."""
         assert check_business_eligibility("COMPLAINT_RESOLUTION", _scores(), _elig())
+
+
+class TestV14PolicyDecisions:
+    """target_definitions v1.4: ambang propensity, jendela SERVICE_REMINDER, EDUCATION OCCASIONAL."""
+
+    @pytest.mark.parametrize("p,ok", [(0.59, False), (0.6, True), (0.9, True)])
+    def test_cross_sell_propensity_boundary(self, p, ok):
+        r = check_business_eligibility(
+            "CROSS_SELL",
+            _scores(lifecycle_stage="ACTIVE", propensity_purchase=p),
+            _elig(),
+        )
+        assert (r is None) is ok
+
+    @pytest.mark.parametrize("p,ok", [(0.59, False), (0.6, True)])
+    def test_upsell_propensity_boundary(self, p, ok):
+        r = check_business_eligibility(
+            "UPSELL",
+            _scores(lifecycle_stage="LOYAL", propensity_renew=p),
+            _elig(tenure_days=90),
+        )
+        assert (r is None) is ok
+
+    @pytest.mark.parametrize(
+        "days,ok", [(-15, False), (-14, True), (7, True), (8, False)]
+    )
+    def test_service_reminder_window_floor_and_cap(self, days, ok):
+        e = _elig(days_until_replenishment=days)
+        r = check_business_eligibility(
+            "SERVICE_REMINDER", _scores(lifecycle_stage="ACTIVE"), e
+        )
+        assert (r is None) is ok
+
+    @pytest.mark.parametrize(
+        "stage,band,ok",
+        [
+            ("OCCASIONAL", "LOW", True),
+            ("OCCASIONAL", "MEDIUM", False),
+            ("NEW", "LOW", True),
+            ("NEVER_TRANSACTED", "LOW", False),
+            ("REACTIVATED", "LOW", False),
+        ],
+    )
+    def test_education_segments(self, stage, band, ok):
+        r = check_business_eligibility(
+            "EDUCATION", _scores(lifecycle_stage=stage, churn_risk_band=band), _elig()
+        )
+        assert (r is None) is ok
+
+    def test_rm_contact_has_no_lifecycle_restriction(self):
+        for stage in ("ACTIVE", "AT_RISK", "DORMANT"):
+            s = _scores(
+                lifecycle_stage=stage, clv_tier="PLATINUM", churn_risk_band="VERY_HIGH"
+            )
+            assert (
+                check_business_eligibility("RELATIONSHIP_MANAGER_CONTACT", s, _elig())
+                is None
+            )
+
+
+def test_rm_contact_requires_phone_consent_not_just_internal_task():
+    from services.decision.nba.evaluator import (
+        CONSENT_GATED_CHANNELS,
+        check_channel_availability,
+    )
+
+    chans = CONSENT_GATED_CHANNELS["RELATIONSHIP_MANAGER_CONTACT"]
+    assert (
+        check_channel_availability(chans, CustomerConsent(CID, phone_opt_in=True))
+        is None
+    )
+    assert check_channel_availability(chans, CustomerConsent(CID, phone_opt_in=False))

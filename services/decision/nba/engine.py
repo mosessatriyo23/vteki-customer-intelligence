@@ -49,6 +49,7 @@ from services.decision.nba.ev_calculator import (
     get_propensity,
 )
 from services.decision.nba.evaluator import (
+    CONSENT_GATED_CHANNELS,
     GATE_BUSINESS_ELIGIBILITY,
     GATE_CUSTOMER_CONSENT,
     GATE_PRODUCT_SUITABILITY,
@@ -737,7 +738,10 @@ class NBAEngine:
             # tidak dapat dieksekusi (K-10: unknown/expired/opt-out = BLOCKED)
             if consent is not None:
                 channel_reason = check_channel_availability(
-                    action.allowed_channels, consent
+                    CONSENT_GATED_CHANNELS.get(
+                        action.action_id, action.allowed_channels
+                    ),
+                    consent,
                 )
                 if channel_reason is not None:
                     candidates.append(
