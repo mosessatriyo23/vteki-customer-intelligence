@@ -153,6 +153,9 @@ ACTION_CATALOGUE: Dict[str, Action] = {
         trigger_conditions=[
             "CLV Tier = PLATINUM (CLV >= Rp 1.000.000)",
             "Churn Risk = HIGH atau VERY_HIGH",
+            # Lifecycle dibatasi AT_RISK/DORMANT sesuai target_definitions v1.3 §5 (Item 5).
+            # Requirement Bab 4 menyebut 'keluhan aktif' juga memicu — tetapi keluhan aktif
+            # diarahkan ke COMPLAINT_RESOLUTION (jalur suppression), bukan ke sini.
             "Lifecycle = AT_RISK atau DORMANT",
             "Consent = Opt-In pada kanal yang relevan",
         ],
@@ -357,7 +360,10 @@ ACTION_CATALOGUE: Dict[str, Action] = {
             "untuk menarik kembali pelanggan yang sudah lama tidak aktif."
         ),
         trigger_conditions=[
-            "Lifecycle = DORMANT (91-180 hari pasif)",
+            # Bab 1 lifecycle: DORMANT = 181-365 hari pasif (bukan 91-180 hari).
+            # Bab 4 katalog menulis 91-180 hari — TEKS ITU SALAH; Bab 1 yang berlaku.
+            # Perbaikan v1.3: teks trigger diselaraskan dengan definisi lifecycle Bab 1.
+            "Lifecycle = DORMANT (181-365 hari pasif, belum ada transaksi)",
             "CLV historis = GOLD atau PLATINUM",
             "Belum ada tawaran win-back aktif dalam 30 hari terakhir",
             "Consent = Opt-In",

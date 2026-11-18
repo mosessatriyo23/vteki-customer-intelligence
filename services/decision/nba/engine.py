@@ -286,23 +286,36 @@ def scores_are_valid(scores: AIScores) -> bool:
 
     Probabilitas (churn, propensity_purchase, propensity_renew) harus angka terhingga
     dalam [0, 1]; `clv_amount` harus angka terhingga >= 0. Selain itu skor ditolak.
+
+    Perbaikan PR #39 (OverflowError): integer Python sangat besar (mis. 10**400) tidak
+    dapat dikonversi ke float IEEE-754 sehingga `math.isfinite()` melempar OverflowError.
+    Guard `try/except` menangkap OverflowError dan ValueError agar fungsi selalu mengembalikan
+    False (bukan crash) untuk input ekstrem — engine kemudian memakai default konservatif.
     """
 
     def finite(value: Any) -> bool:
-        return (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and math.isfinite(value)
-        )
-
-    for probability in (
-        scores.churn_score,
-        scores.propensity_purchase,
-        scores.propensity_renew,
-    ):
-        if not finite(probability) or not 0.0 <= probability <= 1.0:
+        try:
+            return (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(value)
+            )
+        except (OverflowError, ValueError):
+            # integer Python melebihi rentang float IEEE-754 (mis. 10**400)
             return False
-    return finite(scores.clv_amount) and scores.clv_amount >= 0.0
+
+    try:
+        for probability in (
+            scores.churn_score,
+            scores.propensity_purchase,
+            scores.propensity_renew,
+        ):
+            if not finite(probability) or not 0.0 <= probability <= 1.0:
+                return False
+        return finite(scores.clv_amount) and scores.clv_amount >= 0.0
+    except (OverflowError, ValueError):
+        # Tangkap overflow pada perbandingan >= 0.0 untuk integer ekstrem
+        return False
 
 
 # ---------------------------------------------------------------------------

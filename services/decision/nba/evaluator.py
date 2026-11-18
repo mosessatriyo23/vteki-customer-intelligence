@@ -121,6 +121,8 @@ def check_business_eligibility(
             if (clv_tier == "PLATINUM" and churn_band in ("HIGH", "VERY_HIGH"))
             else "CLV bukan PLATINUM atau Churn Risk tidak HIGH/VERY_HIGH"
         ),
+        # Policy v1.3: Churn Risk HIGH ATAU VERY_HIGH (sesuai target_definitions §3.1 dan
+        # Requirement Bab 4). Kode lama hanya HIGH — diperbaiki agar sesuai dokumen.
         "RETENTION_OUTREACH": lambda: (
             None
             if (
@@ -128,7 +130,7 @@ def check_business_eligibility(
                 and clv_tier in ("GOLD", "PLATINUM")
                 and lifecycle in ("AT_RISK", "DORMANT")
             )
-            else "Tidak memenuhi syarat RETENTION_OUTREACH (churn/CLV/lifecycle)"
+            else "Tidak memenuhi syarat RETENTION_OUTREACH (churn HIGH/VERY_HIGH, CLV GOLD/PLATINUM, lifecycle AT_RISK/DORMANT)"
         ),
         "CROSS_SELL": lambda: (
             None
