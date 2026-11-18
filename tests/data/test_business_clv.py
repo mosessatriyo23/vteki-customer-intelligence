@@ -9,7 +9,16 @@ from services.data.models.business_clv import calculate_business_clv
 class BusinessCLVTests(unittest.TestCase):
     def test_formula_uses_gross_revenue_and_explicit_retention(self):
         result = calculate_business_clv(120_000, 50_000, 2, 0.5, 4)
-        self.assertEqual(result, {"clv": 720_000.0, "tier": "GOLD"})
+        self.assertEqual(result["clv"], 720_000.0)
+        self.assertEqual(result["tier"], "GOLD")
+
+    def test_components_reconcile_and_zero_retention_preserves_history(self):
+        for retention, projected in ((0, 0.0), (0.5, 600_000.0), (1, 1_200_000.0)):
+            with self.subTest(retention=retention):
+                result = calculate_business_clv(120_000, 50_000, 2, retention, 4)
+                self.assertEqual(result["historical_component"], 120_000.0)
+                self.assertEqual(result["forward_component"], projected)
+                self.assertEqual(result["clv"], 120_000.0 + projected)
 
     def test_tier_boundaries(self):
         cases = (
@@ -33,7 +42,12 @@ class BusinessCLVTests(unittest.TestCase):
     def test_zero_values_are_valid(self):
         self.assertEqual(
             calculate_business_clv(0, 0, 0, 0, 0),
-            {"clv": 0.0, "tier": "INSUFFICIENT_HISTORY"},
+            {
+                "clv": 0.0,
+                "tier": "INSUFFICIENT_HISTORY",
+                "historical_component": 0.0,
+                "forward_component": 0.0,
+            },
         )
 
     def test_retention_is_required(self):
