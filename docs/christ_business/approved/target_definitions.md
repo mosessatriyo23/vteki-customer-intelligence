@@ -49,6 +49,19 @@ Label churn adalah **hasil yang diamati SETELAH `prediction_date`** (bukan keada
 > v1.1 mengikuti 90 hari (Panduan + implementasi). **Konfirmasi ke Dosen/Mentor diperlukan.**
 > Angka 180 hari hanya tetap dipakai pada lifecycle `CHURNED` (membership kadaluarsa > 180 hari, §3), yang merupakan status berbasis aturan, bukan label ML.
 
+### 1.1a Permintaan keputusan Moses — 2026-11-18 (belum disetujui)
+
+Pembacaan FRD v0.9 §9.2 dan TRD v0.9 §9.3 dari ZIP terbaru mendukung **default 90 hari**, tetapi tidak menghapus konflik 180 hari di Requirement_Capstone Bab 2.1. Weekly guide dan kode yang sudah ada bukan dasar persetujuan bisnis baru. Bagian ini tidak mengubah definisi v1.2 maupun approver di header.
+
+| Sumbu keputusan | Pilihan yang perlu dikonfirmasi | Status |
+|---|---|---|
+| Outcome horizon | 90 hari (default FRD/TRD) atau 180 hari (teks literal Capstone); jika berbeda dari horizon skor, jelaskan makna keduanya | PENDING |
+| Negation events | Konfirmasi POS completed/partial refund, completed visits dan renewal **masing-masing**, termasuk refund/correction | PENDING |
+| Eligible cohort | Definisikan registered/active, membership-only/visit-only, identity unresolved; prior purchase 365 hari adalah pilihan development | PENDING |
+| Boundary/observability | Inclusion endpoint, timezone, maturity/adjustment dan coverage yang cukup untuk non-null label | PENDING |
+
+Memilih 90 hari tidak sekaligus menyetujui ketiga event atau cohort 365 hari. Renewal dan lifecycle CHURNED bukan label ML yang sama. Label development `christ-churn90-three-events-dev-1.1` tetap tidak berubah. Keputusan harus direview Christ dan penyetuju berwenang; nama/tanggal tidak diisi oleh Moses. Detail siap-review: [Moses unblock handoff](../../moses_data_ai/MOSES_UNBLOCK_HANDOFF_2026-11-18.md) dan [draft I-04](../../moses_data_ai/PREDICTION_CONTRACT_I04_DRAFT_2026-11-18.md).
+
 ### 1.2 Parameter Prediksi
 
 | Parameter | Nilai |

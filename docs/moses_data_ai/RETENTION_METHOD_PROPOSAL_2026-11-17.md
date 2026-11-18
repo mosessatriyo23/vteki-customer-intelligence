@@ -2,6 +2,8 @@
 
 **Date:** 2026-11-17 · **Status:** independent design proposal only; `training_ready=false`, `experiment_ready=false`, `final_model=false`. No factor has been estimated, no model trained, no result or new contract/version is asserted. Business baseline: [`Requirement_Capstone.md`](../christ_business/reference/Requirement_Capstone.md), Bab 2.2. Synthetic capstone data only.
 
+See the [2026-11-18 unblock handoff](MOSES_UNBLOCK_HANDOFF_2026-11-18.md) for source limits, independent churn horizon/event/cohort decisions and pending James acceptance; no method/factor is approved by that note.
+
 ## Contract to preserve and decisions still needed
 
 Bab 2.2 defines gross-revenue CLV as historical spend over 12 months plus projected revenue over the next 12 months, with the illustrative formula `Historical Spend (12m) + Avg Txn Value × Freq/Mo × 12 × Retention_Factor`. It gives tiers and flags customers with fewer than two transactions as `INSUFFICIENT_HISTORY` (excluded from tier filtering). This proposal does **not** set a retention value, change tier boundaries, turn gross revenue into profit, or infer that a development `clv90` label measures 12-month CLV. The requirement does not define a retention estimator, the gross-revenue event/refund convention, or calendar months versus a rolling-day window. Obtain Christ's written decision on those points, the target population and the meaning of retention before implementing a business CLV calculation. The current development calculator takes a caller-supplied factor; it does not authorize a default.
