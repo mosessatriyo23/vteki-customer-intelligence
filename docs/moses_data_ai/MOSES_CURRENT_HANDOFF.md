@@ -12,9 +12,13 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 
 ## Evaluasi lanjutan — termasuk temuan yang tidak bagus
 
+- [Importance global dan evaluasi subkelompok](GLOBAL_IMPORTANCE_SEGMENT_FINDING_DEV_2026-11-19.md) tersedia untuk churn dua-cutoff dan propensity POS-only; review independen tanpa temuan wajib. AUC churn agregat 0,903 menutupi AUC **0,428** pada recency 91–180 hari; retail recency 31–90 AUC **0,516**. Ini bukan evaluasi lifecycle/tier CLV final dan belum mencakup renewal membership.
+- [Peringatan producer prediksi pertama](PREDICTION_CONTRACT_REVIEW_NOTICE_2026-11-19.md): artefak `churn_contract_dev_20260906` tidak boleh dipakai untuk acceptance/serving. Perbaikan status parsial, tanggal cutoff, adapter dan lineage sedang berjalan.
+
 - [Kalibrasi tiga fold](CALIBRATION_FINDING_DEV_2026-11-19.md): isotonic calibration pada fold terpisah **memperburuk** ECE dan Brier pada test (tidak tergeneralisasi), dan threshold 0,5 menjadi tidak berguna setelah kalibrasi (TP=0). Threshold yang dipilih dari fold kalibrasi (≈0,25) menaikkan recall 0,513→0,884 dengan trade-off precision 0,594→0,465 — keputusan bisnis untuk Christ.
 - [Reason codes](REASON_CODE_LIMITATION_DEV_2026-11-19.md): 50.141/50.640 prediksi punya ≥3 alasan matematis yang lolos cek faithfulness, tetapi mayoritas tiga alasan teratas adalah tiga jendela waktu dari satu konsep (frekuensi pembelian 365/90/60 hari). **Ini belum memenuhi niat "tiga alasan bisnis berbeda".**
-- [Renewal dengan fitur membership](RENEWAL_MEMBERSHIP_EXPLORATORY_DEV_2026-11-19.md): fitur membership baru (`days_to_expiry`, tier, tenure, riwayat renewal) menaikkan AUC renewal60 dari 0,4657 (POS-only) menjadi **0,6492** pada holdout Juni. Status **eksploratif**, bukan konfirmasi independen, karena holdout itu sudah dilihat lewat probe. Sinyalnya kemungkinan berasal dari struktur window eligibility, belum diuji dengan ablasi.
+- [Renewal dengan fitur membership](RENEWAL_MEMBERSHIP_EXPLORATORY_DEV_2026-11-19.md): fitur membership baru menaikkan AUC renewal60 dari 0,4657 (POS-only) menjadi **0,6492** pada holdout Juni. Status eksploratif.
+- [Ablasi fitur renewal](RENEWAL_ABLATION_FINDING_DEV_2026-11-19.md): kenaikan itu **hampir seluruhnya dari satu sinyal** (`days_to_expiry`/`days_since_last_membership_event`, keduanya redundan). Empat fitur lain (tier, tenure, riwayat renewal, upgrade) sendirian **di bawah atau mendekati acak**. Sebagian besar AUC adalah artefak struktur eligibility window, bukan perilaku pelanggan. Jangan mempromosikan model enam-fitur sebagai lebih baik dari model satu-fitur.
 - [Eksperimen propensity](PROPENSITY_EXPERIMENT_FINDING_DEV_2026-11-19.md): retail logistic (AUC 0,680) sedikit di bawah aturan sederhana `recency<=30` (AUC 0,684). **Renewal POS-only AUC 0,4657**, di bawah referensi acak pada holdout ini; semua keputusan pada threshold 0,5 positif, bukan berarti skor konstan. Ketiadaan fitur membership merupakan hipotesis keterbatasan, bukan akar sebab yang terbukti. Eksperimen membership-only terbaru dijelaskan di atas.
 
 ## Belum selesai — dibedakan supaya tim tidak menerima klaim palsu
@@ -24,7 +28,7 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 | Governed churn prediction I-04 | Belum tersedia: skor mentah offline; belum calibration, risk bands/expiry dan reason codes bisnis sah | Christ/James menyepakati kontrak; Moses menambah producer + acceptance fixtures setelah artinya jelas |
 | Historical PIT | Belum terbukti: current mapping/final status retrospektif | James menyediakan known-at/refund correction/identity-as-of dengan coverage; Moses menguji consumer |
 | CLV 12 bulan | Formula ada, faktor empiris final belum ada; mismatch nama Gross vs net/retained belum diputuskan | [Rekonsiliasi](CLV_REVENUE_RECONCILIATION_DEV.md), Christ memilih convention/estimand, James memastikan as-of source |
-| Propensity retail/renewal | Sudah fitted & dievaluasi; renewal POS-only tidak berguna; membership-only eksploratif AUC 0,649 (belum ablasi/konfirmasi); booking source tidak ada | Ablasi fitur membership, cutoff evaluasi baru, dan definisi booking source dengan James |
+| Propensity retail/renewal | Sudah fitted & dievaluasi; renewal POS-only tidak berguna; membership-only eksploratif AUC 0,649 namun **ablasi eksploratif menunjukkan dominasi sinyal expiry**, bukan enam; booking source tidak ada | Cutoff evaluasi baru yang belum diperiksa, definisi booking source dengan James |
 | Reason codes | Matematis faithful tersedia; taxonomy bisnis "distinct" belum disepakati | Christ memutuskan apakah 3 fitur frekuensi = 1 atau 3 alasan |
 | Kalibrasi | Dicoba dan **tidak membantu** pada data ini; threshold dari fold kalibrasi terbukti berguna | Christ memilih trade-off precision/recall; jangan pakai isotonic ini sebagai kalibrasi final |
 | API/worker/persisted NBA/campaign | Tidak disentuh oleh slice Moses ini | Integrasi James/Christ, tidak menggunakan integer customer demo sebagai Golden ID |
@@ -33,4 +37,10 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 
 ## Verifikasi lokal
 
-`.venv\Scripts\python.exe -m pytest -q` pasca-review: **1080 passed, 19 skipped, 3 xfailed**, warning Starlette/httpx. Test targeted pasca-review: **68 passed**. Tiga test regresi tambahan membuktikan empty population sudah ditolak ValueError oleh shared PSI helper, bukan ZeroDivisionError. Docstring CLV diperbaiki agar tidak mengklaim net/retained source yang belum digunakan. PostgreSQL acceptance yang skipped tidak dianggap lulus. Ruff dan Black file baru lulus. Output besar berada di `artifacts/` ignored; jangan commit data/PII/ground_truth/.env. Gunakan output dir baru, jangan timpa artefak. Perubahan belum di-commit dan belum di-push.
+`.venv\Scripts\python.exe -m pytest -q` terakhir: **1180 passed, 19 skipped, 3 xfailed**, satu warning Starlette/httpx. Ruff dan Black bersih pada 141 file `services`/`tests`. Gunakan `.venv\Scripts\python.exe`, bukan `python` default, karena dependensi model hanya terpasang di venv.
+
+PostgreSQL acceptance yang skipped **tidak** dianggap lulus. Tiga test regresi membuktikan empty population ditolak `ValueError` oleh shared PSI helper, bukan `ZeroDivisionError`. Docstring CLV tidak lagi mengklaim sumber net/retained yang belum dipakai.
+
+Output besar berada di `artifacts/` yang di-ignore; jangan commit data/PII/ground_truth/.env, dan jangan menimpa artefak lama — selalu pakai output dir baru. Pekerjaan ini sudah di-commit lokal di branch `feat/moses-fitted-churn-dev` dan **belum di-push**.
+
+Peta kesesuaian terhadap FRD/TRD beserta sisa pekerjaan ada di [status penutupan](FRD_TRD_CLOSURE_STATUS_2026-11-19.md).
