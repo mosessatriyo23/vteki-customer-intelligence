@@ -1,18 +1,26 @@
 # Kontrak Definisi Bisnis: Target & Standar Sistem
 **Dokumen:** `target_definitions.md`
-**Status:** v1.3 — REVISI (menunggu persetujuan Dosen/Mentor + review tim). v1.0 berstatus APPROVED.
+**Status:** v1.4 — REVISI / PENDING APPROVAL. **Belum APPROVED.** (v1.0 pernah berstatus APPROVED; sudah digantikan.)
 **Penyusun:** Christ (Decisioning, Activation & Measurement Engineer)
-**Disetujui oleh:** [PENDING — tidak akan diisi sendiri; menunggu tanda tangan Dosen Pembimbing / Mentor V-TEKI]
-**Versi:** v1.3
-**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07; v1.2 = 2026-11-09; v1.3 = 2026-11-18
+**Disetujui oleh:** [PENDING — diisi hanya setelah Dosen Pembimbing / Mentor V-TEKI benar-benar menyetujui; tidak boleh diisi sendiri]
+**Tanggal persetujuan:** [PENDING]
+**Versi:** v1.4
+**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07; v1.2 = 2026-11-09; v1.3 = 2026-11-18 (draf); v1.4 = 2026-11-19
 **Klasifikasi:** 100% Data Sintetis — Hanya untuk keperluan akademik Capstone Project UKDW
 
 ---
 
 > **TUJUAN DOKUMEN**
-> Dokumen ini menetapkan definisi formal target bisnis yang dibutuhkan sebagai kontrak antar modul.
-> Modul Machine Learning (Moses) **wajib** mengacu pada standar ini saat membuat label training data,
-> dan modul Decisioning (Christ) akan menerapkan aturan-aturan ini dalam NBA Engine & Policy Services.
+> Dokumen ini menetapkan definisi formal target bisnis sebagai kontrak antar modul.
+> Modul ML (Moses) **wajib** mengacu ke sini saat membuat label; modul Decisioning (Christ) menerapkannya di NBA Engine & Policy.
+
+> **ATURAN STATUS KEPUTUSAN (v1.4)**
+> Draf v1.3 memuat tag "DISETUJUI v1.3" yang ditulis oleh penyusun sendiri. Itu **dicabut**: self-declared approval tidak menutup Gate A.
+> Semua keputusan di bawah berstatus salah satu dari:
+> - **USULAN** — keputusan penyusun, menunggu tanda tangan dosen/mentor + review Moses/James;
+> - **PROVISIONAL** — angka/aturan placeholder kebijakan yang belum dikalibrasi dari data;
+> - **PENDING** — butuh data atau konfirmasi pihak lain; tidak diisi dengan angka karangan.
+> Tidak ada bagian dokumen ini yang APPROVED sampai kolom "Disetujui oleh" terisi.
 
 ---
 
@@ -20,431 +28,412 @@
 
 > **Referensi:** `Requirement_Capstone.md` Bab 2 (FRD §6.6, TRD §9.3)
 
-### 1.1 Definisi Churn yang Disepakati (label target ML)
+### 1.1 Definisi Churn (label target ML) — USULAN
 
-Label churn adalah **hasil yang diamati SETELAH `prediction_date`** (bukan keadaan sebelumnya).
+Label churn adalah **outcome yang diamati SETELAH `prediction_date`**, bukan prediksi model.
+Semua batas hari memakai kalender **WIB (UTC+7)**: sebuah event masuk ke hari berdasarkan tanggal WIB-nya.
 
-| Komponen | Nilai / Aturan |
+| Komponen | Aturan |
 |---|---|
-| **Cohort (eligible)** | Pelanggan yang sudah terdaftar dan aktif pada `prediction_date`. **[DISETUJUI v1.3 — Item 1]**: minimal **1 churn negation event** (transaksi POS, kunjungan, atau perpanjangan) dalam 365 hari sebelum `prediction_date`. |
-| **Jendela outcome** | **90 hari ke depan**: (`prediction_date`, `prediction_date` + 90 hari]. Batas kanan tertutup, `prediction_date` sendiri tidak termasuk. |
-| **Churn = 1** | Tidak ada satu pun *churn negation event* di dalam jendela outcome. |
-| **Churn = 0** | Ada minimal satu *churn negation event* di dalam jendela outcome. |
-| **Label tidak lengkap** | Jika data belum mencakup `prediction_date` + 90 hari, label dikosongkan (null), **bukan** diisi 0. |
+| **Cohort aktif (eligible)** | Pelanggan dengan **minimal 1 churn negation event** dalam jendela (`prediction_date` − 365 hari, `prediction_date`] (batas kiri terbuka, batas kanan tertutup). Event yang tepat 365 hari sebelum `prediction_date` **tidak** dihitung. |
+| **Jendela outcome** | (`prediction_date`, `prediction_date` + 90 hari]. `prediction_date` tidak termasuk; hari ke-90 termasuk. |
+| **Churn = 1** | Cohort aktif DAN tidak ada churn negation event di jendela outcome. |
+| **Churn = 0** | Cohort aktif DAN ada ≥ 1 churn negation event di jendela outcome. |
+| **Label tidak lengkap** | Data belum mencakup `prediction_date` + 90 hari → label **null** (bukan 0). |
+| **Bukan cohort** | Tidak punya negation event dalam 365 hari terakhir → tidak diberi label (bukan churn=1). Termasuk `NEVER_TRANSACTED`. |
 
-**Churn negation events** (salah satu cukup untuk membatalkan label churn):
+**Churn negation events** (salah satu cukup):
+1. Minimal 1 transaksi POS berstatus `COMPLETED` atau `PARTIAL_REFUND` (`CANCELLED`/`REFUNDED` tidak dihitung);
+2. Kunjungan fisik terverifikasi (`customer_visits.csv`, status `COMPLETED`);
+3. Perpanjangan keanggotaan (`membership_events.csv`, `event_type = RENEWAL`; dihitung transaksi resmi sesuai Requirement Bab 1).
 
-1. Minimal **1 transaksi POS** berstatus `COMPLETED` atau `PARTIAL_REFUND`;
-2. **Kunjungan fisik terverifikasi** (`customer_visits.csv`, status `COMPLETED`);
-3. **Perpanjangan keanggotaan** (`membership_events.csv`, `event_type = RENEWAL`). Perpanjangan dihitung sebagai transaksi resmi sesuai `Requirement_Capstone.md` Bab 1.
+> **Ketidaksesuaian yang ditemukan (v1.4) — kode ≠ dokumen v1.3:** v1.3 menulis bahwa definisi cohort "sinkron dengan implementasi `labels.py`". **Tidak benar.** `labels.py` menghitung `eligible` dari **transaksi saja** (`history = events`), sedangkan jendela outcome memakai ketiga jenis event. Akibatnya pelanggan yang dalam 365 hari terakhir hanya berkunjung/memperpanjang membership dikeluarkan dari cohort, padahal event yang sama dianggap membatalkan churn di jendela outcome.
+> **Keputusan (USULAN):** cohort memakai **ketiga jenis event** (simetris dengan jendela outcome). Ini **berubah dari implementasi saat ini** → permintaan ke Moses: terbitkan versi label baru (`label_version` baru; `churn90` development lama tidak ditimpa). Sampai Moses mengimplementasikan dan Gate A disetujui, `training_ready=false` tetap berlaku.
 
-> **Resolusi ketidakkonsistenan Requirement (Item 1 — v1.3):**
-> `Requirement_Capstone.md` Bab 2.1 memuat dua angka berbeda: (a) "jendela outcome 180 hari ke depan" dan (b) "prediction horizon = 90 hari".
-> **Resolusi:** Angka **90 hari** yang berlaku sebagai jendela label ML. Alasan: (1) implementasi Moses (`labels.py`, `horizon_days = 90`) sudah menggunakan 90 hari; (2) Panduan Kerja Christ Minggu 1 menetapkan 90 hari; (3) `business_events.md` bagian *Model labels* menggunakan 90 hari; (4) angka 180 hari di Requirement Bab 2.1 kemungkinan typo atau merujuk pada jendela monitoring lifecycle, bukan label ML. **Konfirmasi ke Dosen/Mentor WAJIB sebelum Gate A ditutup** — kolom approver tetap PENDING sampai dosen menandatangani.
->
-> **Contoh positif (churn=1):** Pelanggan A belanja terakhir 2026-08-01; `prediction_date` = 2026-10-01; tidak ada transaksi/kunjungan hingga 2026-12-30 (> 90 hari). Label = 1.
-> **Contoh negatif (churn=0):** Pelanggan B belanja terakhir 2026-08-01; `prediction_date` = 2026-10-01; memperpanjang membership pada 2026-10-15 (14 hari ke depan). Label = 0.
-> **Contoh boundary:** Pelanggan C transaksi terakhir tepat pada `prediction_date` + 90 hari (hari ke-90 batas kanan tertutup). Label = 0 (satu negation event dalam jendela).
+> **Resolusi kontradiksi Requirement (180 vs 90 hari) — USULAN, BELUM DIKONFIRMASI DOSEN:**
+> `Requirement_Capstone.md` Bab 2.1 menulis "180 hari ke depan" (Definisi Churn) dan "Jendela prediksi = 90 hari ke depan" (Prediction Horizon) dalam bab yang sama; panduan Bab 2 juga menyebut 90 hari.
+> **Pembacaan yang diusulkan:** **90 hari** menentukan label ML. Alasan: (1) jendela prediksi dan jendela outcome label harus sama agar skor "risiko churn 90 hari" dapat dievaluasi terhadap label; (2) `labels.py` (`horizon_days=90`), `contracts/business_events.md`, dan Panduan Kerja memakai 90; (3) 180 hari tidak muncul di tempat lain pada Requirement; (4) angka 180 paling mungkin salah ketik/sisa draf lama (v1.0 memakai 180 hari arah mundur dari tanggal prediksi).
+> **Status: PENDING konfirmasi tertulis dosen/mentor.** Draf permintaan konfirmasi ada di `docs/christ_business/approved/GATE_A_REVIEW_REQUEST_2026-11-19.md`. Jika dosen menetapkan 180: `horizon_days` di `labels.py` (saat ini menolak ≠ 90), konstanta `PREDICTION_HORIZON_DAYS`, `valid_until`, dan seluruh contoh di bawah harus direvisi sebagai versi baru; jangan ubah diam-diam.
 
-> **Sumber v1.1:** `Panduan_Kerja_Christ.md` Minggu 1 (window 90 hari pasca `prediction_date` + 3 negation events);
-> `contracts/business_events.md` bagian *Model labels*; implementasi `services/data/models/labels.py` (`horizon_days = 90`).
->
-> **Catatan cohort (v1.3):** Definisi cohort dikonfirmasi ≥ 1 qualifying event dalam 365 hari sebelum `prediction_date` (sinkron dengan implementasi `labels.py`). Pelanggan `NEVER_TRANSACTED` (tenure > 30 hari, 0 transaksi) **dikecualikan dari cohort ML** — tidak masuk training set.
+**Contoh (cutoff `prediction_date` = 2026-10-01 WIB; jendela outcome berakhir 2026-12-30, karena 1 Okt + 90 hari = 30 Des):**
+
+| Kasus | Data | Cohort? | Label |
+|---|---|---|---|
+| Positif (churn=1) | A: transaksi terakhir 2026-08-01; tidak ada transaksi/kunjungan/renewal pada 2026-10-02 s.d. 2026-12-30 **inklusif** | Ya | **1** |
+| Negatif (churn=0) | B: transaksi terakhir 2026-08-01; renewal membership 2026-10-15 | Ya | **0** |
+| Boundary kanan | C: satu-satunya event di jendela jatuh tepat 2026-12-30 (hari ke-90) | Ya | **0** |
+| Boundary kanan +1 | D: event pertama di jendela baru 2026-12-31 (hari ke-91) | Ya | **1** |
+| Boundary cohort | E: event terakhir sebelum cutoff tepat 2025-10-01 (365 hari sebelum) | **Tidak** (di luar jendela) | null |
+| Boundary cohort dalam | F: event terakhir 2025-10-02 (364 hari sebelum) | Ya | tergantung outcome |
+| Event di hari cutoff | G: event 2026-10-01 | masuk jendela cohort (≤ cutoff), **bukan** jendela outcome | — |
+| Label tidak lengkap | H: data baru tersedia sampai 2026-12-15 | Ya | **null** |
+| Hanya kunjungan | I: tak ada transaksi 365 hari, tetapi 1 kunjungan COMPLETED 2026-09-10 | Ya (usulan) — **Tidak** (implementasi lama) | beda antar versi |
+
+Kasus tambahan dari pertanyaan C2 tim (`TEAM_FOLLOW_UP_ACTIONS` C2): pelanggan tanpa riwayat membership tetap masuk cohort bila punya transaksi/kunjungan; pelanggan identitas `PROVISIONAL`/`REVIEW_REQUIRED` **tidak dipakai** untuk label produksi sampai ada policy tertulis (lihat catatan ke James, §8).
 
 ### 1.2 Parameter Prediksi
 
 | Parameter | Nilai |
 |---|---|
-| **Prediction Horizon** | 90 hari ke depan dari `prediction_date` |
+| **Prediction Horizon** | 90 hari ke depan (PENDING konfirmasi dosen, §1.1) |
 | **Masa Berlaku Skor (`valid_until`)** | 30 hari sejak skor diterbitkan |
-| **Risk Band Cut-offs** | LOW (< 0.30) / MEDIUM (0.30-0.60) / HIGH (0.60-0.80) / VERY_HIGH (>= 0.80) |
+| **Risk Band Cut-offs** | LOW (< 0.30) / MEDIUM (0.30–0.60) / HIGH (0.60–0.80) / VERY_HIGH (≥ 0.80) |
 
 ### 1.3 Persyaratan Reason Codes
 
-Setiap prediksi churn **wajib** menghasilkan **minimal 3 Reason Codes** dalam format bahasa bisnis:
-
-| Kode | Deskripsi |
-|---|---|
-| `RECENCY_LONG` | Tidak berkunjung / bertransaksi dalam N hari |
-| `SPEND_DECLINE` | Penurunan nilai transaksi rata-rata dibanding 3 bulan sebelumnya |
-| `FREQUENCY_DROP` | Penurunan frekuensi kunjungan signifikan |
-| `MEMBERSHIP_EXPIRING` | Membership akan kadaluarsa dalam <= 30 hari |
-| `UNRESOLVED_COMPLAINT` | Memiliki keluhan aktif yang belum diselesaikan |
-| `NO_CROSS_CATEGORY` | Tidak pernah melakukan pembelian lintas kategori produk |
+Setiap prediksi churn **wajib** minimal **3 Reason Codes** berbahasa bisnis: `RECENCY_LONG`, `SPEND_DECLINE`, `FREQUENCY_DROP`, `MEMBERSHIP_EXPIRING` (≤ 30 hari), `UNRESOLVED_COMPLAINT`, `NO_CROSS_CATEGORY`.
 
 ---
 
 ## 2. Definisi Customer Lifetime Value (CLV)
 
-> **Referensi:** `Requirement_Capstone.md` Bab 2 (FRD §6.7, TRD §9.4)
+> **Referensi:** `Requirement_Capstone.md` Bab 2 (FRD §6.7, TRD §9.4); implementasi referensi `services/data/models/business_clv.py`.
 
-### 2.1 Formula CLV
+### 2.1 Formula
 
 ```
 CLV = Historical_Spend_12m + (Avg_Txn_Value x Freq_Per_Month x 12 x Retention_Factor)
 ```
 
-**Keterangan variabel:**
+CLV adalah **pendapatan (revenue) yang diterima bisnis, bukan profit/margin** (Requirement Bab 2). "Kotor" di sini berarti sebelum biaya/margin; **bukan** berarti sebelum diskon (lihat 2.2).
 
-| Variabel | Penjelasan |
-|---|---|
-| `Historical_Spend_12m` | Total pendapatan kotor (Gross Revenue) pelanggan dalam **rolling 365 hari** mundur dari `prediction_date` |
-| `Avg_Txn_Value` | Rata-rata nilai transaksi dalam rolling 365 hari terakhir |
-| `Freq_Per_Month` | Rata-rata frekuensi transaksi per bulan dalam rolling 365 hari terakhir |
-| `Retention_Factor` | Estimasi probabilitas pelanggan tetap aktif (0.0-1.0). Requirement_Capstone hanya menyebut nama variabel ini **tanpa nilai**; nilai default 0.7 pada v1.0 adalah **asumsi tanpa sumber** dan dicabut. Nilai/cara estimasi ditetapkan oleh model ML (Moses) dan wajib didokumentasikan. |
+### 2.2 Pemetaan field sumber → formula — USULAN
 
-> **[KEPUTUSAN v1.3 — Item 3] Sumber gross revenue:**
-> - **Jendela waktu:** rolling **365 hari** mundur dari `prediction_date` (bukan tahun kalender).
-> - **Status transaksi yang dihitung:** `COMPLETED` dan `PARTIAL_REFUND`. Transaksi berstatus `CANCELLED`, `PENDING`, `FAILED` **tidak dihitung**.
-> - **Perlakuan refund/diskon:** Gunakan `gross_amount` (sebelum diskon di laporan internal). Jika tersedia `net_amount` (setelah diskon POS), gunakan `net_amount`. Refund penuh (`CANCELLED`/`REFUNDED`) dikecualikan dari perhitungan. Refund parsial (`PARTIAL_REFUND`) dihitung dengan nilai bersih yang diterima bisnis.
-> - **Alasan rolling vs kalender:** Menghindari bias musiman akhir tahun dan konsisten dengan `prediction_date` yang dapat jatuh kapan saja.
->
-> **[KEPUTUSAN v1.3 — Item 3] Retention Factor:**
-> - Nilai `0.7` TIDAK BOLEH dipakai — dicabut karena tanpa sumber bisnis.
-> - `1 - churn_score` TIDAK BOLEH dipakai — data leakage (memakai target prediksi sebagai input).
-> - **Metode yang disetujui:** Estimasi empiris berbasis segmen lifecycle historis. Moses menyediakan rata-rata probabilitas retensi 90-hari per segmen lifecycle dari data historis (`services/data/`). Christ menyetujui nilai bisnis dan contoh numerik setelah Moses menyerahkan angka tersebut.
-> - **Status:** PENDING Moses menyerahkan tabel retensi per segmen. `SERVICE_REMINDER` dan CLV scoring tidak dapat di-finalize sampai nilai ini tersedia.
->
-> **Contoh numerik (placeholder sampai Moses menyerahkan angka):**
-> Pelanggan ACTIVE, rolling 365 hari: 8 transaksi, total gross Rp 1.200.000 → `Historical_Spend_12m = 1.200.000`, `Avg_Txn_Value = 150.000`, `Freq_Per_Month = 0.67`. `Retention_Factor = [Moses akan isi]`. CLV = 1.200.000 + (150.000 × 0.67 × 12 × RF).
+| Variabel | Definisi | Field sumber |
+|---|---|---|
+| Jendela | **Rolling 365 hari**: (`prediction_date` − 365 hari, `prediction_date`], tanggal WIB. Bukan tahun kalender (menghindari bias musiman; `prediction_date` bisa kapan saja). | `transactions.transaction_datetime` |
+| Transaksi dihitung | Status `COMPLETED` dan `PARTIAL_REFUND` saja. `CANCELLED`, `REFUNDED`, `PENDING`, `FAILED` tidak dihitung (nilainya 0 / bukan transaksi). | `transactions.status` |
+| Nilai per transaksi | `actual_revenue = net_amount − refund_amount`, dengan `net_amount = gross_amount − discount_amount` (diskon/voucher **sudah mengurangi** nilai; yang dihitung adalah uang yang benar-benar diterima). | `gross_amount`, `discount_amount`, `net_amount`, `refund_amount`, `actual_revenue` |
+| `Historical_Spend_12m` | Σ `actual_revenue` transaksi dalam jendela | — |
+| `Avg_Txn_Value` | `Historical_Spend_12m` ÷ jumlah transaksi dalam jendela | — |
+| `Freq_Per_Month` | jumlah transaksi dalam jendela ÷ 12 (bukan ÷ jumlah bulan aktif) | — |
+| Perpanjangan membership | Dihitung sebagai transaksi **hanya jika** nilainya tercatat di `transactions` (jangan dobel hitung dari `membership_events`). Jika tidak tercatat di `transactions`, tidak masuk CLV (PENDING konfirmasi James/Moses di data sumber). | `membership_events` (event saja, tanpa nilai) |
+| Refund | Refund yang **sudah diketahui pada `prediction_date`** (`known_at ≤ prediction_date`) mengurangi nilai. Refund/koreksi yang baru tersedia setelahnya **tidak** mengubah CLV historis yang sudah diterbitkan (mengikuti kontrak James: late event tidak dihitung ulang di cutoff lama). | event `REFUND_RECORDED`/`CORRECTION` (James) |
+| Pajak | Tidak ada field pajak di data sintetis; diasumsikan **tidak ada** (nilai = harga yang dibayar). PENDING bila data nyata punya pajak: pajak harus dikeluarkan. | — |
+| Mata uang & pembulatan | IDR, bilangan bulat; CLV dihitung tanpa pembulatan perantara lalu dibulatkan ke rupiah terdekat di akhir. Nilai negatif tidak diperbolehkan (`business_clv.py` menolak). | — |
+| Riwayat minimum | < 2 transaksi dalam jendela **atau** CLV < Rp 200.000 → `INSUFFICIENT_HISTORY` (pelanggan 1 transaksi diberi tier ini, tetap punya angka CLV). | — |
 
-> **ATURAN PENTING:**
-> CLV **WAJIB** dinyatakan sebagai **PENDAPATAN KOTOR (Gross Revenue)**, bukan profit atau margin.
+> Catatan perbaikan v1.4: teks v1.3 ("gunakan `gross_amount`; jika ada `net_amount` gunakan `net_amount`") ambigu dan bertentangan dengan dirinya sendiri; diganti definisi `actual_revenue` di atas yang sama dengan basis `clv90` development dan `labels.py`.
 
-### 2.2 Tiering CLV
+### 2.3 Retention Factor — USULAN (angka PENDING dari Moses)
 
-| Tier | Ambang Nilai CLV (IDR) | Label Sistem | Implikasi Aksi |
+- Nilai `0.7` (v1.0) **dicabut**, tidak boleh dipakai kembali.
+- `1 − churn_score` / `1 − churn90` **dilarang** (memakai target prediksi sebagai input = leakage; `business_clv.py` mewajibkan retensi diberikan eksplisit).
+- **Makna bisnis yang disetujui (USULAN):** `Retention_Factor` = proporsi **empiris** pelanggan di segmen lifecycle yang sama pada cutoff historis yang memiliki ≥ 1 churn negation event dalam **12 bulan ke depan**, yaitu (cutoff, cutoff + 365 hari].
+- **Perubahan dari v1.3:** v1.3 menyebut "retensi 90-hari per segmen". Itu **tidak cocok**: proyeksi CLV adalah 12 bulan, sehingga retensi 90 hari yang dipakai pada proyeksi 12 bulan melebihkan nilai. Jika data sintetis tidak cukup panjang untuk jendela 365 hari, Moses harus melapor — **bukan** mengompound 90 hari secara diam-diam.
+- Aturan estimasi (semantik; teknik oleh Moses): hanya cutoff dengan jendela outcome lengkap; per segmen lifecycle; sel dengan < 30 pelanggan → laporkan "tidak cukup data" dan CLV = null (bukan default); tidak memakai skor churn pelanggan itu sendiri; tabel diberi versi dan tanggal.
+- **Status: PENDING Moses menyerahkan tabel.** CLV scoring tidak final sebelum tabel ada.
+
+**Contoh numerik.** Pelanggan ACTIVE, 8 transaksi dalam 365 hari, Σ `actual_revenue` = Rp 1.200.000:
+`Historical_Spend_12m` = 1.200.000; `Avg_Txn_Value` = 150.000; `Freq_Per_Month` = 8/12 = 0,6667. Karena `Avg × Freq × 12` = 1.200.000, bagian proyeksi = `Historical_Spend_12m × RF`, yaitu **CLV = 1.200.000 × (1 + RF)**.
+- *Ilustrasi aritmetika saja (RF = 0,50 BUKAN nilai kebijakan):* CLV = 1.800.000 → `PLATINUM`.
+- *Negatif:* 1 transaksi Rp 600.000 → `INSUFFICIENT_HISTORY` (txn < 2) walau CLV ≥ 200.000.
+- *Boundary tier:* CLV tepat 1.000.000 → `PLATINUM`; 999.999 → `GOLD`; tepat 500.000 → `GOLD`; 499.999 → `SILVER`; tepat 200.000 → `SILVER`; 199.999 → `INSUFFICIENT_HISTORY`.
+- *Boundary refund:* transaksi Rp 300.000 dengan refund parsial Rp 100.000 yang diketahui sebelum cutoff → kontribusi 200.000. Refund yang baru tercatat setelah cutoff → kontribusi tetap 300.000 pada skor cutoff itu.
+- *Boundary jendela:* transaksi tepat 365 hari sebelum cutoff **tidak** dihitung; 364 hari dihitung.
+
+### 2.4 Tiering CLV
+
+| Tier | Ambang (IDR) | Label | Implikasi |
 |---|---|---|---|
-| **Sangat Tinggi** | CLV >= Rp 1.000.000 | `PLATINUM` | Eligible untuk `RELATIONSHIP_MANAGER_CONTACT`, insentif tertinggi |
-| **Tinggi** | Rp 500.000 <= CLV < Rp 1.000.000 | `GOLD` | Diprioritaskan untuk program retensi proaktif & insentif menengah |
-| **Sedang** | Rp 200.000 <= CLV < Rp 500.000 | `SILVER` | Penawaran standar tanpa eskalasi insentif khusus |
-| **Rendah / Riwayat Tidak Cukup** | CLV < Rp 200.000 atau total transaksi < 2x | `INSUFFICIENT_HISTORY` | Dikecualikan dari filter tier CLV; label khusus diterapkan |
+| Sangat Tinggi | CLV ≥ 1.000.000 | `PLATINUM` | Eligible `RELATIONSHIP_MANAGER_CONTACT`, insentif tertinggi |
+| Tinggi | 500.000 ≤ CLV < 1.000.000 | `GOLD` | Retensi proaktif, insentif menengah |
+| Sedang | 200.000 ≤ CLV < 500.000 | `SILVER` | Penawaran standar |
+| Rendah / Riwayat Tidak Cukup | CLV < 200.000 atau transaksi < 2 | `INSUFFICIENT_HISTORY` | Dikecualikan dari filter tier |
+
+> Requirement Bab 2.2 menulis nama tier ganda ("Platinum / Gold", "Gold / Silver", "Silver / Bronze"); pemetaan satu-label di atas adalah pembacaan penyusun dan ikut diminta konfirmasi dosen.
+
+### 2.5 Peran nilai CLV
+
+CLV adalah **skor input decisioning dan dasar tiering**, bukan target prediksi ML. `clv90` development tetap ada sebagai target teknis terpisah (tidak menggantikan CLV bisnis).
 
 ---
 
 ## 3. Matriks Siklus Pelanggan (Customer Lifecycle)
 
-> **Referensi:** `Requirement_Capstone.md` Bab 1 (FRD §6.5, TRD §9.1)
+> **Referensi:** `Requirement_Capstone.md` Bab 1; implementasi `services/data/segmentation/snapshot.py::lifecycle()` (milik Moses, status PROPOSED).
 
-> **CATATAN KRITIS:**
-> Lifecycle bersifat **rule-based declarative** (bukan hasil prediksi ML).
-> Perpanjangan membership **dihitung sebagai transaksi resmi** — pelanggan yang memperpanjang
-> membership **TIDAK BOLEH** dikategorikan Churned.
+Lifecycle bersifat **rule-based declarative**, bukan hasil ML. Perpanjangan membership dihitung sebagai transaksi resmi — pelanggan yang memperpanjang **tidak boleh** menjadi Churned.
 
-| Tahap Lifecycle | Label Sistem | Syarat RFM & Membership | Logika Prioritas |
-|---|---|---|---|
-| **New (Pelanggan Baru)** | `NEW` | Akun/transaksi pertama <= 30 hari lalu DAN total transaksi <= 2x | Dikecualikan dari audiens berbasis RFM kuintil |
-| **Active (Pelanggan Aktif)** | `ACTIVE` | Transaksi >= 3x dalam 60 hari terakhir ATAU membership aktif digunakan dalam 60 hari terakhir | Target kampanye cross-sell & upsell |
-| **Loyal (Pelanggan Setia)** | `LOYAL` | Transaksi >= 5x DAN akumulasi belanja >= Rp 500.000 dalam 90 hari terakhir DAN tenure >= 60 hari | Target loyalty reward & upsell premium |
-| **At Risk (Mulai Pasif)** | `AT_RISK` | Tidak ada transaksi/kunjungan selama 91-180 hari DAN sisa perpanjangan membership <= 30 hari | Target prioritas intervensi retensi |
-| **Dormant / Lapsed (Pasif)** | `DORMANT` | Tidak ada transaksi/kunjungan dalam 181-365 hari DAN perpanjangan membership terlewat 1-60 hari | Memerlukan penawaran reaktivasi khusus |
-| **Churned (Berpaling)** | `CHURNED` | Tidak ada transaksi/kunjungan > 365 hari DAN membership kadaluarsa > 180 hari | Status dicatat di histori lifecycle |
-| **Reactivated / Reclaimed** | `REACTIVATED` | Sebelumnya `DORMANT`/`CHURNED`, kembali transaksi >= 2x ATAU memperpanjang membership | Hasil kampanye win-back yang berhasil |
-| **Occasional (Sesekali)** — *[DISETUJUI v1.3 — Item 2]* | `OCCASIONAL` | Tidak ada pada Requirement. Implementasi: recency <= 90 hari dan transaksi 60 hari terakhir < 3 | **DISETUJUI** sebagai segmen pelengkap untuk kelengkapan coverage. Perlakuan: lihat §3.1 |
-| **Never Transacted (Belum Pernah Bertransaksi)** — *[DISETUJUI v1.3 — Item 2]* | `NEVER_TRANSACTED` | Tidak ada pada Requirement. Implementasi: tenure > 30 hari dan belum pernah ada transaksi | **DISETUJUI** untuk consent/edukasi saja. Perlakuan: lihat §3.1 |
+| Tahap | Label | Syarat Requirement (Bab 1) |
+|---|---|---|
+| New | `NEW` | Akun/transaksi pertama ≤ 30 hari lalu DAN total transaksi ≤ 2 |
+| Active | `ACTIVE` | Transaksi ≥ 3x dalam 60 hari ATAU membership aktif digunakan dalam 60 hari |
+| Loyal | `LOYAL` | Transaksi ≥ 5x DAN belanja ≥ Rp 500.000 dalam 90 hari DAN tenure ≥ 60 hari |
+| At Risk | `AT_RISK` | Tanpa transaksi/kunjungan 91–180 hari DAN sisa membership ≤ 30 hari |
+| Dormant | `DORMANT` | Tanpa transaksi/kunjungan 181–365 hari DAN membership terlewat 1–60 hari |
+| Churned | `CHURNED` | Tanpa transaksi/kunjungan > 365 hari DAN membership kedaluwarsa > 180 hari |
+| Reactivated | `REACTIVATED` | Sebelumnya Dormant/Churned, kembali belanja ≥ 2x ATAU memperpanjang membership |
+| Occasional | `OCCASIONAL` | Tidak ada di Requirement. Usulan implementasi: recency ≤ 90 hari dan transaksi 60 hari < 3 |
+| Never Transacted | `NEVER_TRANSACTED` | Tidak ada di Requirement. Usulan implementasi: tenure > 30 hari dan belum pernah ada aktivitas |
 
-> **[KEPUTUSAN v1.3 — Item 2] Kelengkapan aturan lifecycle:**
->
-> **A. OCCASIONAL — DISETUJUI:**
-> Segmen ini diperlukan agar setiap pelanggan masuk tepat satu segmen (total coverage = 100%). Tanpa `OCCASIONAL`, pelanggan dengan recency ≤ 90 hari tetapi frekuensi < 3 tidak masuk ACTIVE/LOYAL/NEW — jatuh ke celah. Perlakuan ditetapkan di §3.1.
->
-> **B. NEVER_TRANSACTED — DISETUJUI dengan batasan:**
-> Diperlukan agar pelanggan terdaftar tanpa transaksi (periode orientasi > 30 hari) tidak ghost. HANYA eligible untuk `EDUCATION` (konten orientasi produk, bukan penawaran komersial). Tidak masuk cohort ML (dikecualikan dari training set churn).
->
-> **C. AT_RISK/DORMANT gap — KEPUTUSAN:**
-> Pelanggan yang memenuhi syarat recency (91-180 hari) tetapi TIDAK memenuhi syarat membership (sisa > 30 hari, bukan ≤ 30 hari) → **dikategorikan `AT_RISK` berdasarkan recency saja**. Recency adalah kriteria primer; membership adalah reinforcement sekunder. Ini sesuai implementasi `snapshot.py` dan lebih mudah dipahami operasional.
->
-> **Contoh gap resolution:**
-> - Pelanggan X: recency 120 hari, membership sisa 45 hari → AT_RISK (recency primer; membership tidak memblokir)
-> - Pelanggan Y: recency 120 hari, membership sisa 10 hari → AT_RISK (memenuhi kedua kriteria)
->
-> **D. WIN_BACK window contradiction — KEPUTUSAN:**
-> Bab 1 Requirement: `DORMANT` = 181-365 hari. Bab 4 katalog `WIN_BACK_OFFER`: "91-180 hari pasif".
-> **Definisi Bab 1 yang berlaku** — Bab 1 adalah definisi lifecycle primer; Bab 4 adalah teks aksi yang mengacu pada definisi itu. Teks "91-180 hari" di Bab 4 adalah error copywriting. `catalogue.py` trigger text sudah diperbaiki di v1.3 agar menyebut "181-365 hari".
->
-> **Urutan prioritas klasifikasi** (implementasi `snapshot.py`): `REACTIVATED` > `LOYAL` > `NEW` > `NEVER_TRANSACTED` > `CHURNED` > `DORMANT` > `AT_RISK` > `ACTIVE` > `OCCASIONAL`. Urutan ini berlaku sampai ada keputusan berbeda dari Moses+Christ.
+### 3.1 Matriks Alokasi Perlakuan per Segmen — USULAN
 
-### 3.1 Matriks Alokasi Perlakuan per Segmen
-
-Sumber: kolom *Syarat Pemicu* pada Requirement_Capstone Bab 4. Sel **"Belum ditetapkan"** berarti Requirement tidak memberi aturan; default sistem adalah `NO_ACTION` sampai diputuskan.
+Sumber: Requirement Bab 4 + keputusan v1.4. Tabel ini **dibaca langsung oleh `tests/decision/test_lifecycle_matrix.py`** dan harus sama dengan perilaku `evaluator.py`. Tidak ada lagi sel "Belum ditetapkan".
 
 | Segmen | Aksi proaktif yang diizinkan | Catatan |
 |---|---|---|
-| `NEW` | `EDUCATION` (syarat: Churn Risk LOW) | |
-| `ACTIVE` | `CROSS_SELL`, `UPSELL`, `SERVICE_REMINDER` (jadwal habis pakai <= 7 hari) | Lihat catatan SERVICE_REMINDER di bawah |
-| `LOYAL` | `CROSS_SELL`, `UPSELL`, `LOYALTY_REWARD` (syarat CLV Tinggi/Sangat Tinggi), `SERVICE_REMINDER` (jadwal habis pakai <= 7 hari) | Lihat catatan SERVICE_REMINDER di bawah |
-| `AT_RISK` | `RETENTION_OUTREACH` (Churn Risk HIGH atau VERY_HIGH, CLV GOLD/PLATINUM) | **[DISETUJUI v1.3 — Item 5]** Churn Risk HIGH+VERY_HIGH keduanya eligible (kode diperbaiki). |
-| `DORMANT` | `WIN_BACK_OFFER` (CLV historis GOLD/PLATINUM, belum ada tawaran aktif), `RETENTION_OUTREACH` (At_Risk/Lapsed) | Jendela DORMANT = 181-365 hari (Bab 1 berlaku). |
-| `CHURNED` | **`NO_ACTION`** (tidak ada kontak komersial) | **[DISETUJUI v1.3 — Item 2]** CHURNED tidak di-contact. Jika bisnis ingin winback setelah > 365 hari, harus melalui jalur khusus dengan persetujuan tambahan. |
-| `REACTIVATED` | Perlakuan seperti `ACTIVE` | **[DISETUJUI v1.3 — Item 2]** Setelah REACTIVATED, pelanggan diperlakukan sama dengan ACTIVE karena sudah kembali bertransaksi. |
-| `OCCASIONAL` | `EDUCATION` (konten awareness, bukan penawaran komersial) | **[DISETUJUI v1.3 — Item 2]** OCCASIONAL eligible untuk konten edukasi/awareness agar menjadi ACTIVE. Tidak eligible untuk CROSS_SELL/UPSELL/insentif besar. |
-| `NEVER_TRANSACTED` | `EDUCATION` (orientasi produk, `is_commercial=False`) | **[DISETUJUI v1.3 — Item 2]** Hanya edukasi/onboarding. Tidak ada penawaran komersial sampai ada transaksi pertama. |
-| *Lintas segmen* | `COMPLAINT_RESOLUTION` (keluhan `OPEN_SEVERE` aktif, prioritas #1); `RENEWAL_REMINDER` (sisa membership <= 15 hari); `RELATIONSHIP_MANAGER_CONTACT` (CLV >= Rp 1 juta dengan Churn Risk HIGH/VERY_HIGH, lifecycle AT_RISK/DORMANT) | Tidak dibatasi segmen lifecycle |
-
-> **[KEPUTUSAN v1.3 — Item 5] Rekonsiliasi katalog aksi:**
->
-> **A. RELATIONSHIP_MANAGER_CONTACT lifecycle restriction:**
-> Kode (`evaluator.py`): lifecycle `AT_RISK` atau `DORMANT`. Requirement Bab 4 menyebut "keluhan aktif" juga memicu.
-> **Keputusan:** lifecycle restriction AT_RISK/DORMANT di kode **DISETUJUI**. Pelanggan dengan keluhan aktif → `COMPLAINT_RESOLUTION` (bukan RM_CONTACT). Kedua aksi tidak overlap. Trigger text `catalogue.py` sudah diperbaiki v1.3 untuk mencerminkan ini.
->
-> **B. RETENTION_OUTREACH risk band:**
-> Kode lama: hanya `HIGH`. Target_definitions v1.2: `HIGH+VERY_HIGH`. Requirement Bab 4: `HIGH`.
-> **Keputusan:** `HIGH DAN VERY_HIGH` keduanya eligible — **v1.3 memenangkan interpretasi ini** karena pelanggan `VERY_HIGH` jelas lebih urgent untuk diretain. Kode `evaluator.py` sudah diperbaiki.
->
-> **C. CROSS_SELL/UPSELL propensity threshold:**
-> `catalogue.py` trigger_conditions mencantumkan "Propensity >= 0.6" tetapi `evaluator.py` TIDAK mengecek threshold ini.
-> **Keputusan:** Threshold **TIDAK** di-enforce di `evaluator.py` pada v1.3 — EV calculator sudah menggunakan propensity sebagai input formula EV. Aksi dengan propensity rendah (<0.6) akan menghasilkan EV rendah dan akan kalah dari NO_ACTION secara alami. Enforcement di kode (hard threshold) **ditunda** sampai ada data empiris yang membuktikan threshold 0.6 optimal. Trigger text di catalogue.py tetap informational.
-
-> **Catatan `SERVICE_REMINDER` (keputusan tim, v1.2 — dikonfirmasi v1.3):** eligible hanya untuk lifecycle `ACTIVE`/`LOYAL` dengan `days_until_replenishment <= 7`
-> (`last_purchase_date + replenishment_cycle_days - hari ini`; nilai negatif = sudah lewat), tanpa keluhan aktif, dengan consent Push/Email.
-> `CHURNED`/`DORMANT` dikecualikan. Jika data jadwal tidak tersedia (`None`) aksi **tidak eligible** (fail-closed).
-> **Perbedaan dengan Requirement_Capstone Bab 4:** Bab 4 tidak membatasi lifecycle untuk aksi ini. Pembatasan ACTIVE/LOYAL dan ambang 7 hari berasal dari keputusan tim.
-> **Ketergantungan data:** field `replenishment_cycle_days` / `last_purchase_date` **belum ada** di data sintetis; Moses perlu menyediakannya.
-> Sampai data tersedia, `SERVICE_REMINDER` tidak akan terpilih.
+| `NEW` | `EDUCATION` (Churn Risk LOW) | |
+| `ACTIVE` | `CROSS_SELL`, `UPSELL`, `SERVICE_REMINDER` | CROSS_SELL/UPSELL wajib propensity ≥ 0.6 (§3.2.C); SERVICE_REMINDER lihat §6 |
+| `LOYAL` | `CROSS_SELL`, `UPSELL`, `LOYALTY_REWARD`, `SERVICE_REMINDER` | LOYALTY_REWARD: CLV GOLD/PLATINUM |
+| `AT_RISK` | `RETENTION_OUTREACH` | Churn Risk HIGH atau VERY_HIGH, CLV GOLD/PLATINUM |
+| `DORMANT` | `WIN_BACK_OFFER`, `RETENTION_OUTREACH` | WIN_BACK: CLV GOLD/PLATINUM, belum ada tawaran aktif |
+| `CHURNED` | `NO_ACTION` | Tidak ada kontak komersial. Jalur win-back > 365 hari butuh keputusan terpisah |
+| `REACTIVATED` | `NO_ACTION` | Masa tenang (cool-off): segmen ini hanya bertahan ≤ 30 hari (implementasi), sama dengan jendela atribusi win-back; mengirim aksi lain di jendela itu mencemari pengukuran dan menumpuk insentif. Setelah itu pelanggan diklasifikasi ulang ke ACTIVE/OCCASIONAL dan mengikuti aturan segmen itu |
+| `OCCASIONAL` | `EDUCATION` (Churn Risk LOW) | Konten awareness tanpa insentif agar naik ke ACTIVE. Tidak eligible CROSS_SELL/UPSELL/insentif. PROVISIONAL: hentikan bila holdout tidak menunjukkan lift |
+| `NEVER_TRANSACTED` | `NO_ACTION` | Lihat §3.2.B |
+| *Lintas segmen* | `COMPLAINT_RESOLUTION` (keluhan OPEN_SEVERE aktif, prioritas #1); `RENEWAL_REMINDER` (sisa membership ≤ 15 hari); `RELATIONSHIP_MANAGER_CONTACT` (CLV PLATINUM + Churn Risk HIGH/VERY_HIGH) | **Tanpa** pembatasan lifecycle (§3.2.A) |
 
 ---
 
-## 4. Aturan Kebijakan (Fatigue & Suppression Policy)
+### 3.2 Keputusan kelengkapan lifecycle & rekonsiliasi katalog — USULAN
+
+**A. `RELATIONSHIP_MANAGER_CONTACT` — pembatasan lifecycle.**
+v1.3 dan teks katalog menulis "lifecycle AT_RISK/DORMANT" dan menyebut itu perilaku kode. **Salah**: `evaluator.py` tidak pernah memeriksa lifecycle untuk aksi ini. Requirement Bab 4 juga tidak membatasi lifecycle.
+**Keputusan:** perilaku kode **disetujui** (tanpa batas lifecycle: PLATINUM + Churn Risk HIGH/VERY_HIGH). Alasan: pelanggan PLATINUM dengan risiko tinggi layak ditangani apa pun segmennya (mis. ACTIVE yang frekuensinya anjlok). Teks katalog diperbaiki. Pemicu "keluhan aktif" dari Requirement diwujudkan lewat `COMPLAINT_RESOLUTION` (kanal `task_rm`/`branch`, jalur suppression) — penyimpangan dari Bab 4 yang dicatat dan diminta konfirmasi dosen.
+*Contoh:* positif — PLATINUM, VERY_HIGH, lifecycle ACTIVE → eligible. Negatif — GOLD, VERY_HIGH → tidak eligible (bukan PLATINUM). Boundary — PLATINUM, MEDIUM (skor 0,59) → tidak eligible.
+
+**B. `OCCASIONAL` dan `NEVER_TRANSACTED`.**
+- `OCCASIONAL`: **disetujui** sebagai segmen pelengkap (tanpa ini pelanggan recency ≤ 90 hari dengan < 3 transaksi/60 hari tidak punya segmen). Perlakuan: `EDUCATION` (kode `evaluator.py` diubah: `NEW` atau `OCCASIONAL`, Churn Risk LOW).
+- `NEVER_TRANSACTED`: **disetujui sebagai label**, perlakuan NBA = **`NO_ACTION`**. v1.3 menetapkan `EDUCATION`, tetapi pelanggan ini dikeluarkan dari cohort ML sehingga tidak pernah punya skor churn; engine memakai skor default konservatif (propensity 0) dan akan selalu memilih `NO_ACTION`. Menulis EDUCATION di dokumen tidak dapat dipenuhi engine. Onboarding pelanggan tanpa transaksi, jika diinginkan, adalah alur non-skor terpisah yang butuh persetujuan sendiri (PENDING, di luar Gate A).
+- *Contoh:* OCCASIONAL, recency 45 hari, 2 transaksi/60 hari, LOW → `EDUCATION` eligible. OCCASIONAL, MEDIUM → tidak. Boundary: 3 transaksi/60 hari → `ACTIVE`, bukan OCCASIONAL.
+
+**C. Ambang propensity CROSS_SELL / UPSELL.**
+v1.3: tidak ditegakkan karena "EV rendah akan kalah dari NO_ACTION secara alami". **Alasan itu salah**: CLV Rp 600.000, propensity 0,2 → pendapatan 180.000, EV = 0,2 × 180.000 × 1,2 − 25.000 = **Rp 18.200** (> Rp 1.000), jadi tetap terkirim.
+**Keputusan:** Requirement menulis "Propensity Tinggi"; ditegakkan **propensity ≥ 0,6** (CROSS_SELL: `propensity_purchase`; UPSELL: `propensity_renew`). **PROVISIONAL** — 0,6 placeholder kebijakan, kalibrasi setelah ada data eksperimen. `RENEWAL_REMINDER` dan `LOYALTY_REWARD` **tanpa** ambang keras (non-insentif / diurutkan EV); ini penyimpangan dari teks "Propensity Renew tinggi" Bab 4 untuk RENEWAL_REMINDER, diminta konfirmasi dosen.
+*Contoh:* 0,60 → eligible; 0,59 → tidak; 0,90 → eligible (boundary tertutup di 0,6).
+Syarat CROSS_SELL "belum memiliki produk di kategori itu" **tidak ditegakkan** (tidak ada data kepemilikan kategori); katalog menandainya `[TIDAK DITEGAKKAN]` dan data dirutekan ke Moses.
+
+**D. `RETENTION_OUTREACH` — band risiko.**
+Requirement Bab 4: HIGH. **Keputusan:** HIGH **dan** VERY_HIGH (VERY_HIGH ≥ 0,80 jelas risiko lebih besar; mengecualikannya tidak masuk akal). Ini penyimpangan sengaja dari Bab 4; kode dan teks katalog sudah sama (teks katalog sebelumnya masih "HIGH" — diperbaiki). *Contoh:* HIGH → eligible; VERY_HIGH → eligible; MEDIUM (0,59) → tidak.
+
+**E. Celah AT_RISK / DORMANT (syarat membership).**
+Requirement menggabungkan recency dan membership; pelanggan yang memenuhi recency tetapi bukan syarat membership jatuh ke celah. **Keputusan:** **recency adalah kriteria utama**; syarat membership tidak memblokir (sesuai `snapshot.py`). *Contoh:* recency 120 hari, sisa membership 45 hari → `AT_RISK`; recency 120, non-member → `AT_RISK`; recency 181 hari → `DORMANT` (boundary: 180 → AT_RISK, 181 → DORMANT; 90 → bukan AT_RISK, 91 → AT_RISK).
+
+**F. Kontradiksi jendela WIN_BACK.**
+Bab 1: Dormant = 181–365; Bab 4: WIN_BACK "91–180 hari". **Keputusan:** Bab 1 berlaku (definisi lifecycle primer); "91–180" di Bab 4 dianggap salah ketik. `WIN_BACK_OFFER` hanya untuk `DORMANT`. Ini keputusan penyusun yang **diminta konfirmasi dosen** (bukan sekadar "error copywriting"). *Contoh:* recency 200 hari, GOLD, tanpa tawaran aktif → eligible; recency 150 hari (AT_RISK) → tidak (gunakan RETENTION_OUTREACH); boundary 181 hari → eligible.
+
+**G. Temuan konformansi implementasi `snapshot.py` → diserahkan ke Moses (bukan wewenang Christ mengubah kode):**
+1. **Celah `UNCLASSIFIED`:** recency > 365 hari tanpa data kedaluwarsa membership > 180 hari (termasuk **non-member**) menjadi `UNCLASSIFIED`, bukan CHURNED. **Keputusan bisnis:** `CHURNED` = recency > 365 hari DAN (tidak punya riwayat membership ATAU membership kedaluwarsa > 180 hari). Pelanggan recency > 365 yang membership-nya masih berlaku atau kedaluwarsa ≤ 180 hari = `DORMANT` (rentang DORMANT diperluas melewati 365 hari). Tidak ada segmen `UNCLASSIFIED` yang boleh keluar dari snapshot.
+2. **NEW:** kode hanya memeriksa tenure ≤ 30 hari; Requirement juga mensyaratkan total transaksi ≤ 2. Tenure 20 hari dengan 4 transaksi → `ACTIVE` (bukan NEW).
+3. **REACTIVATED:** kode = 1 pembelian dalam 30 hari terakhir setelah jeda > 180 hari antar-pembelian (hanya transaksi); Requirement = ≥ 2 belanja ATAU renewal setelah Dormant/Churned. **Keputusan:** definisi Requirement berlaku; selisih ini harus diselaraskan Moses atau diterima tertulis oleh dosen.
+4. **Prioritas klasifikasi (USULAN):** `REACTIVATED` > `LOYAL` > `NEW` > `NEVER_TRANSACTED` > `CHURNED` > `DORMANT` > `AT_RISK` > `ACTIVE` > `OCCASIONAL`.
+
+---
+
+## 4. Aturan Kebijakan (Fatigue & Suppression)
 
 > **Referensi:** `Requirement_Capstone.md` Bab 3 (FRD §9.6, TRD §10.1)
 
-### 4.1 Aturan Fatigue (Contact Frequency Cap)
+### 4.1 Fatigue (Contact Frequency Cap)
 
 | Parameter | Nilai |
 |---|---|
-| **Batas Maksimum Kontak Pemasaran** | **2 kontak** per **14 hari** per pelanggan |
-| **Jangka Waktu Rolling Window** | 14 hari terakhir dihitung mundur dari tanggal eksekusi |
-| **Status Jika Terlampaui** | `FREQ_CAP_SUPPRESSED` |
-| **Konsekuensi** | Seluruh aksi komersial diblokir; sistem wajib memilih `NO_ACTION` |
-| **Pengecualian** | `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` tidak dihitung dalam batas frekuensi |
+| Batas | **2 kontak pemasaran / 14 hari / pelanggan** (rolling, mundur dari tanggal eksekusi) |
+| Terlampaui | `FREQ_CAP_SUPPRESSED`; seluruh aksi komersial diblokir → `NO_ACTION` |
+| Tidak dihitung | `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` (non-komersial) |
 
-### 4.2 Aturan Suppression Mutlak
+### 4.2 Suppression mutlak
 
-Pelanggan dengan salah satu kondisi berikut akan **diblokir penuh** dari seluruh penawaran komersial:
-
-| Kondisi Suppression | Status Sistem | Konsekuensi |
+| Kondisi | Status | Konsekuensi |
 |---|---|---|
-| Pelanggan memiliki status **Opt-Out** pada kanal komunikasi manapun | `OPT_OUT_SUPPRESSED` (reason code: `OPT_OUT_SUPPRESSED`) | `NO_ACTION` wajib dipilih; tidak ada pengecualian |
-| Pelanggan memiliki tiket keluhan aktif berstatus **`OPEN_SEVERE_COMPLAINT`** | `COMPLAINT_SUPPRESSED` (reason code: `EXCL_OPEN_SEVERE_COMPLAINT`) | Semua pesan promosi komersial diblokir; hanya `COMPLAINT_RESOLUTION` yang boleh dikirim |
+| **Global opt-out** (`is_global_opt_out = true`, atau status global `OPT_OUT`) | `OPT_OUT_SUPPRESSED` | `NO_ACTION` untuk semua aksi, tanpa pengecualian |
+| Tiket keluhan **`OPEN_SEVERE_COMPLAINT`** aktif | `COMPLAINT_SUPPRESSED` (`EXCL_OPEN_SEVERE_COMPLAINT`) | Semua promosi diblokir; hanya `COMPLAINT_RESOLUTION` |
 
-> **Penempatan pada 5 masukan keputusan (Requirement Bab 3):** keluhan aktif termasuk masukan 2 (*Business Eligibility*); opt-out = masukan 3 (*Consent*);
-> frequency cap = masukan 4 (*Contact Policy*).
+Penempatan pada 5 masukan: keluhan = masukan 2; consent = masukan 3; frequency cap = masukan 4.
 
-> **[KEPUTUSAN v1.3 — Item 6] Cakupan opt-out — DIPUTUSKAN:**
->
-> Sebelum v1.3, teks §4.2 dan implementasi tidak konsisten. Keputusan resmi:
->
-> **Model yang berlaku: Campuran (channel-level + global hard stop)**
-> - `is_global_opt_out = True` pada K-10 → **blokir SEMUA kanal** (hard suppression global). Alasan: pelanggan yang memilih global opt-out menyatakan tidak ingin dihubungi melalui cara apapun.
-> - Opt-out pada **kanal spesifik** (mis. `email_opt_out=True`) → hanya **memblokir kanal itu**. Aksi yang masih punya kanal lain yang diizinkan tetap dapat dikirim.
-> - Implementasi `suppression.py` (cek `global_opt_out`) + `evaluator.py::check_channel_availability()` (cek kanal spesifik) sudah mencerminkan model ini dengan benar — TIDAK ada perubahan kode diperlukan.
->
-> **Contoh positif (global opt-out):** Pelanggan A, `is_global_opt_out=True`. Engine → `OPT_OUT_SUPPRESSED` → NO_ACTION pada semua aksi.
-> **Contoh negatif (channel-level):** Pelanggan B, `email_opt_out=True`, `push_opt_in=True`. RETENTION_OUTREACH (kanal: email, push) → email diblokir, push tersedia → aksi TETAP eligible via push.
-> **Contoh boundary:** Pelanggan C, `email_opt_out=True`, `push_opt_out=True`, `is_global_opt_out=False`. RETENTION_OUTREACH hanya punya email+push, kedua-duanya opt-out → `check_channel_availability` mengembalikan alasan blokir → aksi tidak eligible.
+### 4.3 Cakupan opt-out — KEPUTUSAN (USULAN)
 
-> **ATURAN TEGAS:**
-> Suppression bersifat **MUTLAK**. Tidak ada skor AI, nilai CLV, atau urgensi bisnis yang dapat
-> meng-override kondisi suppression. Jika suppression aktif, sistem **wajib** memilih `NO_ACTION`
-> (kecuali `COMPLAINT_RESOLUTION` untuk kasus `OPEN_SEVERE_COMPLAINT`).
+**Model: channel-level + global hard stop.** Menggantikan teks lama "opt-out pada kanal manapun memblokir penuh" (yang bertentangan dengan keputusan v1.3 dan implementasi K-10).
+
+1. **Global opt-out** → blokir **semua** kontak komersial dan non-komersial ber-kanal pelanggan (`OPT_OUT_SUPPRESSED`). Termasuk saat ada keluhan aktif: kontak ke pelanggan tetap diblokir; penanganan keluhan berjalan sebagai tugas internal oleh tim, bukan pesan ke pelanggan (disimpan di luar NBA).
+2. **Opt-out satu kanal** → hanya kanal itu diblokir, untuk **semua** aksi. Aksi tetap eligible bila masih ada ≥ 1 kanalnya yang diizinkan.
+3. Status `UNKNOWN`, `EXPIRED`, `BLOCKED`, `valid_until` terlewat, atau kanal tak tercantum = **BLOCKED** (K-10 `from_k10`).
+4. Setelah merge identitas: **status paling restriktif menang** (K-10 `most_restrictive_wins`).
+5. **Kanal internal** (`task_rm`, `branch`) tidak diatur consent pemasaran, **kecuali** `RELATIONSHIP_MANAGER_CONTACT`: karena itu kontak komersial ke pelanggan, membuat task internal saja tidak cukup — wajib consent kanal `phone`. (Celah ini ditemukan di v1.4: sebelumnya aksi ini lolos untuk pelanggan yang opt-out dari semua kanal non-global.) Kode: `CONSENT_GATED_CHANNELS` di `evaluator.py`, dipakai `engine.py`.
+
+*Contoh:* **Positif:** A `is_global_opt_out=true` → semua aksi `NO_ACTION`. **Negatif:** B `email_opt_out`, `push_opt_in` → `RETENTION_OUTREACH` (email,push) tetap eligible lewat push. **Boundary:** C email & push opt-out, global false → `RETENTION_OUTREACH` tidak eligible; `RELATIONSHIP_MANAGER_CONTACT` eligible **hanya jika** `phone_opt_in = true`; D status email `EXPIRED` → diperlakukan blocked.
+
+Pertanyaan C5 tim yang masih terbuka dan **tidak** diputuskan di sini: sumber/timestamp/expiry/audit perubahan consent dan definisi persis "kontak yang dihitung" (apakah kontak tersimulasi dihitung?) — perlu producer data consent (James) dan dosen.
+
+> **ATURAN TEGAS:** suppression mutlak; tidak ada skor AI, CLV, atau urgensi yang meng-override. Tidak ada outbound nyata selama fase akademik.
 
 ---
 
-## Lampiran: Ringkasan Konstanta Sistem
+## Lampiran: Konstanta Sistem
 
 ```python
-# Konstanta yang harus digunakan konsisten di seluruh modul
-PREDICTION_HORIZON_DAYS = 90         # Jendela prediksi & jendela outcome label churn (ke depan)
-SCORE_VALIDITY_DAYS = 30             # Masa berlaku skor valid_until
-FREQ_CAP_MAX_CONTACTS = 2            # Maksimum kontak per rolling window
-FREQ_CAP_WINDOW_DAYS = 14            # Rolling window dalam hari
-MIN_REASON_CODES = 3                 # Minimum Reason Codes per prediksi
+PREDICTION_HORIZON_DAYS = 90         # PENDING konfirmasi dosen (§1.1)
+SCORE_VALIDITY_DAYS = 30
+FREQ_CAP_MAX_CONTACTS = 2
+FREQ_CAP_WINDOW_DAYS = 14
+MIN_REASON_CODES = 3
+COHORT_LOOKBACK_DAYS = 365           # (cutoff-365d, cutoff]
+CLV_WINDOW_DAYS = 365
 
-# CLV Tier Thresholds (IDR)
 CLV_TIER_PLATINUM = 1_000_000
 CLV_TIER_GOLD = 500_000
 CLV_TIER_SILVER = 200_000
 
-# Lifecycle Boundaries (days)
 LIFECYCLE_NEW_WINDOW = 30
 LIFECYCLE_ACTIVE_WINDOW = 60
 LIFECYCLE_AT_RISK_START = 91
 LIFECYCLE_AT_RISK_END = 180
 LIFECYCLE_DORMANT_START = 181
-LIFECYCLE_DORMANT_END = 365
+LIFECYCLE_DORMANT_END = 365          # DORMANT melewati 365 hari bila syarat CHURNED membership tidak terpenuhi (§3.2.G.1)
 LIFECYCLE_CHURNED_THRESHOLD = 365
-
-# Keputusan tim (v1.2) -- bukan dari Requirement_Capstone
-MIN_EV_THRESHOLD_IDR = 1000.0         # EV < nilai ini -> NO_ACTION (alasan BELOW_MIN_EV)
-MAX_DISCOUNT_PERCENT = 30.0           # pagu diskon global pada pesan
-SERVICE_REMINDER_WINDOW_DAYS = 7      # SERVICE_REMINDER eligible jika habis pakai <= 7 hari
-CONTROL_HOLDOUT_RATIO = 0.10          # Holdout Control Group default (K-08)
 MEMBERSHIP_CHURN_THRESHOLD = 180
+
+# Keputusan tim / penyusun -- bukan dari Requirement_Capstone
+MIN_EV_THRESHOLD_IDR = 1000.0
+MAX_DISCOUNT_PERCENT = 30.0
+SERVICE_REMINDER_WINDOW_DAYS = 7
+SERVICE_REMINDER_OVERDUE_FLOOR_DAYS = -14   # PROVISIONAL
+PROPENSITY_HIGH_THRESHOLD = 0.6             # PROVISIONAL
+CONTROL_HOLDOUT_RATIO = 0.10
 ```
 
 ---
 
-## §5. Parameter Expected Value (EV) — Keputusan Tim v1.2 Dikonfirmasi v1.3
+## 5. Parameter Expected Value (EV)
 
-> **[KEPUTUSAN v1.3 — Item 4]** Parameter-parameter di bawah adalah **kebijakan bisnis** Christ, bukan angka dari Requirement_Capstone. Semua dikonfirmasi berlaku.
+> Formula (Requirement Bab 5): `EV = Propensity × Expected_Revenue_Contribution × Action_Weight − Incentive_Cost`. EV < `min_ev_threshold` → `NO_ACTION`.
 
-### 5.1 Threshold & Caps
+### 5.1 Threshold & pagu — keputusan tim v1.2, DIRATIFIKASI sebagai USULAN
 
-| Parameter | Nilai | Alasan Bisnis |
-|---|---|---|
-| `min_ev_threshold` | **Rp 1.000** | EV di bawah ini tidak bermakna secara bisnis; skor expired/degraded menghasilkan EV ≈ 0, tidak boleh mengalahkan NO_ACTION |
-| Pagu diskon global | **30%** | Ceiling agar margin gross tidak tergerus di luar batas dapat diterima |
-| Pagu per band: NONE | **0%** | Aksi edukasi/reminder tidak memberi diskon |
-| Pagu per band: LOW | **≤ 10%** | Cross-sell/edukasi ringan |
-| Pagu per band: MEDIUM | **≤ 20%** | RM Contact, Upsell |
-| Pagu per band: HIGH | **≤ 30%** | Retensi prioritas tinggi |
-
-### 5.2 Action Weights (dari `catalogue.py` — DIRATIFIKASI v1.3)
-
-| Aksi | Weight | Alasan |
-|---|---|---|
-| `COMPLAINT_RESOLUTION` | 2.0 | Prioritas tertinggi — layanan, bukan komersial |
-| `RELATIONSHIP_MANAGER_CONTACT` | 1.8 | Pelanggan PLATINUM berisiko tinggi → nilai tertinggi kedua |
-| `RETENTION_OUTREACH` | 1.6 | Retensi pelanggan berharga (GOLD/PLATINUM AT_RISK/DORMANT) |
-| `WIN_BACK_OFFER` | 1.5 | Reaktivasi pelanggan lapsed berharga |
-| `RENEWAL_REMINDER` | 1.5 | Mencegah churn membership berbatas waktu |
-| `UPSELL` | 1.4 | Upgrade memberikan nilai jangka panjang |
-| `LOYALTY_REWARD` | 1.3 | Apresiasi pelanggan setia → retention |
-| `CROSS_SELL` | 1.2 | Pertumbuhan revenue dari pelanggan aktif |
-| `SERVICE_REMINDER` | 1.0 | Non-komersial, pengingat rutin |
-| `EDUCATION` | 0.8 | Jangka panjang, efek lambat |
-| `NO_ACTION` | 0.0 | Fallback; tidak ada EV |
-
-### 5.3 Revenue Factor & Incentive Cost (dari `ev_calculator.py` — DIRATIFIKASI v1.3)
-
-**Faktor kontribusi pendapatan terhadap CLV (proxy):**
-
-| Aksi | Factor | Interpretasi Bisnis |
-|---|---|---|
-| `RELATIONSHIP_MANAGER_CONTACT` | 0.60 | Mencegah kehilangan 60% CLV pelanggan PLATINUM |
-| `RETENTION_OUTREACH` | 0.50 | Mencegah kehilangan 50% CLV |
-| `WIN_BACK_OFFER` | 0.40 | Reaktivasi mengambil kembali 40% CLV historis |
-| `UPSELL` | 0.35 | Upgrade meningkatkan CLV 35% |
-| `CROSS_SELL` | 0.30 | Kategori baru menambah 30% CLV |
-| `RENEWAL_REMINDER` | 0.25 | Perpanjangan menjaga 25% CLV tahunan |
-| `LOYALTY_REWARD` | 0.20 | Apresiasi meningkatkan retensi; efek pendapatan 20% CLV |
-| `EDUCATION` | 0.15 | Edukasi jangka panjang, efek pendapatan 15% CLV |
-| `SERVICE_REMINDER` | 0.10 | Reminder ringan, 10% CLV |
-| `COMPLAINT_RESOLUTION` | 0.00 | Non-revenue; protektif |
-
-> **Catatan:** Semua angka ini adalah **proxy engineering**. Nilai exat harus dikalibrasi dari data eksperimen setelah deployment. Jika hasil eksperimen mengindikasikan faktor berbeda secara signifikan (> 20% deviasi), tim harus merevisi angka ini.
-
-**Biaya insentif per band (dari `ev_calculator.py`):**
-
-| Band | % CLV | Cap IDR | Contoh (CLV Rp 600.000) |
-|---|---|---|---|
-| LOW | 5% | Rp 25.000 | 5% × 600.000 = 30.000 → cap → **Rp 25.000** |
-| MEDIUM | 10% | Rp 75.000 | 10% × 600.000 = 60.000 (di bawah cap) → **Rp 60.000** |
-| HIGH | 15% | Rp 150.000 | 15% × 600.000 = 90.000 (di bawah cap) → **Rp 90.000** |
-| DISCOUNT_LIMITED | 8% | Rp 50.000 | 8% × 600.000 = 48.000 (di bawah cap) → **Rp 48.000** |
-| LOYALTY_POINTS | 5% | Rp 30.000 | 5% × 600.000 = 30.000 → cap → **Rp 30.000** |
-
----
-
-## §6. Data Contract SERVICE_REMINDER — Item 7 v1.3
-
-> **[KEPUTUSAN v1.3 — Item 7]**
-
-### 6.1 Definisi Bisnis
-
-`SERVICE_REMINDER` adalah pengingat jadwal kunjungan atau pembelian ulang produk habis pakai. Aksi ini:
-- **Non-komersial**: tidak ada diskon/insentif; hanya informasi jadwal
-- **Fail-closed**: jika data tidak tersedia → aksi tidak eligible (tidak pernah dipilih)
-
-### 6.2 Field yang Diperlukan
-
-| Field | Makna Bisnis | Sumber |
-|---|---|---|
-| `last_purchase_date` | Tanggal terakhir pelanggan membeli produk dalam kategori yang memiliki replenishment cycle (mis. skincare, haircare, vitamin). **Bukan** tanggal kunjungan atau perpanjangan membership. | `transactions.csv` — filter berdasarkan `product_category` yang masuk daftar kategori replenishment |
-| `replenishment_cycle_days` | Rata-rata durasi pemakaian produk dalam kategori tersebut (dalam hari). Ini adalah rata-rata per kategori, bukan per SKU. Contoh: skincare = 60 hari, haircare = 45 hari. | Moses menyediakan lookup tabel per kategori dari data historis |
-| `days_until_replenishment` | `last_purchase_date + replenishment_cycle_days - today`. Nilai ≤ 0 artinya sudah lewat jatuh tempo. | Dihitung di `EligibilityProfile` |
-
-### 6.3 Kategori yang Eligible untuk Replenishment Cycle
-
-Kategori produk/layanan yang umumnya memiliki siklus pemakaian teratur:
-- Produk perawatan kulit (skincare)
-- Produk perawatan rambut (haircare)
-- Suplemen/vitamin
-- Layanan salon rutin (potong rambut, perawatan)
-
-> **Routing ke Moses:** Moses perlu menyediakan:
-> 1. Daftar `product_category` values yang masuk bucket "replenishment-eligible"
-> 2. `replenishment_cycle_days` per kategori (lookup tabel, bukan nilai per pelanggan)
-> 3. Cara mengisi `last_purchase_date` jika pelanggan pernah beli beberapa kategori (ambil yang paling baru? atau per kategori?)
->
-> **Sampai Moses menyerahkan data ini, `days_until_replenishment` selalu `None` → `SERVICE_REMINDER` selalu `NOT_ELIGIBLE`.**
-
----
-
-## §7. Kontrak Outcome/KPI — Gate A
-
-> **[KEPUTUSAN v1.3]** Bagian ini memenuhi persyaratan Gate A untuk kontrak outcome/KPI.
-
-### 7.1 Event Konversi per Aksi
-
-| Aksi | Event Konversi yang Valid | Jendela Atribusi |
-|---|---|---|
-| `RETENTION_OUTREACH` | Transaksi POS COMPLETED atau perpanjangan membership setelah aksi | 30 hari |
-| `RELATIONSHIP_MANAGER_CONTACT` | Transaksi POS COMPLETED atau perpanjangan membership setelah aksi | 30 hari |
-| `WIN_BACK_OFFER` | Transaksi POS COMPLETED pertama setelah DORMANT | 30 hari |
-| `CROSS_SELL` | Transaksi pertama pada kategori yang sebelumnya tidak dimiliki | 30 hari |
-| `UPSELL` | Perpanjangan membership pada tier yang lebih tinggi | 30 hari |
-| `RENEWAL_REMINDER` | `membership_events.event_type = RENEWAL` | 15 hari (sejak reminder dikirim) |
-| `LOYALTY_REWARD` | Transaksi tambahan setelah reward diterima | 30 hari |
-| `EDUCATION` | Kunjungan atau transaksi pertama setelah edukasi | 60 hari (efek edukasi lebih lambat) |
-| `SERVICE_REMINDER` | Transaksi pada kategori yang diingatkan | 14 hari |
-| `COMPLAINT_RESOLUTION` | Penutupan tiket keluhan (`ticket_status = CLOSED`) | 7 hari |
-
-### 7.2 Treatment & Control Group
-
-| Parameter | Nilai | Alasan |
-|---|---|---|
-| Holdout ratio (control) | **10%** (K-08: `control_holdout_ratio = 0.10`) | Minimum statistis untuk deteksi efek kecil |
-| Seed randomisasi | Wajib diisi (`random_seed` di K-08) | Reproducibility |
-| Eligibility treatment | Semua pelanggan yang lolos 5 gerbang | |
-| Eligibility control | Pelanggan yang lolos 5 gerbang tetapi diassign ke holdout (10%) | |
-| Kontaminasi | Pelanggan control yang terkena aksi lewat kanal lain (mis. datang ke toko sendiri) → tetap dihitung sebagai control; tidak ada cara teknis mencegah ini di lingkungan sintetis | |
-
-### 7.3 Atribusi Revenue
-
-| Parameter | Aturan |
+| Parameter | Nilai |
 |---|---|
-| **Jendela atribusi default** | 30 hari sejak aksi dikirim |
-| **Jendela refund/penyesuaian** | 14 hari sejak tanggal transaksi (K-09: `adjustment_window_days = 14`) |
-| **Revenue yang dihitung** | Gross Revenue dari transaksi COMPLETED; refund dikurangi setelah adjustment window |
-| **Revenue terobservasi** | Total gross transaksi treatment group dalam jendela atribusi |
-| **Revenue inkremental** | Revenue terobservasi treatment MINUS revenue terobservasi control (normalized per pelanggan) |
-| **Uplift sintetis** | **BUKAN** bukti kausalitas bisnis; hanya dipakai untuk validasi teknis pipeline |
+| `min_ev_threshold` | **Rp 1.000** (`EV < 1.000` → `NO_ACTION`, alasan `BELOW_MIN_EV`; EV tepat 1.000,00 lolos; 999,99 tidak) |
+| Pagu diskon global | **30%** pada teks pesan |
+| Pagu per band | NONE 0% · LOW ≤ 10% · MEDIUM ≤ 20% · HIGH ≤ 30% (melebihi → `MESSAGE_BLOCKED_BY_GUARDRAIL` + `INCENTIVE_ESCALATED` ke Business Approver); band DISCOUNT_LIMITED & LOYALTY_POINTS memakai pagu global |
 
-### 7.4 Threshold Keberhasilan
+### 5.2 Bobot, faktor pendapatan, biaya insentif — status **PROVISIONAL**
 
-> **Catatan:** Threshold ini bersifat sementara dan belum dikalibrasi dari data eksperimen nyata. Harus direvisi setelah deployment pertama.
+Angka berikut adalah **placeholder rekayasa yang mewakili kebijakan**, bukan angka Requirement dan **bukan hasil kalibrasi**. Disetujui hanya sebagai urutan prioritas relatif pada data sintetis; **tidak boleh dipakai sebagai klaim nilai bisnis**.
 
-| Aksi | Threshold Konversi Minimum | Threshold Revenue Inkremental |
+| Aksi | Weight | Faktor pendapatan | Band insentif |
+|---|---|---|---|
+| `COMPLAINT_RESOLUTION` | 2.0 | 0.00 | Tanpa |
+| `RELATIONSHIP_MANAGER_CONTACT` | 1.8 | 0.60 | MEDIUM |
+| `RETENTION_OUTREACH` | 1.6 | 0.50 | DISCOUNT_LIMITED |
+| `WIN_BACK_OFFER` | 1.5 | 0.40 | MEDIUM |
+| `RENEWAL_REMINDER` | 1.5 | 0.25 | Tanpa |
+| `UPSELL` | 1.4 | 0.35 | MEDIUM |
+| `LOYALTY_REWARD` | 1.3 | 0.20 | LOYALTY_POINTS |
+| `CROSS_SELL` | 1.2 | 0.30 | LOW |
+| `SERVICE_REMINDER` | 1.0 | 0.10 | Tanpa |
+| `EDUCATION` | 0.8 | 0.15 | Tanpa |
+
+| Band | % CLV | Cap IDR |
 |---|---|---|
-| `RETENTION_OUTREACH` | ≥ 15% pelanggan treatment bertransaksi dalam 30 hari | Positive (treatment > control) |
-| `WIN_BACK_OFFER` | ≥ 10% pelanggan DORMANT kembali aktif | Positive |
-| `CROSS_SELL` | ≥ 8% transaksi pada kategori baru | Positive |
-| `RENEWAL_REMINDER` | ≥ 20% perpanjangan dalam 15 hari | Positive |
-| Lainnya | Belum dikalibrasi — tandai sebagai PENDING empiris | — |
+| LOW | 5% | 25.000 |
+| MEDIUM | 10% | 75.000 |
+| HIGH | 15% | 150.000 (tidak dipakai aksi katalog mana pun saat ini) |
+| DISCOUNT_LIMITED | 8% | 50.000 |
+| LOYALTY_POINTS | 5% | 30.000 |
 
-**Contoh positif:** 100 pelanggan AT_RISK treatment RETENTION_OUTREACH; 18 bertransaksi dalam 30 hari = 18% conversion → MELEWATI threshold (≥ 15%).
-**Contoh negatif:** 100 pelanggan treatment; hanya 5 bertransaksi = 5% → GAGAL threshold.
-**Contoh boundary:** 15 pelanggan bertransaksi = tepat 15% → TEPAT di batas, dianggap LULUS.
+**Contoh kerja (CLV Rp 600.000):** `RETENTION_OUTREACH`, churn 0,7 → pendapatan 0,5 × 600.000 = 300.000; EV = 0,7 × 300.000 × 1,6 − 48.000 = **Rp 288.000** (biaya 8% = 48.000 < cap). `CROSS_SELL`, propensity 0,8 → 180.000; EV = 0,8 × 180.000 × 1,2 − 25.000 (5% = 30.000 → cap) = **Rp 147.800**. Boundary: EV 999,99 → `NO_ACTION`; 1.000,00 → eligible.
 
-### 7.5 Hal yang Belum Dapat Diputuskan (PENDING Data/Eksperimen)
+**Keterbatasan yang diakui (harus ditinjau dosen):**
+1. Untuk aksi retensi, "propensity" = skor churn (peluang pendapatan **terancam**), bukan peluang tawaran dikonversi. Aksi ber-risiko tinggi otomatis mendapat EV tinggi tanpa bukti bahwa aksi itu efektif; hanya eksperimen holdout yang dapat menunjukkan efeknya.
+2. Faktor pendapatan dikalikan CLV **total**, yang memuat belanja historis 12 bulan — bukan hanya proyeksi ke depan — sehingga melebihkan kontribusi.
+3. Revisi wajib bila hasil eksperimen menyimpang > 20% dari faktor ini.
 
+---
+
+## 6. Data Contract SERVICE_REMINDER
+
+### 6.1 Kebijakan — dikonfirmasi sebagai kebijakan tim (USULAN)
+
+Pengingat jadwal kunjungan/pembelian ulang produk habis pakai; non-komersial, tanpa insentif; **fail-closed** (data tidak ada → tidak eligible). Eligible hanya jika: lifecycle `ACTIVE`/`LOYAL`; `days_until_replenishment` dalam rentang **−14 s.d. +7 hari**; tanpa keluhan aktif; consent push/email. Pembatasan ACTIVE/LOYAL dan ambang 7 hari adalah keputusan tim, **bukan** Requirement Bab 4 (yang tidak membatasi lifecycle).
+**Tambahan v1.4:** batas bawah −14 hari (PROVISIONAL). Sebelumnya semua nilai negatif eligible tanpa batas — pelanggan yang terlambat 200 hari tetap dapat "pengingat". *Contoh:* +7 → eligible; +8 → tidak; −14 → eligible; −15 → tidak; `None` → tidak.
+
+### 6.2 Makna bisnis field
+
+| Field | Makna | Sumber |
+|---|---|---|
+| `last_purchase_date` | Tanggal pembelian **terakhir pada kategori replenishment-eligible** yang sama dengan siklus yang dihitung (per kategori). Bukan tanggal kunjungan/perpanjangan membership/pembelian kategori lain | `transactions` terfilter kategori |
+| `replenishment_cycle_days` | Rata-rata hari pemakaian satu pembelian pada kategori itu (**per kategori**, bukan per SKU/pelanggan) | tabel lookup |
+| `days_until_replenishment` | `last_purchase_date + replenishment_cycle_days − tanggal eksekusi (WIB)`; ≤ 0 = sudah jatuh tempo | `EligibilityProfile` |
+
+**Kategori:** kandidat awal (perawatan kulit, rambut, suplemen/vitamin, layanan salon rutin). **Daftar final dan nilai siklus belum ada** — penyusun tidak mengarang angka. Jika pelanggan punya beberapa kategori: pakai kategori dengan `days_until_replenishment` terkecil yang masih ≥ −14 (USULAN).
+
+### 6.3 Routing data ke Moses (belum ada di data sintetis)
+1. daftar `product_category` replenishment-eligible; 2. tabel `replenishment_cycle_days` per kategori beserta cara menurunkannya dari data; 3. penurunan `last_purchase_date` per kategori. **Sampai ada, `days_until_replenishment = None` dan `SERVICE_REMINDER` selalu tidak eligible.**
+
+---
+
+## 7. Kontrak Outcome / KPI (Gate A)
+
+Implementasi referensi: `services/decision/measurement/uplift.py`, `attribution/touchpoint.py`, `campaign/holdout.py`, kontrak K-08/K-09. **Uplift pada data sintetis hanya memvalidasi pipeline teknis; bukan bukti kausal bisnis dan bukan dasar persetujuan.**
+
+### 7.1 Event konversi per aksi (tipe K-09)
+
+| Aksi | Event konversi | Tipe K-09 |
+|---|---|---|
+| `RETENTION_OUTREACH`, `RM_CONTACT`, `LOYALTY_REWARD`, `EDUCATION`, `SERVICE_REMINDER` | Transaksi POS `COMPLETED`/`PARTIAL_REFUND` setelah paparan | `PURCHASE` |
+| `WIN_BACK_OFFER` | Transaksi pertama setelah paparan pada pelanggan DORMANT | `PURCHASE` |
+| `RENEWAL_REMINDER` | `membership_events.event_type = RENEWAL` | `MEMBERSHIP_RENEWAL` |
+| `UPSELL` | Perpanjangan/upgrade ke tier lebih tinggi | `UPGRADE` — butuh data tier membership (PENDING) |
+| `CROSS_SELL` | Transaksi pertama di kategori yang belum dimiliki | `PURCHASE` — butuh data kategori (PENDING) |
+| `COMPLAINT_RESOLUTION` | Tiket ditutup — **hasil layanan, bukan konversi pendapatan** | tidak diukur dengan uplift |
+| (`BOOKING`) | **Tidak diaktifkan**: tidak ada event booking nyata | — |
+
+**Jendela konversi:** default implementasi `conversion_window_days = 30` dan `adjustment_window_days = 14` (K-09). Angka per aksi di v1.3 (15/60/14/7 hari) tidak punya sumber bisnis → **ditarik**. Pilihan bisnis per aksi **PENDING** (pemilik: Christ + dosen); usulan logis: RENEWAL_REMINDER ≤ 15 hari agar tidak melewati kedaluwarsa.
+
+### 7.2 Treatment, control, kontaminasi
+- Eligible = lolos 5 gerbang + fatigue **sebelum** pengacakan. Holdout (default 10%, `random_seed` wajib, hash SHA-256) diambil dari yang eligible; control = eligible tetapi ditahan.
+- **Analisis intent-to-treat:** treatment = semua yang ditugaskan, termasuk yang pesannya tidak terkirim; control tetap control walau tersentuh.
+- **Kontaminasi** (control tersentuh kampanye lain; treatment dalam dua kampanye; datang ke toko tanpa pesan): dicatat sebagai flag (konflik atribusi), tetap dianalisis ITT, plus analisis sensitivitas tanpa yang terkontaminasi. Tidak dapat dicegah di lingkungan sintetis.
+- **Pengecualian holdout (kebijakan):** `COMPLAINT_RESOLUTION` dan aksi protektif **tidak boleh** ditahan sebagai control. Belum ditegakkan di `holdout.py` → butir kerja Christ berikutnya.
+- Jendela observasi sama untuk treatment & control: [mulai paparan, akhir paparan + jendela konversi].
+
+### 7.3 Atribusi, refund, finalisasi, observed vs incremental
+| Hal | Aturan |
+|---|---|
+| Atribusi | Last-touch dalam jendela konversi; konflik multi-kampanye diberi flag. **Atribusi ≠ inkrementalitas** (`is_incremental` individu selalu null) |
+| Basis pendapatan | Default `REFUND_ADJUSTED` = `net_amount` dikurangi refund yang terjadi ≤ 14 hari sejak transaksi; refund > 14 hari diabaikan (K-09 `NET_FINALIZED`). **Berbeda dari basis CLV** (§2.2, refund yang diketahui pada cutoff) — disengaja, dan keduanya harus disebut eksplisit di setiap laporan |
+| Finalisasi | Hasil `PROVISIONAL` sampai tanggal akhir paparan + jendela konversi + 14 hari; baru `FINAL` setelahnya |
+| Observed | Hasil apa adanya pada treatment (termasuk pembelian yang akan terjadi tanpa kampanye) — tidak boleh disajikan sebagai dampak |
+| Incremental | `Rev_T − Rev_C × (N_T / N_C)` dan `Conv_T − Conv_C × (N_T / N_C)` — satu-satunya angka yang boleh diklaim sebagai efek kampanye |
+
+(v1.3 menulis "refund dikurangi setelah adjustment window" — ambigu dan salah terhadap kode; diganti di atas.)
+
+### 7.4 Kriteria keberhasilan
+Persentase ambang v1.3 (15%/10%/8%/20%) tidak punya sumber bisnis → **ditarik, bukan dipakai ulang**. Aturan keputusan (USULAN), semuanya wajib:
+1. hasil berstatus `FINAL`;
+2. lift konversi absolut > 0 dan **batas bawah CI 95% > 0** (`uplift.py`);
+3. pendapatan inkremental per pelanggan treatment **>** biaya insentif per pelanggan treatment;
+4. jumlah minimum pelanggan/konversi per kelompok dan *minimum meaningful lift*: **PENDING pilihan bisnis** (Christ + dosen; tidak diisi angka karangan).
+
+| Contoh (angka ilustrasi) | Treatment | Control | Lift | CI 95% | Hasil |
+|---|---|---|---|---|---|
+| Positif | 180/900 (20%) | 10/100 (10%) | +10 pp | (+3,6; +16,4) pp | **Lolos** kriteria 2 |
+| Negatif | 90/900 (10%) | 11/100 (11%) | −1 pp | (−7,4; +5,4) pp | Gagal |
+| Boundary (titik estimasi positif tapi CI memuat 0) | 126/900 (14%) | 9/100 (9%) | +5 pp | (−1,0; +11,0) pp | **Tidak meyakinkan = bukan sukses** |
+| Boundary eksak | batas bawah CI tepat 0,0 | | | | **Gagal** (harus > 0 secara ketat) |
+
+Karena holdout 10% kecil, CI lebar; angka di atas menunjukkan alasan ambang minimum harus ditentukan.
+
+### 7.5 Yang belum dapat diputuskan
 | Item | Status | Routing |
 |---|---|---|
-| Retensi factor per segmen | PENDING | Moses menyerahkan angka historis per lifecycle segment |
-| Threshold konversi per aksi (empiris) | PENDING | Setelah deployment pertama dan data terkumpul |
-| Replenishment cycle per kategori | PENDING | Moses menyerahkan lookup table |
-| Incremental revenue per aksi (baseline) | PENDING | Eksperimen pertama setelah go-live |
+| Tabel Retention Factor 12 bulan per segmen | PENDING | Moses |
+| Jendela konversi per aksi, minimum lift, ukuran sampel minimum | PENDING pilihan bisnis | Christ + dosen |
+| `replenishment_cycle_days` per kategori | PENDING data | Moses |
+| Data kategori dimiliki (CROSS_SELL) dan tier membership (UPSELL) | PENDING data | Moses/James |
+| Producer/consumer + acceptance test K-09 | PENDING | Christ (consumer), James (producer) |
+| Booking | Tidak diaktifkan | — |
+
+---
+
+## 8. Status Gate A, penerimaan, dan routing
+
+**Belum dapat ditutup.** Syarat yang masih menggantung:
+- Konfirmasi dosen: 180 vs 90 hari (§1.1); penyimpangan dari Bab 4 (§3.2.A, C, D, F); pemetaan nama tier (§2.4).
+- Persetujuan formal dokumen ini: **Disetujui oleh [PENDING] · Tanggal [PENDING]**.
+- Review Moses (cohort, tabel retensi, konformansi `snapshot.py` §3.2.G, data replenishment) dan James (makna bisnis refund/koreksi/ketersediaan).
+Rincian permintaan: `GATE_A_REVIEW_REQUEST_2026-11-19.md`.
 
 ---
 
@@ -453,5 +442,7 @@ Kategori produk/layanan yang umumnya memiliki siklus pemakaian teratur:
 | Versi | Tanggal | Perubahan |
 |---|---|---|
 | v1.0 | 2026-10-28 | Versi awal (APPROVED). |
-| v1.1 | 2026-11-07 | (1) §1.1 definisi churn diubah ke jendela 90 hari **ke depan** + 3 churn negation events, menggantikan definisi 180 hari ke belakang; (2) §2.1 nilai default Retention_Factor 0.7 dicabut (tanpa sumber); (3) §3 ditambah label `OCCASIONAL` & `NEVER_TRANSACTED` (usulan) dan catatan kelengkapan aturan; (4) §3.1 matriks alokasi perlakuan per segmen (9 segmen); (5) §4.2 reason code `EXCL_OPEN_SEVERE_COMPLAINT`, penempatan pada 5 masukan, dan butir konfirmasi cakupan opt-out; (6) konstanta `CHURN_DEFINITION_DAYS = 180` dihapus (tidak dipakai di kode mana pun). |
-| v1.2 | 2026-11-09 | Keputusan tim: (1) `min_ev_threshold` = Rp 1.000 (`BELOW_MIN_EV`); (2) pagu diskon global 30% dan batas per band (Tanpa Insentif 0%, Rendah <= 10%, Sedang <= 20%, Tinggi <= 30%) dengan eskalasi `INCENTIVE_ESCALATED`; (3) daftar kata terlarang; (4) aturan `SERVICE_REMINDER` (ACTIVE/LOYAL, <= 7 hari) dan penyesuaian matriks §3.1; (5) K-08: `control_holdout_ratio` (default 0.10) dan `random_seed`. |
+| v1.1 | 2026-11-07 | Churn → 90 hari ke depan + 3 negation events; Retention_Factor 0.7 dicabut; label `OCCASIONAL`/`NEVER_TRANSACTED` (usulan); matriks §3.1; reason code suppression; konstanta `CHURN_DEFINITION_DAYS = 180` dihapus. |
+| v1.2 | 2026-11-09 | Keputusan tim: `min_ev_threshold` Rp 1.000; pagu diskon 30% + per band; kata terlarang; aturan SERVICE_REMINDER; K-08 holdout. |
+| v1.3 | 2026-11-18 | **Draf, tidak punya baris changelog saat ditemukan; dicatat di sini.** Menambah Item 1–7 dan §7 KPI dengan tag "DISETUJUI v1.3" (self-declared). Ditemukan v1.4: beberapa klaim tidak sesuai kode (cohort, RM_CONTACT lifecycle, propensity, OCCASIONAL/NEVER_TRANSACTED/REACTIVATED) dan 5 tes `test_lifecycle_matrix` gagal. |
+| v1.4 | 2026-11-19 | (1) Tag "DISETUJUI" dicabut → USULAN/PROVISIONAL/PENDING; approver/tanggal tetap PENDING. (2) §1.1 cohort 3 event (berubah dari `labels.py`), contoh boundary, WIB, 180 vs 90 tetap PENDING dosen. (3) §2 pemetaan `actual_revenue`, Retention Factor = retensi empiris 12 bulan per segmen (bukan 90 hari), contoh. (4) §3 matriks lengkap tanpa "belum ditetapkan"; OCCASIONAL→EDUCATION; NEVER_TRANSACTED/CHURNED/REACTIVATED→NO_ACTION; RM_CONTACT tanpa batas lifecycle; ambang propensity 0,6 ditegakkan; temuan `snapshot.py` ke Moses. (5) §4.3 consent channel-level + global; `RELATIONSHIP_MANAGER_CONTACT` wajib consent `phone`. (6) §5 parameter EV = PROVISIONAL + keterbatasan. (7) §6 batas bawah −14 hari. (8) §7 ambang KPI v1.3 ditarik; aturan CI; pengecualian holdout. Kode: `evaluator.py`, `catalogue.py`, `engine.py`; tes diperbarui. Overflow `scores_are_valid()` sudah diperbaiki sebelumnya (diverifikasi). |
