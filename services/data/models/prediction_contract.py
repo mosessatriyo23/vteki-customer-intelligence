@@ -7,7 +7,7 @@ output (`churn_reasons`). Nothing is fabricated or approved here:
   is null and ``score_is_calibrated`` is false: isotonic calibration was tested and
   did not generalize (docs/moses_data_ai/CALIBRATION_FINDING_DEV_2026-11-19.md).
 * ``band`` uses the FRD/Capstone churn cut-offs held as constants below.
-* Dates derive only from the prediction manifest ``generated_at``; never the clock.
+* Reference dates derive from row ``cutoff_at``; publication never refreshes expiry.
 * ``reason_codes`` only come from the reasons output; no display text is invented.
 * CLV fields and ``prediction_id`` are not produced.
 
@@ -32,10 +32,10 @@ VALID_DAYS = 30
 MIN_REASON_CODES = 3
 MIN_DISTINCT_CONCEPTS = 3
 IDENTITY_TIME_POLICY = "CURRENT_SNAPSHOT_RETROSPECTIVE"
-COMPLIANT = "CONTRACT_COMPLIANT"
-NOT_COMPLIANT = "NOT_CONTRACT_COMPLIANT"
+PRODUCER_VERSION = "prediction-contract-dev-v2"
+SCHEMA_PARTIAL = "SCHEMA_PARTIAL"
 INVALID_SCORE = "INVALID_SCORE"
-STATUSES = (COMPLIANT, INVALID_SCORE, NOT_COMPLIANT)
+STATUSES = (SCHEMA_PARTIAL, INVALID_SCORE)
 FEWER_THAN_3 = "FEWER_THAN_3_REASON_CODES"
 CALIBRATION_NOTE = (
     "Isotonic calibration was tested and did not generalize "
@@ -85,7 +85,21 @@ def _valid_score(value: object) -> bool:
         return False
 
 
+def _aware_timestamp(value: object, field: str) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{field} must be an aware timestamp")
+    try:
+        result = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(f"{field} must be an aware timestamp") from exc
+    if result.tzinfo is None or result.utcoffset() is None:
+        raise ValueError(f"{field} must be an aware timestamp")
+    return result
+
+
 def _reason_entry(reason: dict) -> dict:
+    if not isinstance(reason, dict):
+        raise ValueError("reason entry must be an object")
     code, direction = reason.get("code"), reason.get("direction")
     contribution = reason.get("log_odds_contribution")
     if not isinstance(code, str) or not code.strip():
@@ -115,23 +129,36 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
     horizon = prediction["horizon_days"]
     if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon <= 0:
         raise ValueError("horizon_days must be a positive integer")
-    prediction_date: date = datetime.fromisoformat(generated_at).date()
+    publication = _aware_timestamp(generated_at, "generated_at")
+    if prediction.get("generated_at") != generated_at:
+        raise ValueError("row generated_at differs from prediction manifest")
+    reference = _aware_timestamp(cutoff, "cutoff_at")
+    if reference > publication:
+        raise ValueError("cutoff_at must not be after generated_at")
+    prediction_date: date = reference.date()
+    if not isinstance(reasons.get("reasons"), list):
+        raise ValueError("reasons must be a list")
     entries = [_reason_entry(item) for item in reasons["reasons"]]
     codes = [entry["code"] for entry in entries]
     concepts = distinct_concept_count(codes)
     raw = prediction["churn_probability"]
     score_ok = _valid_score(raw)
-    status_reasons: list[str] = []
+    reason_count_ok = len(codes) >= MIN_REASON_CODES
+    status_reasons = [
+        "MISSING_PREDICTION_ID",
+        "UNAPPROVED_TAXONOMY",
+        "UNCALIBRATED",
+        "MISSING_BUSINESS_TEXT",
+    ]
+    if prediction["valid_until"] is None:
+        status_reasons.append("MISSING_PRODUCER_EXPIRY")
     if not score_ok:
         status_reasons.append(INVALID_SCORE)
-    if reasons["status"] != "OK" or len(codes) < MIN_REASON_CODES:
+    if not reason_count_ok:
         status_reasons.append(FEWER_THAN_3)
-    if not score_ok:
-        status = INVALID_SCORE
-    elif status_reasons:
-        status = NOT_COMPLIANT
-    else:
-        status = COMPLIANT
+    if reasons["status"] != "OK":
+        status_reasons.append("INSUFFICIENT_EXPLANATION")
+    status = INVALID_SCORE if not score_ok else SCHEMA_PARTIAL
     score = float(raw) if score_ok else None
     return {
         "customer_id": customer,
@@ -154,10 +181,15 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
         "prediction_date": prediction_date.isoformat(),
         "horizon_days": horizon,
         "outcome_window_end": (prediction_date + timedelta(days=horizon)).isoformat(),
-        "valid_until": (prediction_date + timedelta(days=VALID_DAYS)).isoformat(),
+        "valid_until": prediction["valid_until"],
+        "proposed_valid_until": (
+            prediction_date + timedelta(days=VALID_DAYS)
+        ).isoformat(),
         "score_generated_at": generated_at,
         "contract_status": status,
         "contract_status_reasons": status_reasons,
+        "producer_version": PRODUCER_VERSION,
+        "reason_count_ok": reason_count_ok,
         "distinct_reason_concepts": concepts,
         "meets_three_distinct_concepts": concepts >= MIN_DISTINCT_CONCEPTS,
         "frd_distinct_reason_concept_unresolved": True,
@@ -168,19 +200,23 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
     }
 
 
-def to_ai_scores_dict(record: dict) -> dict:
-    """Plain-builtin fields for an AIScores adapter; compliant records only.
+def to_ai_scores_dict(record: dict, *, allow_development: bool = False) -> dict:
+    """Legacy name: development inspection only, NOT an AIScores adapter.
 
-    Propensity, CLV and lifecycle fields are not produced here and are omitted.
+    No combination of caller-supplied readiness flags authorizes serving.
+    Structured explanations and lineage remain intact; AIScores fields are not emitted.
     """
-    if record.get("contract_status") != COMPLIANT:
-        raise ValueError("only CONTRACT_COMPLIANT records may be adapted")
+    if allow_development is not True:
+        raise ValueError("explicit allow_development=True required; no serving adapter")
+    if not _valid_score(record.get("score")):
+        raise ValueError("invalid score cannot be previewed")
     return {
-        "customer_id": str(record["customer_id"]),
-        "churn_score": float(record["score"]),
-        "churn_risk_band": str(record["band"]),
-        "score_generated_at": str(record["score_generated_at"]),
-        "reason_codes": [str(item["code"]) for item in record["reason_codes"]],
+        **record,
+        "contract_status": SCHEMA_PARTIAL,
+        "development_only": True,
+        "serving_ready": False,
+        "approved": False,
+        "aiscores_compatible": False,
     }
 
 
@@ -236,22 +272,44 @@ def run(predictions_dir: Path, reasons_dir: Path, output_dir: Path) -> dict:
         raise ValueError("predictions.json checksum mismatch against manifest")
     if rman.get("output_sha256", {}).get("reasons.json") != before["reasons.json"]:
         raise ValueError("reasons.json checksum mismatch against manifest")
-    linked = rman.get("input_sha256", {}).get("predictions.json")
-    if linked != before["predictions.json"]:
-        raise ValueError("reasons were not derived from these predictions (checksum)")
+    for name in ("predictions.json", "prediction_manifest.json"):
+        if rman.get("input_sha256", {}).get(name) != before[name]:
+            raise ValueError(f"{name}: reasons input checksum mismatch")
     for key in ("model_version", "feature_version", "label_version"):
         if pman.get(key) != rman.get(key):
             raise ValueError(f"{key} differs between prediction and reasons manifests")
     generated_at = pman.get("generated_at")
     if not isinstance(generated_at, str):
         raise ValueError("prediction manifest generated_at is required")
-    datetime.fromisoformat(generated_at)
+    _aware_timestamp(generated_at, "generated_at")
     predictions = json.loads(paths["predictions.json"].read_text(encoding="utf-8"))
     reasons = json.loads(paths["reasons.json"].read_text(encoding="utf-8"))
     if not isinstance(predictions, list) or not predictions:
         raise ValueError("predictions.json must hold a nonempty list")
-    if "rows" in pman and pman["rows"] != len(predictions):
-        raise ValueError("Prediction row count mismatch against manifest")
+    if not isinstance(reasons, list) or not all(isinstance(r, dict) for r in reasons):
+        raise ValueError("reasons.json must hold a list of objects")
+    if not all(isinstance(p, dict) for p in predictions):
+        raise ValueError("predictions.json must hold a list of objects")
+    for name, count, rows in (
+        ("Prediction", pman.get("rows"), predictions),
+        (
+            "reasons",
+            (
+                rman.get("summary", {}).get("total")
+                if "summary" in rman
+                else rman.get("rows")
+            ),
+            reasons,
+        ),
+    ):
+        if type(count) is not int or count != len(rows):
+            raise ValueError(f"{name} row count mismatch against manifest")
+    if any(
+        p.get(field) != predictions[0].get(field)
+        for p in predictions
+        for field in ("cutoff_at", "horizon_days")
+    ):
+        raise ValueError("mixed cutoff_at or horizon_days inputs are not supported")
     by_key: dict[tuple[str, str], dict] = {}
     for item in reasons:
         key = (item["golden_customer_id"], item["cutoff_at"])
@@ -288,12 +346,13 @@ def run(predictions_dir: Path, reasons_dir: Path, output_dir: Path) -> dict:
         if record["band"] is not None:
             band_counts[record["band"]] += 1
     manifest = {
+        "producer_version": PRODUCER_VERSION,
         "prediction_type": PREDICTION_TYPE,
         "model_version": pman["model_version"],
         "feature_set_version": pman["feature_version"],
         "label_version": pman["label_version"],
         "prediction_date": records[0]["prediction_date"],
-        "valid_days": VALID_DAYS,
+        "proposed_valid_days": VALID_DAYS,
         "horizon_days": records[0]["horizon_days"],
         "band_cutoffs_version": BAND_CUTOFFS_VERSION,
         "band_cutoffs": {
@@ -315,12 +374,9 @@ def run(predictions_dir: Path, reasons_dir: Path, output_dir: Path) -> dict:
         "rows": len(records),
         "counts_by_contract_status": status_counts,
         "counts_by_band": band_counts,
-        "count_meeting_3_reason_codes": sum(
-            r["contract_status"] == COMPLIANT for r in records
-        ),
+        "count_meeting_3_reason_codes": sum(r["reason_count_ok"] for r in records),
         "count_meeting_3_distinct_concepts": sum(
-            r["contract_status"] == COMPLIANT and r["meets_three_distinct_concepts"]
-            for r in records
+            r["reason_count_ok"] and r["meets_three_distinct_concepts"] for r in records
         ),
         "input_sha256": before,
         "input_sha256_after": after,

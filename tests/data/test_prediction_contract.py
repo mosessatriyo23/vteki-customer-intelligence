@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 
 from services.data.models import prediction_contract as pc
-from services.data.models.score_contract import validate_score_handoff
-from services.decision.nba.engine import AIScores
 
 GENERATED_AT = "2026-09-06T12:00:00+07:00"
 
@@ -87,12 +85,28 @@ def test_band_boundaries(score, band):
     assert _build(score)["band"] == band
 
 
-def test_dates_come_from_manifest_not_clock():
-    record = _build()
+def test_dates_come_from_cutoff_not_publication_or_clock():
+    prediction = _prediction("c1", 0.5)
+    prediction["generated_at"] = "2026-11-19T12:00:00+07:00"
+    record = pc.build_record(
+        prediction, _reasons("c1", MIXED), generated_at=prediction["generated_at"]
+    )
     assert record["prediction_date"] == "2026-09-06"
-    assert record["valid_until"] == "2026-10-06"
+    assert record["valid_until"] is None
+    assert record["proposed_valid_until"] == "2026-10-06"
     assert record["outcome_window_end"] == "2026-12-05"
     assert record["horizon_days"] == 90
+
+
+def test_existing_source_expiry_is_preserved_without_missing_blocker():
+    prediction = _prediction("c1", 0.5)
+    prediction["valid_until"] = "2026-09-10"
+    record = pc.build_record(
+        prediction, _reasons("c1", MIXED), generated_at=GENERATED_AT
+    )
+    assert record["valid_until"] == "2026-09-10"
+    assert "MISSING_PRODUCER_EXPIRY" not in record["contract_status_reasons"]
+    assert record["proposed_valid_until"] == "2026-10-06"
 
 
 def test_static_fields_do_not_fabricate():
@@ -121,30 +135,43 @@ def test_static_fields_do_not_fabricate():
     }
 
 
-def test_three_mixed_codes_are_compliant_and_meet_distinct_concepts():
+BASE_BLOCKERS = {
+    "MISSING_PREDICTION_ID",
+    "UNAPPROVED_TAXONOMY",
+    "UNCALIBRATED",
+    "MISSING_BUSINESS_TEXT",
+    "MISSING_PRODUCER_EXPIRY",
+}
+
+
+def test_three_mixed_codes_are_partial_and_meet_distinct_concepts():
     record = _build(codes=MIXED)
-    assert record["contract_status"] == "CONTRACT_COMPLIANT"
-    assert record["contract_status_reasons"] == []
+    assert record["contract_status"] == "SCHEMA_PARTIAL"
+    assert set(record["contract_status_reasons"]) == BASE_BLOCKERS
+    assert record["reason_count_ok"] is True
     assert record["distinct_reason_concepts"] == 3
     assert record["meets_three_distinct_concepts"] is True
 
 
 def test_fewer_than_three_reasons_is_not_compliant_but_emitted():
     record = _build(codes=MIXED[:2])
-    assert record["contract_status"] == "NOT_CONTRACT_COMPLIANT"
-    assert record["contract_status_reasons"] == ["FEWER_THAN_3_REASON_CODES"]
+    assert record["contract_status"] == "SCHEMA_PARTIAL"
+    assert "INSUFFICIENT_EXPLANATION" in record["contract_status_reasons"]
+    assert BASE_BLOCKERS <= set(record["contract_status_reasons"])
     assert len(record["reason_codes"]) == 2
 
 
 def test_insufficient_status_never_compliant_even_with_three_codes():
     record = _build(codes=MIXED, status="INSUFFICIENT_EXPLANATION")
-    assert record["contract_status"] == "NOT_CONTRACT_COMPLIANT"
-    assert record["contract_status_reasons"] == ["FEWER_THAN_3_REASON_CODES"]
+    assert record["contract_status"] == "SCHEMA_PARTIAL"
+    assert "INSUFFICIENT_EXPLANATION" in record["contract_status_reasons"]
+    assert BASE_BLOCKERS <= set(record["contract_status_reasons"])
 
 
 def test_three_frequency_codes_meet_codes_but_not_distinct_concepts():
     record = _build(codes=FREQ)
-    assert record["contract_status"] == "CONTRACT_COMPLIANT"
+    assert record["contract_status"] == "SCHEMA_PARTIAL"
+    assert record["reason_count_ok"] is True
     assert record["distinct_reason_concepts"] == 1
     assert record["meets_three_distinct_concepts"] is False
     assert pc.distinct_concept_count(FREQ) == 1
@@ -169,38 +196,29 @@ def test_adapter_refuses_non_compliant():
         pc.to_ai_scores_dict(_build(codes=MIXED[:2]))
 
 
-def test_adapter_returns_builtin_types_and_passes_score_contract():
-    import numpy as np
+def test_adapter_refuses_by_default_even_if_readiness_flags_are_mutated():
+    record = _build()
+    record.update(
+        contract_status="CONTRACT_COMPLIANT",
+        development_only=False,
+        serving_ready=True,
+        approved=True,
+    )
+    with pytest.raises(ValueError, match="development"):
+        pc.to_ai_scores_dict(record)
 
-    prediction = _prediction("c1", np.float64(0.7))
-    record = pc.build_record(
-        prediction, _reasons("c1", MIXED), generated_at=GENERATED_AT
-    )
-    out = pc.to_ai_scores_dict(record)
-    assert type(out["churn_score"]) is float
-    assert type(out["customer_id"]) is str
-    assert out["churn_risk_band"] == "HIGH"
-    assert out["reason_codes"] == MIXED
-    assert all(type(c) is str for c in out["reason_codes"])
-    assert "clv_amount" not in out
-    scores = AIScores(
-        customer_id=out["customer_id"],
-        churn_score=out["churn_score"],
-        churn_risk_band=out["churn_risk_band"],
-        propensity_purchase=0.5,  # test filler: not produced here
-        propensity_renew=0.5,
-        clv_amount=0.0,
-        clv_tier="INSUFFICIENT_HISTORY",
-        lifecycle_stage="ACTIVE",
-        score_generated_at=datetime.fromisoformat(out["score_generated_at"]),
-        reason_codes=out["reason_codes"],
-    )
-    result = validate_score_handoff(
-        scores,
-        expected_customer_id="c1",
-        known_at=datetime.fromisoformat("2026-09-07T00:00:00+07:00"),
-    )
-    assert result.valid, result.errors
+
+def test_explicit_development_preview_preserves_structure_and_non_serving_flags():
+    record = _build()
+    record.update(development_only=False, serving_ready=True, approved=True)
+    out = pc.to_ai_scores_dict(record, allow_development=True)
+    assert out["development_only"] is True
+    assert out["serving_ready"] is False
+    assert out["approved"] is False
+    assert out["aiscores_compatible"] is False
+    assert out["reason_codes"] == record["reason_codes"]
+    assert isinstance(out["reason_codes"][0], dict)
+    assert "churn_score" not in out
 
 
 # ---- end-to-end layout fixtures -------------------------------------------
@@ -242,11 +260,13 @@ def _make_inputs(
         "development_only": True,
         "serving_ready": False,
         "approved_taxonomy": False,
+        "rows": len(reasons),
         "model_version": "m-1",
         "feature_version": "f-1",
         "label_version": "l-1",
         "input_sha256": {
-            "predictions.json": pmanifest["output_sha256"]["predictions.json"]
+            "predictions.json": pmanifest["output_sha256"]["predictions.json"],
+            "prediction_manifest.json": _sha(pdir / "prediction_manifest.json"),
         },
         "output_sha256": {"reasons.json": _sha(rdir / "reasons.json")},
         **(reason_flags or {}),
@@ -268,9 +288,8 @@ def test_run_counts_layout_and_determinism(tmp_path):
     ).read_bytes()
     assert manifest["rows"] == 3
     assert manifest["counts_by_contract_status"] == {
-        "CONTRACT_COMPLIANT": 2,
+        "SCHEMA_PARTIAL": 3,
         "INVALID_SCORE": 0,
-        "NOT_CONTRACT_COMPLIANT": 1,
     }
     assert manifest["counts_by_band"] == {
         "LOW": 1,
@@ -379,3 +398,100 @@ def test_run_rejects_row_set_mismatch(tmp_path):
     _write(rdir / "reasons_manifest.json", manifest)
     with pytest.raises(ValueError, match="join"):
         pc.run(pdir, rdir, tmp_path / "out")
+
+
+def _refresh_hashes(pdir, rdir):
+    pman_path = pdir / "prediction_manifest.json"
+    pman = json.loads(pman_path.read_text())
+    pman["output_sha256"]["predictions.json"] = _sha(pdir / "predictions.json")
+    _write(pman_path, pman)
+    rman_path = rdir / "reasons_manifest.json"
+    rman = json.loads(rman_path.read_text())
+    rman["input_sha256"] = {
+        "predictions.json": _sha(pdir / "predictions.json"),
+        "prediction_manifest.json": _sha(pman_path),
+    }
+    rman["output_sha256"]["reasons.json"] = _sha(rdir / "reasons.json")
+    _write(rman_path, rman)
+
+
+def test_source_reasons_summary_total_is_a_required_row_count(tmp_path):
+    pdir, rdir = _make_inputs(tmp_path)
+    path = rdir / "reasons_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["summary"] = {"total": manifest.pop("rows")}
+    _write(path, manifest)
+    assert pc.run(pdir, rdir, tmp_path / "out")["rows"] == 3
+
+
+def test_tampered_prediction_manifest_lineage_is_rejected(tmp_path):
+    pdir, rdir = _make_inputs(tmp_path)
+    path = pdir / "prediction_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["new_metadata"] = "tampered"
+    _write(path, manifest)
+    with pytest.raises(ValueError, match="prediction_manifest.json.*checksum"):
+        pc.run(pdir, rdir, tmp_path / "out")
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("cutoff_at", "2026-09-05T00:00:00+07:00"),
+        ("horizon_days", 180),
+        ("generated_at", "2026-09-07T12:00:00+07:00"),
+    ],
+)
+def test_mixed_or_inconsistent_prediction_metadata_is_rejected(tmp_path, field, value):
+    pdir, rdir = _make_inputs(tmp_path)
+    path = pdir / "predictions.json"
+    predictions = json.loads(path.read_text())
+    predictions[0][field] = value
+    _write(path, predictions)
+    if field == "cutoff_at":
+        path = rdir / "reasons.json"
+        reasons = json.loads(path.read_text())
+        reasons[0][field] = value
+        _write(path, reasons)
+    _refresh_hashes(pdir, rdir)
+    with pytest.raises(ValueError, match="mixed|generated_at"):
+        pc.run(pdir, rdir, tmp_path / "out")
+    assert not (tmp_path / "out").exists()
+
+
+@pytest.mark.parametrize("generated_at", ["2026-09-06T12:00:00", "2026-09-06"])
+def test_naive_publication_timestamp_is_rejected(generated_at):
+    prediction = _prediction("c1", 0.5)
+    prediction["generated_at"] = generated_at
+    with pytest.raises(ValueError, match="aware"):
+        pc.build_record(prediction, _reasons("c1", MIXED), generated_at=generated_at)
+
+
+@pytest.mark.parametrize("which", ["prediction", "reasons"])
+@pytest.mark.parametrize("rows", [None, True, 99])
+def test_row_counts_are_required_and_validated(tmp_path, which, rows):
+    pdir, rdir = _make_inputs(tmp_path)
+    path = (pdir if which == "prediction" else rdir) / f"{which}_manifest.json"
+    manifest = json.loads(path.read_text())
+    manifest["rows"] = rows
+    _write(path, manifest)
+    _refresh_hashes(pdir, rdir)
+    with pytest.raises(ValueError, match="row count"):
+        pc.run(pdir, rdir, tmp_path / "out")
+
+
+@pytest.mark.parametrize("payload", [{}, None, "bad", [None]])
+def test_reason_list_validation(tmp_path, payload):
+    pdir, rdir = _make_inputs(tmp_path)
+    _write(rdir / "reasons.json", payload)
+    _refresh_hashes(pdir, rdir)
+    with pytest.raises(ValueError, match="reasons|reason"):
+        pc.run(pdir, rdir, tmp_path / "out")
+
+
+@pytest.mark.parametrize("payload", [{}, None, "bad", [None]])
+def test_nested_reason_list_validation(payload):
+    reasons = _reasons("c1", MIXED)
+    reasons["reasons"] = payload
+    with pytest.raises(ValueError, match="reason"):
+        pc.build_record(_prediction("c1", 0.5), reasons, generated_at=GENERATED_AT)
