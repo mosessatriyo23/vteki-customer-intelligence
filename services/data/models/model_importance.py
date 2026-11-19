@@ -14,6 +14,7 @@ import json
 import math
 import random
 import statistics
+from collections.abc import Sequence
 from pathlib import Path
 
 from services.data.features.snapshot import VERSION as FEATURE_VERSION
@@ -170,7 +171,7 @@ def _metrics(labels: list[int], scores: list[float]) -> dict:
     }
 
 
-def _spread(values: list[float]) -> tuple[float | None, float | None]:
+def _spread(values: Sequence[float | None]) -> tuple[float | None, float | None]:
     usable = [value for value in values if value is not None]
     if len(usable) != len(values) or not usable:
         return None, None

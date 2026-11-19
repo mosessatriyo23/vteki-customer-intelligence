@@ -320,10 +320,10 @@ def run(labels_dir: Path, membership_dir: Path, output_dir: Path) -> dict:
     )
     if output_dir.exists():
         raise ValueError("Use a new output directory")
-    paths = [labels_dir, membership_dir, output_dir]
-    if any(part.lower() == "ground_truth" for p in paths for part in p.parts):
+    directories = [labels_dir, membership_dir, output_dir]
+    if any(part.lower() == "ground_truth" for p in directories for part in p.parts):
         raise ValueError("ground_truth paths are not allowed")
-    labels_dir, membership_dir, output_dir = (p.resolve() for p in paths)
+    labels_dir, membership_dir, output_dir = (p.resolve() for p in directories)
     if any(
         part.lower() == "ground_truth"
         for p in (labels_dir, membership_dir, output_dir)

@@ -52,8 +52,8 @@ def _percentile(sorted_values: list[float], pct: float) -> float:
     try:
         import numpy as np  # optional model dependency (requirements-models.txt)
     except ImportError:
-        np = None
-    if np is not None:
+        pass
+    else:
         return float(np.percentile(sorted_values, pct))
     if len(sorted_values) == 1:
         return sorted_values[0]

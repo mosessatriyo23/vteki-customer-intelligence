@@ -84,7 +84,9 @@ def project_clv(
         result = calculate_business_clv(
             history, average, frequency, retention_factor, transaction_count_365d
         )
-        if not math.isfinite(result["forward_component"]):
+        forward_component = result["forward_component"]
+        assert isinstance(forward_component, (int, float))
+        if not math.isfinite(forward_component):
             raise ValueError("calculated forward component must be finite")
 
     return {

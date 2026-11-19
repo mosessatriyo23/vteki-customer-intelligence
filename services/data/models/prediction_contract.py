@@ -160,12 +160,13 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
         status_reasons.append("INSUFFICIENT_EXPLANATION")
     status = INVALID_SCORE if not score_ok else SCHEMA_PARTIAL
     score = float(raw) if score_ok else None
+    band = score_to_band(score) if score is not None else None
     return {
         "customer_id": customer,
         "cutoff_at": cutoff,
         "prediction_type": PREDICTION_TYPE,
         "score": score,
-        "band": score_to_band(score) if score_ok else None,
+        "band": band,
         "band_cutoffs_version": BAND_CUTOFFS_VERSION,
         "score_is_calibrated": False,
         "calibration_version": None,
@@ -275,9 +276,11 @@ def run(predictions_dir: Path, reasons_dir: Path, output_dir: Path) -> dict:
     for name in ("predictions.json", "prediction_manifest.json"):
         if rman.get("input_sha256", {}).get(name) != before[name]:
             raise ValueError(f"{name}: reasons input checksum mismatch")
-    for key in ("model_version", "feature_version", "label_version"):
-        if pman.get(key) != rman.get(key):
-            raise ValueError(f"{key} differs between prediction and reasons manifests")
+    for version_key in ("model_version", "feature_version", "label_version"):
+        if pman.get(version_key) != rman.get(version_key):
+            raise ValueError(
+                f"{version_key} differs between prediction and reasons manifests"
+            )
     generated_at = pman.get("generated_at")
     if not isinstance(generated_at, str):
         raise ValueError("prediction manifest generated_at is required")

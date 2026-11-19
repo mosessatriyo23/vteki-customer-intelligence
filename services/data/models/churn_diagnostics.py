@@ -158,7 +158,7 @@ def summarize(rows: list[dict], *, repeats: int = 200) -> dict:
     for row in rows:
         groups[row["golden_customer_id"]].append(row)
     customers = sorted(groups)
-    samples = {
+    samples: dict[str, dict[str, list[float]]] = {
         model: {
             metric: [] for metric in ("roc_auc", "average_precision", "brier_score")
         }

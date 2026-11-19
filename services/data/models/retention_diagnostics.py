@@ -75,6 +75,8 @@ def summarize_retention90(labels: list[dict], segments: list[dict]) -> list[dict
 
     if label_index.keys() != segment_index.keys():
         raise ValueError("Label and segment keys must exactly match")
+    if label_version is None:
+        return []
 
     groups: dict[tuple[str, str, str], dict] = defaultdict(
         lambda: {

@@ -173,6 +173,7 @@ def select_threshold(scored: list[tuple[int, float]]) -> dict:
         f1 = 2 * tp / (2 * tp + fp + (positives - tp))
         if best is None or f1 > best[0]:
             best = (f1, score, tp, fp)
+    assert best is not None
     f1, threshold, tp, fp = best
     return dict(
         threshold=float(threshold),
