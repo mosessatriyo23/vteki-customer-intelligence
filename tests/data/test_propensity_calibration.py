@@ -42,6 +42,22 @@ class CalibrationTests(unittest.TestCase):
             self.assertEqual(len(predictions), 8)
             json.dumps((report, predictions, artifact), allow_nan=False)
 
+    def test_artifacts_warn_that_better_calibration_is_not_model_usefulness(self):
+        report, _, artifact = calibration.evaluate(
+            joined(TARGETS[1], CUTOFFS), TARGETS[1]
+        )
+        reused = [
+            text
+            for text in report["limitations"]
+            if "independent" in text and "cohort" in text
+        ]
+        self.assertTrue(reused, report["limitations"])
+        self.assertEqual(report["limitations"], artifact["limitations"])
+        self.assertIn(
+            "does not establish",
+            report["test_calibration_minus_raw"]["interpretation"],
+        )
+
     def test_heldout_mutations_never_fit_train_or_tune_on_test(self):
         for target in TARGETS:
             rows = joined(target, CUTOFFS)

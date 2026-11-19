@@ -9,7 +9,7 @@ Modul `services/data/models/propensity_inference.py` memuat artefak logistic JSO
 | Retail30 | 75.002 | 27.647 | 0 | 0 | 2,22e-16 |
 | Renewal60 POS-only | 75.002 | 8.465 | 0 | 0 | 1,11e-16 |
 
-Angka parity adalah hasil pemeriksaan subagent pada existing fitted holdout predictions; focused tests main agent 28 passed, Ruff/Black bersih. Review independen terhenti rate limit setelah restart, belum dianggap lulus. Commit lokal `ccb68bb`; main-agent focused inference 28 passed dan combined regression 47 passed; full suite terakhir 1293 passed, 19 skipped, 3 xfailed. Parity numerik tidak membuktikan calibration, manfaat model renewal, atau eligibility campaign. Keluaran mencakup seluruh snapshot, termasuk pelanggan yang tidak eligible; tidak ada outcome label yang dibaca jalur inference.
+Angka parity adalah hasil pemeriksaan subagent pada existing fitted holdout predictions; focused tests main agent 28 passed, Ruff/Black bersih. Review independen (20 Nov) selesai tanpa temuan wajib: parity direproduksi dari artefak, tetapi angka parity berasal dari perbandingan sekali jalan, bukan test repo yang meregenerasinya. Commit lokal `ccb68bb`; main-agent focused inference 28 passed dan combined regression 47 passed; full suite terakhir 1293 passed, 19 skipped, 3 xfailed. Parity numerik tidak membuktikan calibration, manfaat model renewal, atau eligibility campaign. Keluaran mencakup seluruh snapshot, termasuk pelanggan yang tidak eligible; tidak ada outcome label yang dibaca jalur inference.
 
 ## Reproduksi
 

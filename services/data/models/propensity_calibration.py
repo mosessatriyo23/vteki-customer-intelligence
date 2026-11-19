@@ -53,6 +53,8 @@ LIMITATIONS = [
     "Test results retained even when calibration worsens Brier or ECE",
     "Observational only; no causal or campaign-effect claims",
     "Not I-04 compliant; no reason codes; valid_until is null",
+    "The June test cohort was inspected in earlier experiments; this is a reused "
+    "cohort, not an independent holdout, and does not establish generalization",
 ]
 
 
@@ -189,7 +191,11 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
                 "expected_calibration_error"
             ]
             - test_blocks["uncalibrated"]["expected_calibration_error"],
-            "interpretation": "Positive delta means worse; no approval or model selection from test",
+            "interpretation": (
+                "Positive delta means worse; no approval or model selection from "
+                "test. A better calibrated score does not establish that the "
+                "underlying model is useful or that it generalizes."
+            ),
         },
         "limitations": [*LIMITATIONS, *TARGET_LIMITATIONS[target]],
     }
@@ -224,6 +230,7 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
         "isotonic": isotonic_artifact,
         "thresholds": selection,
         "threshold_rule": THRESHOLD_RULE,
+        "limitations": report["limitations"],
     }
     return report, predictions, artifact
 
