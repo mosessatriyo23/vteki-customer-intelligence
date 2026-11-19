@@ -1,12 +1,9 @@
 """Descriptive 90-day retention-by-lifecycle-segment diagnostic.
 
-This is a retrospective aggregate over the *existing* development churn
-label (``christ-churn90-three-events-dev-1.1``, ``horizon_days=90``). It
-does not fit a model, estimate a 12-month CLV retention factor, or widen
-the label's own eligible cohort (currently POS-transaction-based 365-day
-history; see ``services.data.models.labels``). Any consumer that treats
-this output as the 12-month CLV retention estimand, or as covering
-visit/renewal-only customers, is misusing it.
+This retrospective diagnostic supports v1.1 (POS-only eligibility) and v1.2
+(POS/visit/renewal eligibility), separately. It does not fit a model or
+estimate a 12-month CLV retention factor. Rates are descriptive synthetic
+90-day outcomes, not a calibrated prediction or a business CLV factor.
 
 No ``ground_truth`` field is read or required by this module.
 """
@@ -15,14 +12,17 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-VALID_LABEL_VERSION = "christ-churn90-three-events-dev-1.1"
+COHORT_SCOPES = {
+    "christ-churn90-three-events-dev-1.1": "existing_pos_365d_eligible_subset",
+    "christ-churn90-three-events-dev-1.2": "pos_visit_renewal_365d_eligible",
+}
 VALID_HORIZON_DAYS = 90
 
 
 def _validate_label(row: dict) -> None:
-    if row.get("label_version") != VALID_LABEL_VERSION:
+    if row.get("label_version") not in COHORT_SCOPES:
         raise ValueError(
-            "Only the christ-churn90-three-events-dev-1.1 label is accepted"
+            "Only christ-churn90-three-events-dev-1.1 or -1.2 labels are accepted"
         )
     if row.get("horizon_days") != VALID_HORIZON_DAYS:
         raise ValueError("Only horizon_days=90 is accepted")
@@ -54,6 +54,10 @@ def summarize_retention90(labels: list[dict], segments: list[dict]) -> list[dict
     """
     for row in labels:
         _validate_label(row)
+    versions = {row["label_version"] for row in labels}
+    if len(versions) > 1:
+        raise ValueError("Mixed label versions must be summarized separately")
+    label_version = next(iter(versions), None)
 
     label_index: dict[tuple[str, str], dict] = {}
     for row in labels:
@@ -99,7 +103,7 @@ def summarize_retention90(labels: list[dict], segments: list[dict]) -> list[dict
         denominator = bucket["eligible_complete_count"]
         output.append(
             {
-                "label_version": VALID_LABEL_VERSION,
+                "label_version": label_version,
                 "horizon_days": VALID_HORIZON_DAYS,
                 "cutoff_at": cutoff_at,
                 "lifecycle": lifecycle,
@@ -111,7 +115,7 @@ def summarize_retention90(labels: list[dict], segments: list[dict]) -> list[dict
                 ),
                 "excluded_incomplete_count": bucket["excluded_incomplete_count"],
                 "excluded_ineligible_count": bucket["excluded_ineligible_count"],
-                "cohort_scope": "existing_pos_365d_eligible_subset",
+                "cohort_scope": COHORT_SCOPES[label_version],
                 "clv_factor_ready": False,
             }
         )

@@ -9,7 +9,7 @@ from services.data.features.snapshot import FIELDS as FEATURE_FIELDS
 from services.data.features.snapshot import validate_cutoffs
 
 VERSION = "future-outcomes-proposed-dev-1.0"
-CHRIST_VERSION = "christ-churn90-three-events-dev-1.1"
+CHRIST_VERSION = "christ-churn90-three-events-dev-1.2"
 FIELDS = (
     "golden_customer_id",
     "cutoff_at",
@@ -37,7 +37,8 @@ def build_labels(
 
     Windows are (cutoff-365d, cutoff] and (cutoff, cutoff+horizon]. When
     christ_events is true, churn is negated by qualifying POS transactions,
-    completed physical visits, and membership renewals. CLV remains clv90.
+    completed physical visits, and membership renewals. Those same three
+    event types determine cohort eligibility at the cutoff. CLV remains clv90.
     Incomplete targets are null, never observed partial-window negatives.
     """
     cutoffs = validate_cutoffs(cutoffs)
@@ -129,7 +130,8 @@ def build_labels(
             golden = profile["golden_customer_id"]
             history = events.get(golden, [])
             eligible = any(
-                cutoff - timedelta(days=365) < t <= cutoff for t, _ in history
+                cutoff - timedelta(days=365) < t <= cutoff
+                for t in activity_events.get(golden, [])
             )
             future = [amount for t, amount in history if cutoff < t <= end]
             future_activity = any(
