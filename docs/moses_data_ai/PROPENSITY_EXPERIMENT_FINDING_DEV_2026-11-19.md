@@ -34,4 +34,6 @@ Label cutoff Maret/Juni: `propensity_labels.csv` 75.002 baris; retail eligible 4
 
 ## Batas
 
+Probe expiry memakai holdout Juni yang sudah dilihat. Eksperimen fitur membership sesudah probe ini bersifat eksploratif/adaptif, bukan konfirmasi pada holdout yang belum pernah disentuh. Diperlukan cutoff evaluasi baru yang mature untuk klaim generalisasi independen. Bucket negatif dan tepat +60 hari masih berada dalam cohort eligibility yang diusulkan, tetapi renewal generator terjadi sehari setelah expiry: perbedaan rate nol versus ~0,65 ini bisa memberikan sinyal antar-subkelompok. Rate yang hampir datar di bucket 0–59 hari tidak membuktikan bahwa seluruh fitur membership tidak berguna; probe agregat juga bukan uji kausal atas penyebab AUC rendah.
+
 Data sintetis, retrospektif, tanpa jaminan PIT. Tidak ada kalibrasi atau klaim kausal. Fixed rule adalah konvensi development yang ditetapkan sebelum melihat holdout, bukan hasil tuning. Artefak lokal ignored: `artifacts/models/propensity_retail_20261119/`, `artifacts/models/propensity_renewal_20261119/` (masing-masing `evaluation.json`, `holdout_predictions.json`, `model_parameters.json` JSON-only, `experiment_manifest.json` dengan checksum).
