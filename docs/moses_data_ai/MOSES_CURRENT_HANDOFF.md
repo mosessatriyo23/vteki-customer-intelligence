@@ -10,6 +10,12 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 4. [Tabel retensi untuk Christ](RETENTION90_CHRIST_HANDOFF_DEV_2026-11-19.md) portable, bukan retention factor CLV otomatis.
 5. `clv_projection.project_clv` membungkus formula existing: retention factor wajib eksplisit beserta versi, tanpa faktor hasil forward/total/tier unavailable. Ini kalkulator, bukan fitted model CLV.
 
+## Evaluasi lanjutan — termasuk temuan yang tidak bagus
+
+- [Kalibrasi tiga fold](CALIBRATION_FINDING_DEV_2026-11-19.md): isotonic calibration pada fold terpisah **memperburuk** ECE dan Brier pada test (tidak tergeneralisasi), dan threshold 0,5 menjadi tidak berguna setelah kalibrasi (TP=0). Threshold yang dipilih dari fold kalibrasi (≈0,25) menaikkan recall 0,513→0,884 dengan trade-off precision 0,594→0,465 — keputusan bisnis untuk Christ.
+- [Reason codes](REASON_CODE_LIMITATION_DEV_2026-11-19.md): 50.141/50.640 prediksi punya ≥3 alasan matematis yang lolos cek faithfulness, tetapi mayoritas tiga alasan teratas adalah tiga jendela waktu dari satu konsep (frekuensi pembelian 365/90/60 hari). **Ini belum memenuhi niat "tiga alasan bisnis berbeda".**
+- [Eksperimen propensity](PROPENSITY_EXPERIMENT_FINDING_DEV_2026-11-19.md): retail logistic (AUC 0,680) sedikit di bawah aturan sederhana `recency<=30` (AUC 0,684). **Renewal logistic AUC 0,4657 — lebih buruk dari tebakan acak** dan kolaps ke satu kelas; akar masalah adalah tidak ada fitur membership (`expires_at`, `membership_tier`) di set fitur Moses saat ini, bukan masalah tuning.
+
 ## Belum selesai — dibedakan supaya tim tidak menerima klaim palsu
 
 | Area | Status sekarang | Pemicu tindak lanjut |
@@ -17,9 +23,9 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 | Governed churn prediction I-04 | Belum tersedia: skor mentah offline; belum calibration, risk bands/expiry dan reason codes bisnis sah | Christ/James menyepakati kontrak; Moses menambah producer + acceptance fixtures setelah artinya jelas |
 | Historical PIT | Belum terbukti: current mapping/final status retrospektif | James menyediakan known-at/refund correction/identity-as-of dengan coverage; Moses menguji consumer |
 | CLV 12 bulan | Formula ada, faktor empiris final belum ada; mismatch nama Gross vs net/retained belum diputuskan | [Rekonsiliasi](CLV_REVENUE_RECONCILIATION_DEV.md), Christ memilih convention/estimand, James memastikan as-of source |
-| Tiga fitted propensity | Belum ada; retail/renewal memiliki bahan event, booking source tidak ada | [Inventaris](PROPENSITY_TARGET_INVENTORY_DEV.md), definisi cohort/status/maturity dan source booking; Moses membuat label+model independen |
-| Explanation / global importance | Local mathematical log-odds ada; approved business reason codes/permutation importance belum ada | Tidak mengganti kontribusi matematis menjadi tiga alasan bisnis buatan; Christ taxonomy, Moses faithful mapping/tests |
-| Calibration / segmentation / lift | Reliability diagnosis tersedia; separate calibration fold, segment evaluation dan lift belum dilengkapi | Slice evaluasi Moses berikutnya dengan split terpisah, bukan fit pada holdout lama |
+| Propensity retail/renewal | Sudah fitted & dievaluasi; renewal **tidak berguna** tanpa fitur membership; booking source tidak ada | Tambah fitur membership (expiry/tier) sebelum retrain renewal; definisikan booking source dengan James |
+| Reason codes | Matematis faithful tersedia; taxonomy bisnis "distinct" belum disepakati | Christ memutuskan apakah 3 fitur frekuensi = 1 atau 3 alasan |
+| Kalibrasi | Dicoba dan **tidak membantu** pada data ini; threshold dari fold kalibrasi terbukti berguna | Christ memilih trade-off precision/recall; jangan pakai isotonic ini sebagai kalibrasi final |
 | API/worker/persisted NBA/campaign | Tidak disentuh oleh slice Moses ini | Integrasi James/Christ, tidak menggunakan integer customer demo sebagai Golden ID |
 
 `training_ready=false`, `experiment_ready=false`, `final_model=false`, `serving_ready=false`. Tidak ada Gate A/C/D ditutup oleh dokumen ini. Snapshot September mencakup semua pelanggan, tidak membuktikan eligible campaign audience. Revisi target/fitur harus versi baru dan retrain; [aturan revisi](CHURN_MODEL_REVISION_POLICY_DEV.md).
