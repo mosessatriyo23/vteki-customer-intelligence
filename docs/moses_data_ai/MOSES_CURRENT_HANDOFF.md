@@ -13,7 +13,7 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 ## Evaluasi lanjutan — termasuk temuan yang tidak bagus
 
 - [Importance global dan evaluasi subkelompok](GLOBAL_IMPORTANCE_SEGMENT_FINDING_DEV_2026-11-19.md) tersedia untuk churn dua-cutoff dan propensity POS-only; review independen tanpa temuan wajib. AUC churn agregat 0,903 menutupi AUC **0,428** pada recency 91–180 hari; retail recency 31–90 AUC **0,516**. Ini bukan evaluasi lifecycle/tier CLV final dan belum mencakup renewal membership.
-- [Peringatan producer prediksi pertama](PREDICTION_CONTRACT_REVIEW_NOTICE_2026-11-19.md): artefak `churn_contract_dev_20260906` tidak boleh dipakai untuk acceptance/serving. Perbaikan status parsial, tanggal cutoff, adapter dan lineage sedang berjalan.
+- [Peringatan producer prediksi pertama](PREDICTION_CONTRACT_REVIEW_NOTICE_2026-11-19.md): artefak `churn_contract_dev_20260906` tidak boleh dipakai untuk acceptance/serving. Pengganti `churn_contract_dev_20260906_reviewed_v2` seluruhnya berstatus SCHEMA_PARTIAL; tanggal cutoff, adapter default-refusal dan hash lineage telah diperbaiki, tanpa mengarang expiry sumber.
 
 - [Kalibrasi tiga fold](CALIBRATION_FINDING_DEV_2026-11-19.md): isotonic calibration pada fold terpisah **memperburuk** ECE dan Brier pada test (tidak tergeneralisasi), dan threshold 0,5 menjadi tidak berguna setelah kalibrasi (TP=0). Threshold yang dipilih dari fold kalibrasi (≈0,25) menaikkan recall 0,513→0,884 dengan trade-off precision 0,594→0,465 — keputusan bisnis untuk Christ.
 - [Reason codes](REASON_CODE_LIMITATION_DEV_2026-11-19.md): 50.141/50.640 prediksi punya ≥3 alasan matematis yang lolos cek faithfulness, tetapi mayoritas tiga alasan teratas adalah tiga jendela waktu dari satu konsep (frekuensi pembelian 365/90/60 hari). **Ini belum memenuhi niat "tiga alasan bisnis berbeda".**
@@ -37,7 +37,7 @@ Tanggal: 2026-11-19. **Churn synthetic-development sudah runnable; seluruh cakup
 
 ## Verifikasi lokal
 
-`.venv\Scripts\python.exe -m pytest -q` terakhir: **1180 passed, 19 skipped, 3 xfailed**, satu warning Starlette/httpx. Ruff dan Black bersih pada 141 file `services`/`tests`. Gunakan `.venv\Scripts\python.exe`, bukan `python` default, karena dependensi model hanya terpasang di venv.
+`.venv\Scripts\python.exe -m pytest -q` terakhir: **1293 passed, 19 skipped, 3 xfailed**, satu warning Starlette/httpx (run setelah restart; focused regression berikutnya 47 passed). Ruff dan Black bersih pada 151 file `services`/`tests`. Gunakan `.venv\Scripts\python.exe`, bukan `python` default, karena dependensi model hanya terpasang di venv.
 
 PostgreSQL acceptance yang skipped **tidak** dianggap lulus. Tiga test regresi membuktikan empty population ditolak `ValueError` oleh shared PSI helper, bukan `ZeroDivisionError`. Docstring CLV tidak lagi mengklaim sumber net/retained yang belum dipakai.
 
