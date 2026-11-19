@@ -7,7 +7,7 @@ from pathlib import Path
 
 from services.data.customer360.profile import build_profiles, read
 
-RULE_VERSION = "lifecycle-proposed-1.1-christ-churned-guard"
+RULE_VERSION = "lifecycle-proposed-1.2-christ-new-lifetime-guard"
 FIELDS = (
     "golden_customer_id",
     "cutoff_at",
@@ -42,13 +42,15 @@ def lifecycle(
     revenue90: int,
     reactivated: bool,
     membership_expired_days: int | None = None,
+    *,
+    lifetime_count: int,
 ) -> str:
-    """Mutually exclusive PROPOSED priority, with explicit never-transacted fallback."""
+    """PROPOSED priority; lifetime_count is deduplicated qualifying POS through cutoff."""
     if reactivated:
         return "REACTIVATED"
     if tenure >= 60 and count90 >= 5 and revenue90 >= 500_000:
         return "LOYAL"
-    if tenure <= 30:
+    if tenure <= 30 and lifetime_count <= 2:
         return "NEW"
     if recency is None:
         return "NEVER_TRANSACTED"
@@ -216,6 +218,7 @@ def build_segments(
                     revenue90,
                     reactivated,
                     membership_expired_days,
+                    lifetime_count=len(history),
                 ),
                 rule_version=RULE_VERSION,
             )
