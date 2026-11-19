@@ -150,7 +150,7 @@ class ModelBaselineTests(unittest.TestCase):
         self.assertEqual(by_id["visit"]["clv90"], 0)
         self.assertEqual(by_id["renew"]["clv90"], 0)
         self.assertEqual(
-            by_id["visit"]["label_version"], "christ-churn90-three-events-dev-1.1"
+            by_id["visit"]["label_version"], "christ-churn90-three-events-dev-1.2"
         )
         with self.assertRaisesRegex(ValueError, "requires horizon_days=90"):
             build_labels(
@@ -160,6 +160,167 @@ class ModelBaselineTests(unittest.TestCase):
                 180,
                 christ_events=True,
             )
+
+    def test_christ_eligibility_counts_visit_and_renewal_not_just_transaction(self):
+        """Christ v1.3 Item 1: eligible cohort = >=1 qualifying event (POS,
+        visit, or renewal) in the 365 days before cutoff — not transactions
+        only. A customer whose only qualifying event is a completed visit or
+        a membership renewal must still be eligible."""
+        cutoff = datetime.fromisoformat("2026-01-01T12:00:00+07:00")
+        customer_ids = (
+            "visit_only",
+            "renew_only",
+            "no_event",
+            "at_365",
+            "at_cutoff",
+            "cancelled",
+        )
+        profiles = [dict(golden_customer_id=value) for value in customer_ids]
+        mapping = [
+            dict(source_customer_id=value, golden_customer_id=value)
+            for value in customer_ids
+        ]
+        visits = [
+            dict(
+                source_customer_ref=customer,
+                visit_datetime=(cutoff - timedelta(days=days)).isoformat(),
+                status=status,
+            )
+            for customer, days, status in (
+                ("visit_only", 10, "COMPLETED"),
+                ("at_365", 365, "COMPLETED"),
+                ("at_cutoff", 0, "COMPLETED"),
+                ("cancelled", 10, "CANCELLED"),
+            )
+        ]
+        memberships = [
+            dict(
+                source_customer_ref="renew_only",
+                event_id="renew-1",
+                event_type="RENEWAL",
+                occurred_at=(cutoff - timedelta(days=10)).isoformat(),
+            )
+        ]
+
+        def read_fixture(path):
+            return {
+                "mapping.csv": mapping,
+                "transactions.csv": [],
+                "customer_visits.csv": visits,
+                "membership_events.csv": memberships,
+            }[path.name]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = Path(tmp)
+            (inbound / "generation_manifest.json").write_text(
+                json.dumps({"as_of_date": "2026-04-01"}), encoding="utf-8"
+            )
+            with (
+                patch(
+                    "services.data.models.labels.build_profiles", return_value=profiles
+                ),
+                patch("services.data.models.labels.read", side_effect=read_fixture),
+            ):
+                rows = build_labels(
+                    inbound, Path("resolution"), [cutoff], christ_events=True
+                )
+        by_id = {row["golden_customer_id"]: row for row in rows}
+        self.assertTrue(by_id["visit_only"]["eligible"])
+        self.assertTrue(by_id["renew_only"]["eligible"])
+        self.assertFalse(by_id["no_event"]["eligible"])
+        # Boundary: exactly 365 days back is outside the open-left window.
+        self.assertFalse(by_id["at_365"]["eligible"])
+        # Boundary: exactly at cutoff is inside the closed-right window.
+        self.assertTrue(by_id["at_cutoff"]["eligible"])
+        # A cancelled visit is not a qualifying event.
+        self.assertFalse(by_id["cancelled"]["eligible"])
+
+    def test_christ_eligible_event_only_customers_reach_training_and_retention(self):
+        """A visit-only or renewal-only eligible customer must actually flow
+        through join_training_rows (clv90=0, included) and count in the
+        retention90 denominator — not just carry eligible=True in isolation."""
+        cutoff = datetime.fromisoformat("2026-01-01T12:00:00+07:00")
+        customer_ids = ("visit_retained", "renew_churned")
+        profiles = [dict(golden_customer_id=value) for value in customer_ids]
+        mapping = [
+            dict(source_customer_id=value, golden_customer_id=value)
+            for value in customer_ids
+        ]
+        visits = [
+            dict(
+                source_customer_ref="visit_retained",
+                visit_datetime=(cutoff - timedelta(days=10)).isoformat(),
+                status="COMPLETED",
+            ),
+            # Future qualifying visit negates churn for visit_retained.
+            dict(
+                source_customer_ref="visit_retained",
+                visit_datetime=(cutoff + timedelta(days=30)).isoformat(),
+                status="COMPLETED",
+            ),
+        ]
+        memberships = [
+            dict(
+                source_customer_ref="renew_churned",
+                event_id="renew-1",
+                event_type="RENEWAL",
+                occurred_at=(cutoff - timedelta(days=10)).isoformat(),
+            )
+        ]
+
+        def read_fixture(path):
+            return {
+                "mapping.csv": mapping,
+                "transactions.csv": [],
+                "customer_visits.csv": visits,
+                "membership_events.csv": memberships,
+            }[path.name]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            inbound = Path(tmp)
+            (inbound / "generation_manifest.json").write_text(
+                json.dumps({"as_of_date": "2026-04-01"}), encoding="utf-8"
+            )
+            with (
+                patch(
+                    "services.data.models.labels.build_profiles", return_value=profiles
+                ),
+                patch("services.data.models.labels.read", side_effect=read_fixture),
+            ):
+                labels = build_labels(
+                    inbound, Path("resolution"), [cutoff], christ_events=True
+                )
+        features = [
+            dict(golden_customer_id=value, cutoff_at=cutoff.isoformat())
+            for value in customer_ids
+        ]
+        training_rows = join_training_rows(features, labels)
+        self.assertEqual(len(training_rows), 2)
+        by_id = {row["golden_customer_id"]: row for row in training_rows}
+        self.assertEqual(by_id["visit_retained"]["churn90"], 0)
+        self.assertEqual(by_id["visit_retained"]["clv90"], 0)
+        self.assertEqual(by_id["renew_churned"]["churn90"], 1)
+        self.assertEqual(by_id["renew_churned"]["clv90"], 0)
+
+        from services.data.models.retention_diagnostics import summarize_retention90
+
+        segments = [
+            dict(
+                golden_customer_id=value,
+                cutoff_at=cutoff.isoformat(),
+                lifecycle="ACTIVE",
+                rule_version="development-rule",
+            )
+            for value in customer_ids
+        ]
+        retention = summarize_retention90(labels, segments)
+        self.assertEqual(len(retention), 1)
+        self.assertEqual(retention[0]["eligible_complete_count"], 2)
+        self.assertEqual(retention[0]["retained_count"], 1)
+        self.assertEqual(retention[0]["retention90_rate"], 0.5)
+        self.assertEqual(
+            retention[0]["cohort_scope"], "pos_visit_renewal_365d_eligible"
+        )
 
     def test_christ_churn_event_window_boundaries_and_future_isolation(self):
         cutoff = datetime.fromisoformat("2026-01-01T00:00:00+07:00")
@@ -359,13 +520,40 @@ class ModelBaselineTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "two cutoffs"):
                 run(inbound, resolution, output, [early])
             self.assertFalse(output.exists())
-            result = run(inbound, resolution, output, [late, early])
+            legacy_output = root / "legacy_output"
+            run(inbound, resolution, legacy_output, [late, early])
+            legacy_manifest = json.loads(
+                (legacy_output / "model_manifest.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(
+                legacy_manifest["label_version"], "future-outcomes-proposed-dev-1.0"
+            )
+            self.assertEqual(
+                set(legacy_manifest["output_sha256"]),
+                {"labels.csv", "training_rows.csv", "metrics.json"},
+            )
+            self.assertFalse((legacy_output / "retention90.json").exists())
+            result = run(inbound, resolution, output, [late, early], christ_events=True)
             manifest = json.loads(
                 (output / "model_manifest.json").read_text(encoding="utf-8")
             )
             metrics = json.loads((output / "metrics.json").read_text(encoding="utf-8"))
             self.assertFalse(result["experiment_ready"])
             self.assertFalse(manifest["final_model"])
+            self.assertEqual(
+                manifest["label_version"], "christ-churn90-three-events-dev-1.2"
+            )
+            self.assertIn("retention90.json", manifest["output_sha256"])
+            with (output / "retention90.json").open(encoding="utf-8") as stream:
+                retention = json.load(stream)
+            self.assertTrue(retention)
+            self.assertTrue(
+                all(
+                    row["cohort_scope"] == "pos_visit_renewal_365d_eligible"
+                    and row["clv_factor_ready"] is False
+                    for row in retention
+                )
+            )
             self.assertEqual(metrics["train_cutoffs"], [early.isoformat()])
             self.assertEqual(metrics["test_cutoffs"], [late.isoformat()])
             self.assertGreaterEqual(metrics["purged_rows"], 0)

@@ -10,6 +10,7 @@ from services.data.features.snapshot import FIELDS as FEATURE_FIELDS
 from services.data.features.snapshot import build_features, validate_cutoffs
 from services.data.ingestion.contracts import TABLES
 from services.data.ingestion.validator import BatchValidator, sha256
+from services.data.segmentation.snapshot import build_segments
 
 from .baseline import evaluate
 from .labels import (
@@ -20,6 +21,7 @@ from .labels import (
     join_training_rows,
 )
 from .labels import FIELDS as LABEL_FIELDS
+from .retention_diagnostics import summarize_retention90
 
 
 def _write_csv(path: Path, fields: tuple[str, ...], rows: list[dict]) -> None:
@@ -77,6 +79,14 @@ def run(
     features = build_features(inbound, resolution, cutoffs)
     training_rows = join_training_rows(features, labels)
     metrics = evaluate(training_rows)
+    retention = None
+    if christ_events:
+        segments = [
+            row
+            for cutoff in cutoffs
+            for row in build_segments(inbound, resolution, cutoff)
+        ]
+        retention = summarize_retention90(labels, segments)
     if any(sha256(path) != before[str(path.resolve())] for path in paths):
         raise ValueError("Inputs changed during model development run")
     output_dir.mkdir(parents=True)
@@ -85,10 +95,13 @@ def run(
     (output_dir / "metrics.json").write_text(
         json.dumps(metrics, sort_keys=True, indent=2) + "\n", encoding="utf-8"
     )
-    outputs = {
-        name: sha256(output_dir / name)
-        for name in ("labels.csv", "training_rows.csv", "metrics.json")
-    }
+    output_names = ["labels.csv", "training_rows.csv", "metrics.json"]
+    if retention is not None:
+        (output_dir / "retention90.json").write_text(
+            json.dumps(retention, sort_keys=True, indent=2) + "\n", encoding="utf-8"
+        )
+        output_names.append("retention90.json")
+    outputs = {name: sha256(output_dir / name) for name in output_names}
     manifest = dict(
         label_version=CHRIST_VERSION if christ_events else VERSION,
         feature_fields=list(FEATURE_FIELDS),

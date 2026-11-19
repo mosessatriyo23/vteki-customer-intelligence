@@ -46,6 +46,20 @@ class RetentionDiagnosticsTests(unittest.TestCase):
         self.assertEqual(row["cohort_scope"], "existing_pos_365d_eligible_subset")
         self.assertFalse(row["clv_factor_ready"])
 
+    def test_v12_reports_three_event_cohort_without_mixing_old_version(self):
+        v12 = "christ-churn90-three-events-dev-1.2"
+        result = summarize_retention90(
+            [self.label(label_version=v12)], [self.segment()]
+        )
+        self.assertEqual(result[0]["label_version"], v12)
+        self.assertEqual(result[0]["cohort_scope"], "pos_visit_renewal_365d_eligible")
+        self.assertFalse(result[0]["clv_factor_ready"])
+        with self.assertRaisesRegex(ValueError, "Mixed label versions"):
+            summarize_retention90(
+                [self.label(), self.label("g2", label_version=v12)],
+                [self.segment(), self.segment("g2")],
+            )
+
     def test_empty_denominator_is_null_not_zero(self):
         result = summarize_retention90(
             [self.label(eligible=False, churn90=None)], [self.segment()]

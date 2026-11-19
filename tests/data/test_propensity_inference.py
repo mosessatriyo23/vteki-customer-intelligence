@@ -1,0 +1,259 @@
+"""Offline reload contract: feature snapshots, not target-eligible populations."""
+
+import csv
+import json
+import math
+from datetime import datetime, timezone
+
+import pytest
+
+from services.data.features.snapshot import FIELDS, VERSION
+from services.data.ingestion.validator import sha256
+from services.data.models.churn_experiment import FEATURES
+from services.data.models.propensity_experiment import MODEL_VERSION
+from services.data.models.propensity_inference import load_model, predict_rows, run
+from services.data.models.propensity_labels import TARGETS
+
+TARGET = "retail_purchase30"
+NOW = datetime(2026, 11, 19, tzinfo=timezone.utc)
+
+
+def write_json(path, value):
+    path.write_text(json.dumps(value, allow_nan=False), encoding="utf-8")
+
+
+@pytest.fixture
+def artifacts(tmp_path):
+    model = tmp_path / "model"
+    model.mkdir()
+    identity = dict(
+        model_version=MODEL_VERSION,
+        feature_version=VERSION,
+        target=TARGET,
+        target_version=TARGETS[TARGET][0],
+        horizon_days=30,
+        development_only=True,
+        serving_ready=False,
+    )
+    params = dict(
+        **identity,
+        features=list(FEATURES),
+        logistic=dict(
+            imputer_medians=[2.0] * 7,
+            scaler_mean=[1.0] * 7,
+            scaler_scale=[2.0] * 7,
+            coef=[0.1] * 7,
+            intercept=[-0.3],
+        ),
+    )
+    write_json(model / "model_parameters.json", params)
+    write_json(
+        model / "experiment_manifest.json",
+        dict(
+            **identity,
+            training_ready=False,
+            experiment_ready=False,
+            final_model=False,
+            output_sha256={
+                "model_parameters.json": sha256(model / "model_parameters.json")
+            },
+        ),
+    )
+    features = tmp_path / "features"
+    features.mkdir()
+    row = dict.fromkeys(FIELDS, 3)
+    row.update(
+        golden_customer_id="g-1",
+        cutoff_at="2026-03-01T00:00:00+07:00",
+        identity_status="PROVISIONAL",
+        feature_version=VERSION,
+        training_ready=False,
+        identity_time_policy="CURRENT_SNAPSHOT_RETROSPECTIVE",
+        recency_days="",
+    )
+    with (features / "features.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(row)
+    write_json(
+        features / "feature_manifest.json",
+        dict(
+            feature_version=VERSION,
+            training_ready=False,
+            rows=1,
+            cutoffs=[row["cutoff_at"]],
+            output_sha256={"features.csv": sha256(features / "features.csv")},
+        ),
+    )
+    return model, features, row
+
+
+def update_params(model, change):
+    path = model / "model_parameters.json"
+    params = json.loads(path.read_text())
+    change(params)
+    write_json(path, params)
+    manifest_path = model / "experiment_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["output_sha256"][path.name] = sha256(path)
+    write_json(manifest_path, manifest)
+
+
+def test_known_imputation_and_development_output(artifacts):
+    model, _, row = artifacts
+    result = predict_rows(load_model(model, TARGET), [row], generated_at=NOW)[0]
+    assert result["uncalibrated_probability"] == pytest.approx(
+        1 / (1 + math.exp(-0.35))
+    )
+    assert result["target"] == TARGET
+    assert result["valid_until"] is None
+    assert result["development_only"] is True
+    assert result["serving_ready"] is False
+    assert "eligible" not in result and "reasons" not in result
+
+
+def test_reload_matches_sklearn_fitted_parameters(artifacts):
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    model_dir, _, row = artifacts
+    pipeline = make_pipeline(
+        SimpleImputer(strategy="median", keep_empty_features=True),
+        StandardScaler(),
+        LogisticRegression(),
+    )
+    x = [[float(i + j) for j in range(7)] for i in range(8)]
+    x[0][0] = math.nan
+    pipeline.fit(x, [0, 0, 1, 0, 1, 0, 1, 1])
+    update_params(
+        model_dir,
+        lambda p: p.update(
+            logistic=dict(
+                imputer_medians=pipeline[0].statistics_.tolist(),
+                scaler_mean=pipeline[1].mean_.tolist(),
+                scaler_scale=pipeline[1].scale_.tolist(),
+                coef=pipeline[2].coef_[0].tolist(),
+                intercept=pipeline[2].intercept_.tolist(),
+            )
+        ),
+    )
+    actual = predict_rows(load_model(model_dir, TARGET), [row], generated_at=NOW)[0]
+    expected = pipeline.predict_proba([[math.nan, *[3.0] * 6]])[0, 1]
+    assert abs(actual["uncalibrated_probability"] - expected) < 1e-12
+
+
+@pytest.mark.parametrize(
+    "target", ["renewal60", "service_booking30", "booking30", "unknown"]
+)
+def test_wrong_or_unsupported_target(artifacts, target):
+    with pytest.raises(ValueError):
+        load_model(artifacts[0], target)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("coef", [1]),
+        ("intercept", [1, 2]),
+        ("scaler_scale", [0] * 7),
+        ("scaler_mean", [True] * 7),
+        ("imputer_medians", ["2"] * 7),
+        ("coef", [1e309] * 7),
+    ],
+)
+def test_invalid_parameters(artifacts, field, value):
+    model = artifacts[0]
+    # JSON numeric overflow is legal syntax, but not a finite model value.
+    if field == "coef" and value[0] == math.inf:
+        path = model / "model_parameters.json"
+        text = path.read_text().replace('"coef": [0.1', '"coef": [1e999')
+        path.write_text(text)
+        manifest_path = model / "experiment_manifest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["output_sha256"][path.name] = sha256(path)
+        write_json(manifest_path, manifest)
+    else:
+        update_params(model, lambda p: p["logistic"].update({field: value}))
+    with pytest.raises(ValueError):
+        load_model(model, TARGET)
+
+
+@pytest.mark.parametrize(
+    "bad", ['{"target": NaN}', '{"target": "a", "target": "b"}', "[]"]
+)
+def test_strict_json_manifest(artifacts, bad):
+    model = artifacts[0]
+    (model / "experiment_manifest.json").write_text(bad)
+    with pytest.raises(ValueError):
+        load_model(model, TARGET)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        dict(target_value=1),
+        dict(identity_status="bogus"),
+        dict(identity_time_policy="PIT"),
+        dict(cutoff_at="2027-01-01T00:00:00+07:00"),
+        dict(cutoff_at="2026-01-01"),
+        dict(tenure_days=""),
+        dict(purchase_count_90d="nan"),
+    ],
+)
+def test_feature_only_identity_time_and_numeric_restrictions(artifacts, change):
+    model, _, row = artifacts
+    with pytest.raises(ValueError):
+        predict_rows(load_model(model, TARGET), [{**row, **change}], generated_at=NOW)
+
+
+def test_run_needs_no_labels_and_preserves_inputs(artifacts, tmp_path):
+    model, features, _ = artifacts
+    # Deliberately invalid labels must never be opened.
+    (features / "propensity_labels.csv").write_text("not labels")
+    result = run(model, features, TARGET, tmp_path / "out", generated_at=NOW)
+    assert result["rows"] == 1
+    assert result["input_sha256"] == result["input_sha256_after"]
+    assert "propensity_labels.csv" not in result["input_sha256"]
+    assert (tmp_path / "out" / "predictions.json").exists()
+
+
+def test_checksum_tamper(artifacts, tmp_path):
+    model, features, _ = artifacts
+    (features / "features.csv").write_text("tampered")
+    with pytest.raises(ValueError, match="checksum"):
+        run(model, features, TARGET, tmp_path / "out", generated_at=NOW)
+    (model / "model_parameters.json").write_text("{}")
+    with pytest.raises(ValueError, match="checksum"):
+        load_model(model, TARGET)
+
+
+@pytest.mark.parametrize("destination", ["existing", "overlap", "ground_truth"])
+def test_output_refusals(artifacts, tmp_path, destination):
+    model, features, _ = artifacts
+    output = {
+        "existing": features,
+        "overlap": features / "new",
+        "ground_truth": tmp_path / "ground_truth" / "out",
+    }[destination]
+    with pytest.raises(ValueError):
+        run(model, features, TARGET, output, generated_at=NOW)
+
+
+def test_mutation_during_scoring_rejected(artifacts, tmp_path, monkeypatch):
+    from services.data.models import propensity_inference
+
+    original = propensity_inference.predict_rows
+    model, features, _ = artifacts
+
+    def mutate(*args, **kwargs):
+        result = original(*args, **kwargs)
+        with (features / "feature_manifest.json").open("a") as stream:
+            stream.write(" ")
+        return result
+
+    monkeypatch.setattr(propensity_inference, "predict_rows", mutate)
+    with pytest.raises(ValueError, match="changed"):
+        run(model, features, TARGET, tmp_path / "out", generated_at=NOW)
+    assert not (tmp_path / "out").exists()

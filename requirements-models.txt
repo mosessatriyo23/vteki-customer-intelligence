@@ -1,0 +1,2 @@
+# Optional development-only fitted churn experiment; not a runtime dependency.
+scikit-learn>=1.5,<2

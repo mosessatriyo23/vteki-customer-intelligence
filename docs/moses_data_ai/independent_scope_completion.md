@@ -1,5 +1,7 @@
 # Independent Data & AI development scope — completion handoff
 
+> Historical scope statement (2026-10-16), not completion of all FRD AI deliverables. See [current handoff](MOSES_CURRENT_HANDOFF.md) for the November fitted-churn implementation, reproducible diagnostics and remaining CLV/propensity/integration work.
+
 Status: **COMPLETE for synthetic development scope**, not production/model approval.
 Date: 2026-10-16. Ground truth remains evaluation-only and is never matching/model input.
 

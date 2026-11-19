@@ -15,7 +15,9 @@ from api.models import (
     RFMLifecycleSnapshot,
 )
 from services.data.customer360.persistence import save_profile_snapshots
+from services.data.ingestion.source_tables import SOURCE_TABLES
 from services.data.segmentation.persistence import save_segmentation_snapshots
+from services.data.segmentation.snapshot import RULE_VERSION
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -28,6 +30,7 @@ def make_session():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     ).execution_options(schema_translate_map=SQLITE_SCHEMA_TRANSLATE_MAP)
+    assert SOURCE_TABLES["transactions"].metadata is Base.metadata
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     session = factory()
@@ -208,6 +211,23 @@ def test_segmentation_validates_entire_batch_before_mutating_existing_snapshot()
         assert current.monetary == 100_000
         assert current.source_batch_id == "batch-1"
         assert _as_utc(current.generated_at) == _as_utc(first_generated_at)
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def test_segmentation_new_rule_version_preserves_old_snapshot():
+    engine, session = make_session()
+    try:
+        old = rfm_row(lifecycle="NEW")
+        save_segmentation_snapshots([old], "batch-old", "identity-v1", session)
+        new = rfm_row(lifecycle="ACTIVE", rule_version=RULE_VERSION)
+        save_segmentation_snapshots([new], "batch-new", "identity-v1", session)
+        rows = session.scalars(select(RFMLifecycleSnapshot)).all()
+        assert {(row.rule_version, row.lifecycle) for row in rows} == {
+            ("lifecycle-proposed-1.0", "NEW"),
+            (RULE_VERSION, "ACTIVE"),
+        }
     finally:
         session.close()
         engine.dispose()
