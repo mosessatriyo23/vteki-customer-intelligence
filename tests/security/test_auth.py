@@ -94,11 +94,15 @@ def token_for(client: TestClient, email: str) -> str:
 def test_auth_openapi_declares_runtime_email_domain_restriction():
     from api.auth import EMAIL_SCHEMA_PATTERN
 
-    schema = app.openapi()["components"]["schemas"]["UserCreate"]
-    self_email = schema["properties"]["email"]
-    assert self_email["format"] == "email"
-    assert self_email["pattern"] == EMAIL_SCHEMA_PATTERN
-    assert "additionalProperties" not in schema  # extras intentionally ignored
+    schemas = app.openapi()["components"]["schemas"]
+    user_schema = schemas["UserCreate"]
+    user_email = user_schema["properties"]["email"]
+    customer_email = schemas["CustomerCreate"]["properties"]["email"]
+    assert user_email["format"] == "email"
+    assert user_email["pattern"] == EMAIL_SCHEMA_PATTERN
+    assert customer_email["format"] == "email"
+    assert customer_email["pattern"] == EMAIL_SCHEMA_PATTERN
+    assert "additionalProperties" not in user_schema  # extras intentionally ignored
 
 
 def test_login_and_current_user(client: TestClient):
@@ -507,6 +511,65 @@ def test_campaign_create_accepts_integral_float_ab_test_ratio(client: TestClient
     )
     assert response.status_code == 201
     assert response.json()["ab_test_ratio"] == 9
+
+
+def test_campaign_create_accepts_integral_float_nba_decision_id(client: TestClient):
+    token = token_for(client, "campaign@example.com")
+    response = client.post(
+        "/campaigns",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "name": "Integral NBA decision id",
+            "target_segment": "ACTIVE",
+            "channel": "email_sim",
+            "nba_decision_id": 2_147_483_647.0,
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "NBA recommendation not found"
+
+
+def test_campaign_recommendation_cannot_be_linked_twice(client: TestClient):
+    admin_headers = {
+        "Authorization": f"Bearer {token_for(client, 'admin@example.com')}"
+    }
+    customer = client.post(
+        "/customers",
+        headers=admin_headers,
+        json={
+            "customer_code": "CAMPAIGN-LINK-001",
+            "full_name": "Campaign Link Customer",
+            "email": "campaign-link@example.com",
+            "segment": "Premium",
+        },
+    )
+    assert customer.status_code == 201
+    recommendation = client.post(
+        "/decisions/next-best-actions",
+        headers=admin_headers,
+        json={
+            "customer_id": customer.json()["id"],
+            "recommended_action": "Send a retention offer",
+            "rationale": {"reason": "Customer requested follow-up"},
+        },
+    )
+    assert recommendation.status_code == 201
+    campaign_headers = {
+        "Authorization": f"Bearer {token_for(client, 'campaign@example.com')}"
+    }
+    payload = {
+        "name": "Linked recommendation campaign",
+        "target_segment": "Premium",
+        "channel": "email_sim",
+        "nba_decision_id": recommendation.json()["id"],
+    }
+    created = client.post("/campaigns", headers=campaign_headers, json=payload)
+    duplicate = client.post("/campaigns", headers=campaign_headers, json=payload)
+    assert created.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["detail"] == (
+        "NBA recommendation is already linked to a campaign"
+    )
 
 
 def test_job_create_rejects_boolean_max_attempts(client: TestClient):

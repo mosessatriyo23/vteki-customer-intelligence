@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -61,6 +62,13 @@ class CampaignCreate(BaseModel):
     def normalize_ab_test_ratio(cls, value: object) -> object:
         if isinstance(value, bool):
             raise ValueError("ab_test_ratio must be an integer, not a boolean")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
+
+    @field_validator("nba_decision_id", mode="before")
+    @classmethod
+    def normalize_nba_decision_id(cls, value: object) -> object:
         if isinstance(value, float) and value.is_integer():
             return int(value)
         return value
@@ -163,6 +171,16 @@ def create_campaign(
                 status_code=409,
                 detail="NBA recommendation is not available for campaign use",
             )
+        already_linked = (
+            db.query(Campaign.id)
+            .filter(Campaign.nba_decision_id == payload.nba_decision_id)
+            .first()
+        )
+        if already_linked is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="NBA recommendation is already linked to a campaign",
+            )
         if decision.selected_action or decision.recommended_action == "NO_ACTION":
             action = decision.selected_action or decision.recommended_action
             if action == "NO_ACTION":
@@ -194,7 +212,19 @@ def create_campaign(
         target_customer_id=target_customer_id,
     )
     db.add(campaign)
-    db.flush()
+    try:
+        db.flush()
+    except IntegrityError as error:
+        db.rollback()
+        constraint_name = getattr(
+            getattr(error.orig, "diag", None), "constraint_name", None
+        )
+        if constraint_name == "uq_campaign_nba_decision":
+            raise HTTPException(
+                status_code=409,
+                detail="NBA recommendation is already linked to a campaign",
+            ) from error
+        raise
     record_audit_event(
         db,
         correlation_id=campaign.correlation_id or request.state.correlation_id,

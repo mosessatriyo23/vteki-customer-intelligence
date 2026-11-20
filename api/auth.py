@@ -13,38 +13,10 @@ from api.security import (
     require_roles,
     verify_password,
 )
+from api.validation import EMAIL_SCHEMA_PATTERN, email_field
+
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-# OpenAPI format=email is broader than EmailStr/email-validator: for example,
-# Schemathesis considers 0@0.0 valid, but EmailStr rejects numeric-only TLDs.
-# Document a conservative ASCII subset of valid mailbox/domain syntax, including
-# DNS label and TLD rules, and exclude email-validator's special-use suffixes.
-# The pattern is portable to JSON Schema / JavaScript regular expressions.
-_RESERVED_EMAIL_SUFFIXES = ("arpa", "invalid", "local", "localhost", "onion", "test")
-
-
-def _case_insensitive_ascii(value: str) -> str:
-    return "".join(f"[{letter.lower()}{letter.upper()}]" for letter in value)
-
-
-EMAIL_SCHEMA_PATTERN = (
-    r"^(?![^@\s]+@(?:[^.@\s]+\.)*(?:"
-    + "|".join(_case_insensitive_ascii(s) for s in _RESERVED_EMAIL_SUFFIXES)
-    + r")$)(?=[^@]{1,64}@)"
-    + r"[A-Za-z0-9_%+\-]+(?:\.[A-Za-z0-9_%+\-]+)*@"
-    + r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
-    + r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
-    + r"\.[A-Za-z]{2,63}$"
-)
-
-
-def email_field():
-    return Field(
-        max_length=254,
-        json_schema_extra={"pattern": EMAIL_SCHEMA_PATTERN},
-        description="Email address with DNS-valid TLD; special-use/reserved domains are not accepted.",
-    )
 
 
 class LoginRequest(BaseModel):

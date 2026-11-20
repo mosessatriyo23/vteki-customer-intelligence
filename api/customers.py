@@ -18,7 +18,7 @@ from api.models import (
     User,
 )
 from api.security import require_roles
-from api.validation import DBId
+from api.validation import DBId, email_field
 
 router = APIRouter(prefix="/customers", tags=["customer 360"])
 
@@ -41,7 +41,7 @@ class CustomerResponse(BaseModel):
 class CustomerCreate(BaseModel):
     customer_code: str = Field(min_length=1, max_length=32, pattern=r"^[^\x00]*$")
     full_name: str = Field(min_length=1, max_length=128, pattern=r"^[^\x00]*$")
-    email: EmailStr
+    email: EmailStr = email_field()
     segment: str = Field(min_length=1, max_length=64, pattern=r"^[^\x00]*$")
 
 
