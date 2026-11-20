@@ -11,6 +11,7 @@ from pathlib import Path
 from services.data.features.snapshot import FIELDS as FEATURE_FIELDS
 from services.data.ingestion.validator import sha256
 from services.data.models.baseline import predict_churn, temporal_split
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.labels import CHRIST_VERSION
 
 _HORIZON_DAYS = 90
@@ -163,6 +164,7 @@ def evaluate(rows: list[dict]) -> dict[str, object]:
         "training_ready": False,
         "experiment_ready": False,
         "final_model": False,
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "train": _evaluate_rows(train),
         "holdout": _evaluate_rows(test),
         "train_cutoffs": train_cutoffs,

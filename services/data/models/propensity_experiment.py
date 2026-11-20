@@ -24,6 +24,7 @@ from services.data.models.churn_experiment import (
     SEED,
     _matrix,
 )
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp, _binary
 from services.data.models.propensity_labels import (
     BOOKING_TARGET,
@@ -200,6 +201,7 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
         "final_model": False,
         "development_only": True,
         "serving_ready": False,
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "valid_until": None,
         "train_rows": len(train),
         "test_rows": len(test),

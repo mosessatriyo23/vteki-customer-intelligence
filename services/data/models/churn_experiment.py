@@ -15,6 +15,7 @@ from services.data.features.snapshot import FIELDS as FEATURE_FIELDS
 from services.data.features.snapshot import VERSION as FEATURE_VERSION
 from services.data.ingestion.validator import sha256
 from services.data.models.baseline import predict_churn, temporal_split
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp, _binary
 from services.data.models.labels import CHRIST_VERSION, TRAINING_FIELDS
 
@@ -179,6 +180,7 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
         "final_model": False,
         "development_only": True,
         "serving_ready": False,
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "train_rows": len(train),
         "test_rows": len(test),
         "purged_rows": len(rows) - len(train) - len(test),
