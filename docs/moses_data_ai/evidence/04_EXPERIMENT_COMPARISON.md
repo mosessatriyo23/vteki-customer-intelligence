@@ -1,5 +1,7 @@
 # 04 — Experiment / candidate comparison status
 
+> **Historical snapshot (2026-11-17). Update 2026-11-20:** see [Benchmark evidence](../BENCHMARK_EVIDENCE_2026-11-20.md) for freshly reproduced evaluation-only identity and fixed-rule metrics, plus checksum-verified saved churn/calibration/retail/renewal/membership comparisons. The historical NOT RUN statements below describe the earlier snapshot, not current artifact availability. No winner, promotion or approval is implied; unfavorable metrics and synthetic/cohort limitations are retained in the update.
+
 **As of:** 2026-11-17 · **Requested development evidence:** James. **Owner:** Moses; business review Christ; platform review James. **Reviewer:** pending. **Approval date:** not granted. Checkout: `main` `7e09616` plus PR #38 `aa2a23d`.
 
 ```text

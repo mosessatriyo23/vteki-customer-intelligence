@@ -2,6 +2,18 @@
 
 Tanggal 19 November 2026. Status kerja, bukan sertifikasi selesai atau persetujuan model. Acuan lokal: FRD/TRD dalam `requirements/extracted_20261118/`, Requirement_Capstone, dan keputusan bisnis Christ. Perbedaan antaracuan harus direkonsiliasi; dokumen lama tidak otomatis menimpa keputusan baru.
 
+## Pembaruan 2026-11-20 (setelah PR #48–#54; baca sebelum tabel)
+
+Tabel di bawah ditulis 19 Nov. Butir yang sudah berubah (development-only, bukan acceptance):
+
+- **Importance tiga-fold churn dan membership renewal:** ada (PR #53, #54). Reload/importance membership dan kalibrasi churn tersedia; reason code propensity berbasis taxonomy tetap terbuka.
+- **FR-MON-002:** PSI skor, volume, dan alert advisory offline ada (PR #51). Band mix, metrik per segmen, delivery alert, suspend/fallback tetap terbuka.
+- **Governance TRD §9.6:** inventaris read-only dengan metadata terverifikasi (PR #49, #53); estimator algorithm/hyperparameter dicatat untuk artefak BARU di empat generator. Promosi model, author != validator, dan persistence tetap terbuka.
+- **Feature definition K-03:** skeleton in-memory (PR #52); belum persisten, daftar restricted berasal dari caller.
+- **TRD 9.7:** disclaimer sintetis pada tujuh generator evaluasi (PR #52).
+- Suite terakhir terverifikasi: 1429 passed, 19 skipped, 3 xfailed. Rujukan: [ledger mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md).
+- Observasi 500 intermiten pada `POST /monitoring/drift` (CI #50) milik backend James; dibaca statis, tidak tereproduksi dari validasi payload, belum ada root cause.
+
 ## Kriteria selesai
 
 Sebuah requirement ditutup dengan implementasi, bukti pengujian, hasil run yang dapat direproduksi, dan acceptance yang relevan. Dokumentasi keterbatasan tidak menutup requirement yang belum diimplementasikan. Hasil model buruk tidak otomatis menggagalkan pekerjaan eksperimen: FRD tidak menjanjikan target AUC sebelum baseline. Sebaliknya, test unit lulus tidak membuktikan integrasi atau penerimaan bisnis.
