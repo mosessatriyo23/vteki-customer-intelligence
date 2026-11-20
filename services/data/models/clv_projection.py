@@ -1,4 +1,10 @@
-"""Development-only gross CLV wrapper over the canonical business calculator.
+"""Development-only gross and actual-revenue CLV wrappers.
+
+``project_clv_actual_revenue`` is the separately versioned Christ v1.4
+proposal path. It shares arithmetic and validation with the legacy gross
+wrapper but labels its outputs as actual revenue. Approval and historical
+knowledge-time evidence remain missing. The following describes the legacy
+``project_clv`` path:
 
 Inputs are pre-aggregated rolling-365-day gross IDR amounts. The existing
 producer, clv_features.build_clv_aggregates, sums gross_amount exclusively for
@@ -18,6 +24,7 @@ import math
 from services.data.models.business_clv import calculate_business_clv
 
 FORMULA_VERSION = "christ-clv-gross-365d-dev-1"
+ACTUAL_REVENUE_FORMULA_VERSION = "christ-clv-actual-revenue-365d-dev-1"
 
 
 def project_clv(
@@ -105,5 +112,55 @@ def project_clv(
             "supplied_not_approved" if result is not None else "missing_blocked"
         ),
         "formula_version": FORMULA_VERSION,
+        "production_ready": False,
+    }
+
+
+def project_clv_actual_revenue(
+    history_actual_revenue_365d: int | float,
+    transaction_count_365d: int,
+    retention_factor: int | float | None,
+    retention_factor_version: str | None,
+) -> dict:
+    """Project CLV from ``actual_revenue`` aggregates (Christ v1.4 proposal).
+
+    Validation and arithmetic are shared with ``project_clv``; only the revenue
+    basis and output labels differ. Retention remains caller-supplied and
+    missing retention blocks projection and tier. The v1.4 mapping is pending
+    approval and ``actual_revenue`` knowledge-time is unproven, so every
+    readiness/approval flag stays false.
+    """
+    gross = project_clv(
+        history_actual_revenue_365d,
+        transaction_count_365d,
+        retention_factor,
+        retention_factor_version,
+    )
+    return {
+        "historical_spend_365d_actual_revenue_idr": gross[
+            "historical_spend_365d_gross_idr"
+        ],
+        "transaction_count_365d": gross["transaction_count_365d"],
+        "avg_txn_value_actual_revenue_idr": gross["avg_txn_value_gross_idr"],
+        "freq_per_month": gross["freq_per_month"],
+        "retention_factor": gross["retention_factor"],
+        "retention_factor_version": gross["retention_factor_version"],
+        "projected_forward_12m_actual_revenue_idr": gross[
+            "projected_forward_12m_gross_idr"
+        ],
+        "clv_total_actual_revenue_idr": gross["clv_total_gross_idr"],
+        "tier": gross["tier"],
+        "retention_scope_provenance": gross["retention_scope_provenance"],
+        "revenue_basis": "actual_revenue",
+        "value_horizon_months": 12,
+        "availability_time_status": "UNPROVEN",
+        "formula_version": ACTUAL_REVENUE_FORMULA_VERSION,
+        "training_ready": False,
+        "experiment_ready": False,
+        "final_model": False,
+        "serving_ready": False,
+        "calibration_final": False,
+        "approved": False,
+        "targeting_allowed": False,
         "production_ready": False,
     }
