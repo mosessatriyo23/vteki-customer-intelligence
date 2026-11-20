@@ -7,6 +7,7 @@ from sqlalchemy import func
 
 from api.database import SessionLocal
 from api.models import AuditEvent, Customer
+from services.decision.campaign.execution import build_simulated_execution_result
 
 
 def audit_summary(_: dict[str, Any]) -> dict[str, Any]:
@@ -39,22 +40,25 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
     ratio = payload.get("ab_test_ratio", 50)
     if not isinstance(ratio, int) or not 0 <= ratio <= 100:
         raise ValueError("A/B test ratio must be between 0 and 100")
+    channel = payload.get("channel", "unknown")
+    target_customer_id = payload.get("target_customer_id")
+    target_mode = "single_customer" if target_customer_id is not None else "segment"
     with SessionLocal() as session:
-        audience_size = (
-            session.query(func.count(Customer.id))
-            .filter(Customer.segment == target_segment)
-            .scalar()
-            or 0
+        query = session.query(Customer.id).filter(
+            Customer.segment == target_segment,
+            Customer.is_demo.is_(False),
         )
-    variant_a = audience_size * ratio // 100
-    return {
-        "delivery_mode": "simulated",
-        "external_delivery": False,
-        "channel": payload.get("channel", "unknown"),
-        "audience_size": audience_size,
-        "variant_a_count": variant_a,
-        "variant_b_count": audience_size - variant_a,
-    }
+        if target_customer_id is not None:
+            if isinstance(target_customer_id, bool) or not isinstance(target_customer_id, int):
+                raise ValueError("target_customer_id must be an integer")
+            query = query.filter(Customer.id == target_customer_id)
+        customer_ids = [row[0] for row in query.order_by(Customer.id).all()]
+    return build_simulated_execution_result(
+        customer_ids=customer_ids,
+        channel=channel,
+        ab_test_ratio=ratio,
+        target_mode=target_mode,
+    )
 
 
 TASK_HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {

@@ -2,13 +2,12 @@
 services:
   db:
     image: postgres:15-alpine
-    container_name: vteki_db
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-vteki_intelligence}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -21,19 +20,18 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    container_name: vteki_api
     depends_on:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${API_DATABASE_URL:?Set API_DATABASE_URL in .env}
-      MIGRATION_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-vteki_intelligence}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-vteki_intelligence}
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-vteki_intelligence}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       ACCESS_TOKEN_TTL_MINUTES: ${ACCESS_TOKEN_TTL_MINUTES:-30}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:?Set BOOTSTRAP_ADMIN_EMAIL in .env}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?Set BOOTSTRAP_ADMIN_PASSWORD in .env}
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     command: ["sh", "-c", "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"]
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -45,12 +43,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
-    container_name: vteki_worker
     depends_on:
       api:
         condition: service_healthy
     environment:
-      DATABASE_URL: ${WORKER_DATABASE_URL:?Set WORKER_DATABASE_URL in .env}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-vteki_intelligence}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       PIPELINE_INTERVAL_MINUTES: ${PIPELINE_INTERVAL_MINUTES:-15}
     command: ["python", "-m", "worker"]
@@ -60,9 +57,8 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
-    container_name: vteki_web
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     depends_on:
       api:
         condition: service_healthy

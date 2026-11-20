@@ -1,16 +1,23 @@
-from datetime import datetime, timezone
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from api.audit import record_audit_event
 from api.database import get_db
-from api.models import ModelPredictionRecord, ModelPredictionRun, User
+from api.models import (
+    Customer,
+    GoldenCustomer,
+    ModelPredictionRecord,
+    ModelPredictionRun,
+    SourceIdentityMapping,
+    User,
+)
 from api.security import require_roles
 from api.validation import DBId
 from services.data.models.prediction_review import validate_prediction_import
@@ -86,6 +93,20 @@ def import_prediction_run(
             detail=f"This Moses manifest is already imported as run {existing.id}",
         )
 
+    golden_ids = {row["customer_id"] for row in candidate.records}
+    known_golden_ids = {
+        row[0]
+        for row in db.query(GoldenCustomer.golden_customer_id)
+        .filter(GoldenCustomer.golden_customer_id.in_(golden_ids))
+        .all()
+    }
+    unknown_ids = sorted(golden_ids - known_golden_ids)
+    if unknown_ids:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Golden Customer IDs are not in the identity registry: {', '.join(unknown_ids[:5])}",
+        )
+
     run = ModelPredictionRun(
         model_version=candidate.model_version,
         feature_set_version=candidate.feature_set_version,
@@ -156,6 +177,50 @@ def list_prediction_records(
         .order_by(ModelPredictionRecord.id)
     )
     records = query.offset(offset).limit(limit).all()
+    record_customer_ids = {record.customer_id for record in records}
+    golden_status = {
+        row.golden_customer_id: row.status
+        for row in db.query(GoldenCustomer)
+        .filter(GoldenCustomer.golden_customer_id.in_(record_customer_ids))
+        .all()
+    } if record_customer_ids else {}
+    application_customers = {
+        customer.golden_customer_id: customer
+        for customer in db.query(Customer)
+        .filter(
+            Customer.golden_customer_id.in_(record_customer_ids),
+            Customer.is_demo.is_(False),
+        )
+        .all()
+    } if record_customer_ids else {}
+    candidate_rows = (
+        db.query(SourceIdentityMapping, Customer)
+        .join(Customer, Customer.customer_code == SourceIdentityMapping.source_customer_id)
+        .join(GoldenCustomer, GoldenCustomer.golden_customer_id == SourceIdentityMapping.golden_customer_id)
+        .filter(
+            SourceIdentityMapping.golden_customer_id.in_(record_customer_ids),
+            GoldenCustomer.status == "APPROVED",
+            Customer.is_demo.is_(False),
+            Customer.golden_customer_id.is_(None),
+        )
+        .all()
+        if record_customer_ids
+        else []
+    )
+    candidates_by_golden: dict[str, list[dict[str, Any]]] = {}
+    for mapping, customer in candidate_rows:
+        candidates_by_golden.setdefault(mapping.golden_customer_id, []).append(
+            {
+                "id": customer.id,
+                "customer_code": customer.customer_code,
+                "full_name": customer.full_name,
+            }
+        )
+    mapping_candidates = {
+        golden_id: candidates[0]
+        for golden_id, candidates in candidates_by_golden.items()
+        if len(candidates) == 1
+    }
     return {
         "run_id": run_id,
         "review_status": run.review_status,
@@ -174,6 +239,21 @@ def list_prediction_records(
                 "contract_status": record.contract_status,
                 "reason_codes": record.reason_codes,
                 "source_record": record.source_record,
+                "identity_status": golden_status.get(record.customer_id),
+                "application_customer": (
+                    {
+                        "id": application_customers[record.customer_id].id,
+                        "customer_code": application_customers[record.customer_id].customer_code,
+                        "full_name": application_customers[record.customer_id].full_name,
+                    }
+                    if record.customer_id in application_customers
+                    else None
+                ),
+                "mapping_candidate": (
+                    mapping_candidates[record.customer_id]
+                    if record.customer_id not in application_customers
+                    else None
+                ),
             }
             for record in records
         ],

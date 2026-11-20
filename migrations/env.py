@@ -14,10 +14,7 @@ if config.config_file_name is not None:
 
 # Migrasi menggunakan akun administrator.
 # Aplikasi runtime tetap menggunakan DATABASE_URL miliknya sendiri.
-migration_database_url = os.getenv(
-    "MIGRATION_DATABASE_URL",
-    os.getenv("DATABASE_URL", DATABASE_URL),
-)
+migration_database_url = os.getenv("MIGRATION_DATABASE_URL") or DATABASE_URL
 
 config.set_main_option(
     "sqlalchemy.url",

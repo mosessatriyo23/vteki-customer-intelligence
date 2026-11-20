@@ -1,3 +1,5 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -30,6 +32,7 @@ class MeasurementCreate(BaseModel):
     metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
     observed_value: float = Field(strict=True, allow_inf_nan=False)
     incremental_value: float = Field(strict=True, allow_inf_nan=False)
+    source_mode: Literal["simulated", "unclassified"] = "unclassified"
 
     @field_validator("campaign_id", mode="before")
     @classmethod
@@ -89,6 +92,7 @@ def dashboard(
                 "metric": item.metric_name,
                 "observed": item.observed_value,
                 "incremental": item.incremental_value,
+                "source_mode": item.source_mode,
                 "measured_at": item.measured_at,
             }
             for item in measurements
@@ -177,6 +181,7 @@ def record_measurement(
             "metric": measurement.metric_name,
             "observed": measurement.observed_value,
             "incremental": measurement.incremental_value,
+            "source_mode": measurement.source_mode,
         },
     )
     db.commit()

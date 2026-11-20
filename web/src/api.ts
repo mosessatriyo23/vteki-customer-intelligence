@@ -5,10 +5,11 @@ export type ApiCustomer = {
   full_name: string
   email: string
   segment: string
-  ltv: number
-  churn_risk: string
+  ltv: number | null
+  churn_risk: string | null
   next_best_action: string | null
   created_at: string
+  golden_customer_id: string | null
 }
 export type ApiGoldenCustomer = {
   golden_customer_id: string
@@ -38,11 +39,20 @@ export type ApiCampaign = {
   approved_at: string | null
   created_by: number | null
   created_at: string
+  nba_decision_id: number | null
+  target_customer_id: number | null
   latest_execution: {
     job_id: number
     status: string
     result: Record<string, unknown> | null
     attempts: number
+  } | null
+  latest_measurement: {
+    metric_name: string
+    observed_value: number
+    incremental_value: number
+    source_mode: 'simulated' | 'unclassified'
+    measured_at: string
   } | null
 }
 export type ApiReview = {
@@ -99,6 +109,9 @@ export type ApiModelPredictionRecord = {
   contract_status: string
   reason_codes: Array<Record<string, unknown>>
   source_record: Record<string, unknown>
+  identity_status: string | null
+  application_customer: { id: number; customer_code: string; full_name: string } | null
+  mapping_candidate: { id: number; customer_code: string; full_name: string } | null
 }
 
 const API_ROOT = '/api'
@@ -149,11 +162,13 @@ export const api = {
   login: (email: string, password: string) => request<{ access_token: string; token_type: string; expires_in: number }>('/auth/login', null, { method: 'POST', body: JSON.stringify({ email, password }) }),
   me: (token: string) => request<ApiUser>('/auth/me', token),
   customers: (token: string, query = '') => request<ApiCustomer[]>(`/customers?limit=200${query ? `&q=${encodeURIComponent(query)}` : ''}`, token),
+  createCustomer: (token: string, payload: { customer_code: string; full_name: string; email: string; segment: string }) => request<ApiCustomer>('/customers', token, { method: 'POST', body: JSON.stringify(payload) }),
+  linkGoldenIdentity: (token: string, customerId: number, goldenCustomerId: string) => request<{ customer_id: number; golden_customer_id: string; status: string }>(`/customers/${customerId}/golden-identity`, token, { method: 'PUT', body: JSON.stringify({ golden_customer_id: goldenCustomerId }) }),
   goldenCustomers: (token: string) => request<ApiGoldenCustomer[]>('/customers/golden?limit=200', token),
   goldenProvenance: (token: string, goldenId: string) => request<Record<string, unknown>>(`/customers/golden/${encodeURIComponent(goldenId)}/provenance`, token),
   customerProvenance: (token: string, id: number) => request<Record<string, unknown>>(`/customers/${id}/provenance`, token),
   campaigns: (token: string) => request<ApiCampaign[]>('/campaigns', token),
-  createCampaign: (token: string, payload: { name: string; target_segment: string; channel: string; message_draft: string }) => request<ApiCampaign>('/campaigns', token, { method: 'POST', body: JSON.stringify(payload) }),
+  createCampaign: (token: string, payload: { name: string; target_segment: string; channel: string; message_draft: string; nba_decision_id?: number | null }) => request<ApiCampaign>('/campaigns', token, { method: 'POST', body: JSON.stringify(payload) }),
   submitCampaign: (token: string, id: number) => request<ApiCampaign>(`/campaigns/${id}/request-approval`, token, { method: 'POST' }),
   approveCampaign: (token: string, id: number) => request<ApiCampaign>(`/campaigns/${id}/approve`, token, { method: 'POST' }),
   rejectCampaign: (token: string, id: number, reviewComment: string) => request<{ status: string }>(`/governance/campaigns/${id}/approval`, token, { method: 'POST', body: JSON.stringify({ approved: false, review_comment: reviewComment }) }),

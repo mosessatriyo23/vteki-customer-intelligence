@@ -145,18 +145,28 @@ class BatchJob(Base):
 
 class Customer(Base):
     __tablename__ = "customers"
-    __table_args__ = {"schema": "core"}
+    __table_args__ = (
+        UniqueConstraint("golden_customer_id", name="uq_customer_golden_id"),
+        {"schema": "core"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(128))
     email: Mapped[str] = mapped_column(String(320))
     segment: Mapped[str] = mapped_column(String(64), index=True)
-    ltv: Mapped[float] = mapped_column(default=0.0)
-    churn_risk: Mapped[str] = mapped_column(
-        String(16), default="Low"
+    ltv: Mapped[float | None] = mapped_column(nullable=True)
+    churn_risk: Mapped[str | None] = mapped_column(
+        String(16), nullable=True
     )  # Low, Medium, High
     next_best_action: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    golden_customer_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("identity.golden_customers.golden_customer_id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -166,7 +176,10 @@ class Customer(Base):
 
 class Campaign(Base):
     __tablename__ = "campaigns"
-    __table_args__ = {"schema": "act"}
+    __table_args__ = (
+        UniqueConstraint("nba_decision_id", name="uq_campaign_nba_decision"),
+        {"schema": "act"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(128))
@@ -187,6 +200,12 @@ class Campaign(Base):
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
     execution_job_id: Mapped[int | None] = mapped_column(
         ForeignKey("act.batch_jobs.id", ondelete="RESTRICT"), nullable=True
+    )
+    nba_decision_id: Mapped[int | None] = mapped_column(
+        ForeignKey("dec.nba_decisions.id", ondelete="RESTRICT"), nullable=True
+    )
+    target_customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("core.customers.id", ondelete="RESTRICT"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -380,6 +399,7 @@ class CampaignMeasurement(Base):
     metric_name: Mapped[str] = mapped_column(String(100))
     observed_value: Mapped[float] = mapped_column()
     incremental_value: Mapped[float] = mapped_column()
+    source_mode: Mapped[str] = mapped_column(String(24), default="unclassified", nullable=False)
     measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -961,3 +981,8 @@ class BusinessEventHistory(Base):
     idempotency_key: Mapped[str] = mapped_column(String(256), nullable=False)
     lineage_reference: Mapped[str | None] = mapped_column(String(128), nullable=True)
     payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+# Register the source tables before callers build Base.metadata (including the
+# SQLite API fixtures) so foreign keys declared above resolve consistently.
+from services.data.ingestion import source_tables as _source_tables  # noqa: E402,F401

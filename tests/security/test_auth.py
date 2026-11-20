@@ -286,18 +286,31 @@ def test_audit_records_authenticated_actor(client: TestClient):
     assert trace_payload["audit_events_truncated"] is False
 
 
-def test_customer_seed_and_search_require_authentication(client: TestClient):
+def test_customer_seed_is_disabled_and_registered_customer_search_requires_authentication(client: TestClient):
     admin_token = token_for(client, "admin@example.com")
     seed = client.post(
         "/customers/seed", headers={"Authorization": f"Bearer {admin_token}"}
     )
-    assert seed.status_code == 201
+    assert seed.status_code == 410
+    created = client.post(
+        "/customers",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={
+            "customer_code": "REAL-1001",
+            "full_name": "Budi Santoso",
+            "email": "budi@example.com",
+            "segment": "Premium",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["ltv"] is None
+    assert created.json()["churn_risk"] is None
     analyst_token = token_for(client, "analyst@example.com")
     response = client.get(
         "/customers?q=Budi", headers={"Authorization": f"Bearer {analyst_token}"}
     )
     assert response.status_code == 200
-    assert [customer["customer_code"] for customer in response.json()] == ["CUST-1001"]
+    assert [customer["customer_code"] for customer in response.json()] == ["REAL-1001"]
     assert client.get("/customers").status_code == 401
     customer_id = response.json()[0]["id"]
     provenance = client.get(
@@ -306,7 +319,7 @@ def test_customer_seed_and_search_require_authentication(client: TestClient):
     )
     assert provenance.status_code == 200
     assert provenance.json()["source"] == "core.customers"
-    assert provenance.json()["audit"][0]["event_type"] == "customer.seeded"
+    assert provenance.json()["audit"][0]["event_type"] == "customer.registered"
 
 
 def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkeypatch):
@@ -545,14 +558,19 @@ def test_nba_override_and_monitoring_dashboard(client: TestClient):
     admin_headers = {
         "Authorization": f"Bearer {token_for(client, 'admin@example.com')}"
     }
-    client.post("/customers/seed", headers=admin_headers)
+    customer = client.post(
+        "/customers",
+        headers=admin_headers,
+        json={"customer_code": "REAL-NBA", "full_name": "NBA Customer", "email": "nba@example.com", "segment": "Premium"},
+    )
+    assert customer.status_code == 201
     correlation_id = "nba-human-override-4821"
     request_headers = {**admin_headers, "X-Correlation-ID": correlation_id}
     recommendation = client.post(
         "/decisions/next-best-actions",
         headers=request_headers,
         json={
-            "customer_id": 1,
+            "customer_id": customer.json()["id"],
             "recommended_action": "Send welcome offer",
             "rationale": {"score": 0.82},
         },
@@ -614,12 +632,17 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
         "Authorization": f"Bearer {admin_token}",
         "X-Correlation-ID": correlation_id,
     }
-    client.post("/customers/seed", headers=headers)
+    customer = client.post(
+        "/customers",
+        headers=headers,
+        json={"customer_code": "REAL-TRACE", "full_name": "Trace Customer", "email": "trace@example.com", "segment": "Premium"},
+    )
+    assert customer.status_code == 201
     created = client.post(
         "/decisions/next-best-actions",
         headers=headers,
         json={
-            "customer_id": 1,
+            "customer_id": customer.json()["id"],
             "recommended_action": "Book a service consultation",
             "rationale": {"affinity": 0.82, "last_visit_days": 42},
         },

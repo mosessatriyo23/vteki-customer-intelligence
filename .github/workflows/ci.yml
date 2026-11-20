@@ -555,8 +555,17 @@ jobs:
               )
               print(f"Created E2E user: {email}")
 
-          request("/customers/seed", {}, token)
-          print("E2E customers seeded")
+          customer = request(
+              "/customers",
+              {
+                  "customer_code": "E2E-REAL-001",
+                  "full_name": "E2E Registered Customer",
+                  "email": "e2e-customer@example.com",
+                  "segment": "Premium",
+              },
+              token,
+          )
+          print(f"Registered E2E customer: {customer['customer_code']}")
           PY
 
       - name: Set Up Node

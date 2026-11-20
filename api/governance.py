@@ -135,7 +135,14 @@ def list_nba_decisions(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
 ) -> list[dict[str, Any]]:
-    decisions = db.query(NBADecision).order_by(NBADecision.id.desc()).limit(100).all()
+    decisions = (
+        db.query(NBADecision)
+        .join(Customer, Customer.id == NBADecision.customer_id)
+        .filter(Customer.is_demo.is_(False))
+        .order_by(NBADecision.id.desc())
+        .limit(100)
+        .all()
+    )
     results = []
     for d in decisions:
         customer = db.get(Customer, d.customer_id)

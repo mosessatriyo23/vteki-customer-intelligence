@@ -4,12 +4,12 @@ Platform starter untuk arsitektur data pelanggan dengan PostgreSQL, JWT/RBAC, au
 
 ## Menjalankan stack
 
-1. Salin `.env.example` menjadi `.env`, lalu ganti seluruh password dan `JWT_SECRET` contoh dengan nilai unik. Jangan commit `.env`.
-2. Jalankan `docker compose up --build -d`.
+1. Dari root repo, jalankan `Copy-Item .env.example .env` di PowerShell (atau `cp .env.example .env` di macOS/Linux). Ganti `POSTGRES_PASSWORD`, password admin, dan `JWT_SECRET` dengan nilai unik. Gunakan karakter alfanumerik untuk password PostgreSQL karena Compose menyusunnya ke URL koneksi. Jangan commit `.env`.
+2. Jalankan `docker compose --env-file .env up --build -d` dari root repo. Compose membangun API, web, dan worker, menunggu PostgreSQL sehat, lalu menjalankan migrasi otomatis.
 3. Buat administrator pertama satu kali dengan `docker compose exec api python -m api.bootstrap`.
-4. Buka `http://localhost` untuk web app atau `http://localhost:8000/docs` untuk OpenAPI.
+4. Buka `http://localhost` untuk web app atau `http://localhost:8000/docs` untuk OpenAPI. Port host dapat diubah lewat `WEB_PORT`, `API_PORT`, dan `POSTGRES_PORT`.
 
-API menjalankan migrasi Alembic sebelum menerima request. Bootstrap ditolak jika tabel user sudah berisi akun. Endpoint bootstrap hanya membuat admin pertama; user berikutnya dibuat admin lewat `POST /auth/users`.
+Bootstrap ditolak jika tabel user sudah berisi akun. User berikutnya dibuat admin lewat `POST /auth/users`.
 
 ## PostgreSQL dan keamanan
 
@@ -55,13 +55,13 @@ Data telepon, riwayat kunjungan, consent per channel, dan segmentasi membership 
 
 Jalankan API/database dengan Docker Compose, lalu masuk ke `web/`, jalankan `npm ci` dan `npm run dev`. Proxy `/api` Vite meneruskan request ke API pada port 8000; web dev server tersedia di `http://localhost:5173`.
 
-`POST /customers/seed` hanya menyediakan record contoh untuk pengembangan dan tes; jangan gunakan pada database demo atau produksi yang datanya harus mencerminkan sumber asli. Tombol pemuatan record contoh tidak ditampilkan di web app.
+Endpoint demo `POST /customers/seed` dinonaktifkan dan mengembalikan `410 Gone`. Pelanggan hanya muncul setelah dimasukkan melalui sumber resmi atau didaftarkan admin lewat `POST /customers`; nilai LTV dan churn yang belum ada tetap kosong. Record demo lama ditandai dan disembunyikan dari alur pelanggan/NBA/kampanye.
 
 ## Handoff Moses dan pemeriksaan model
 
 Halaman **Review model Moses** menerima `contract_manifest.json` dan `records.jsonl` keluaran `services.data.models.prediction_contract`, memeriksa checksum/versi, dan menyimpan run serta baris skor ke `ml.prediction_review_runs` dan `ml.prediction_review_records`. Role admin/analis dapat mengimpor artefak; run hanya dapat ditinjau oleh pengguna lain. Catatan import dan review masuk ke audit trail.
 
-Artefak di halaman review tetap diberi status **development/non-serving**. Kontrak I-04 masih draft, tidak ada output Moses di repo yang disetujui untuk serving, dan teks alasan/band bisnis belum disetujui. Review teknis mencatat pemeriksaan orang kedua; itu tidak mengaktifkan serving dan tidak menghubungkan skor ke NBA. Proposal NBA yang ada tetap tersimpan di `dec.nba_decisions` sebagai proposal manual. Jangan gunakan skor di halaman review untuk memilih pelanggan atau campaign sebelum kontrak bisnis dan handoff serving disetujui.
+Artefak di halaman review tetap diberi status **development/non-serving**. Kontrak I-04 masih draft, tidak ada output Moses di repo yang disetujui untuk serving, dan teks alasan/band bisnis belum disetujui. Review teknis mencatat pemeriksaan orang kedua; itu tidak mengaktifkan serving dan tidak menghubungkan skor ke NBA. Identitas kandidat hanya ditautkan lewat Golden Customer yang approved dan kecocokan source ID yang tepat. Proposal NBA tetap manual sampai kontrak bisnis dan handoff serving disetujui. Jangan gunakan skor halaman review untuk memilih pelanggan atau campaign sebelum prasyarat itu terpenuhi.
 
 Untuk menjalankan handoff dari direktori artefak Moses yang sudah tersedia:
 

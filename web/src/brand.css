@@ -132,6 +132,10 @@ button { transition: background-color .16s ease, color .16s ease, border-color .
 .model-import-panel .field-label { margin: 11px 0; }
 .model-import-panel input[type='file'] { height: auto; min-height: 42px; padding: 7px; background: #fff; }
 .model-import-panel .button { width: 100%; margin-top: 7px; }
+.model-reason-list { min-width: 240px; max-width: 420px; margin: 0; padding-left: 17px; color: #58665a; font-size: 11px; line-height: 1.55; }
+.model-reason-list li + li { margin-top: 5px; }
+.model-link-button { margin-top: 7px; }
+.campaign-simulation-notice { margin: 0 0 16px; }
 .model-run-panel .panel-heading { align-items: center; margin-bottom: 7px; }
 .model-count { display: grid; min-width: 30px; height: 30px; place-items: center; border-radius: 9px; background: #f0f2e9; color: #556b58; font-size: 11px; font-weight: 700; }
 .model-run-row { display: flex; width: 100%; align-items: center; gap: 11px; padding: 13px 2px; border: 0; border-top: 1px solid #edf0e9; background: transparent; text-align: left; cursor: pointer; }

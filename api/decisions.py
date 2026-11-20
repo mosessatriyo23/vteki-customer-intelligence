@@ -37,7 +37,7 @@ def list_decisions(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
 ) -> list[dict]:
-    query = db.query(NBADecision)
+    query = db.query(NBADecision).join(Customer, Customer.id == NBADecision.customer_id).filter(Customer.is_demo.is_(False))
     if customer_id is not None:
         query = query.filter(NBADecision.customer_id == customer_id)
     if status != "all":
@@ -63,7 +63,11 @@ def create_decision(
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin", "analyst")),
 ) -> dict[str, int | str]:
-    customer = db.get(Customer, payload.customer_id)
+    customer = (
+        db.query(Customer)
+        .filter(Customer.id == payload.customer_id, Customer.is_demo.is_(False))
+        .first()
+    )
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
     decision = NBADecision(
