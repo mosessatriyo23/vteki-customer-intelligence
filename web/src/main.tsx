@@ -4,6 +4,7 @@ import App from './App'
 import './styles.css'
 import './governance.css'
 import './brand.css'
+import './redesign.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

@@ -28,12 +28,25 @@ import {
   Sliders,
   RotateCcw,
   LogOut,
+  Menu,
+  PanelLeftClose,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { api, ApiError, getStoredToken, storeToken } from './api'
 import { GoldenSnapshotsPanel } from './GoldenSnapshotsPanel'
 import type { ApiAuditEvent, ApiCampaign, ApiCustomer, ApiDecision, ApiModelPredictionRecord, ApiModelPredictionRun, ApiReview, ApiUser } from './api'
 
 type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring' | 'governance' | 'models'
+
+const pagePaths: Record<Page, string> = {
+  dashboard: '/', customers: '/customers', campaigns: '/campaigns', reviews: '/identity-reviews',
+  decisions: '/decisions', monitoring: '/monitoring', governance: '/governance', models: '/models',
+}
+function pageFromPath(path: string): Page {
+  const normalized = path.replace(/\/$/, '') || '/'
+  return (Object.entries(pagePaths) as Array<[Page, string]>).find(([, route]) => route === normalized)?.[0] ?? 'dashboard'
+}
 
 type Customer = {
   apiId: number
@@ -185,7 +198,9 @@ function mapDecision(row: ApiDecision): Decision {
 }
 
 function App() {
-  const [page, setPage] = useState<Page>('dashboard')
+  const [page, setPageState] = useState<Page>(() => pageFromPath(window.location.pathname))
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [token, setToken] = useState<string | null>(() => getStoredToken())
   const [user, setUser] = useState<ApiUser | null>(null)
   const [authLoading, setAuthLoading] = useState(() => Boolean(getStoredToken()))
@@ -201,6 +216,33 @@ function App() {
   const [builderOpen, setBuilderOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null)
+
+  function setPage(next: Page) {
+    if (next !== page || window.location.pathname !== pagePaths[next]) window.history.pushState({ page: next }, '', pagePaths[next])
+    setPageState(next)
+    setMobileNavOpen(false)
+  }
+
+  useEffect(() => {
+    const syncRoute = () => {
+      const normalized = window.location.pathname.replace(/\/$/, '') || '/'
+      const next = pageFromPath(normalized)
+      if (!Object.values(pagePaths).includes(normalized)) window.history.replaceState({ page: 'dashboard' }, '', pagePaths.dashboard)
+      setPageState(next)
+      setMobileNavOpen(false)
+    }
+    window.addEventListener('popstate', syncRoute)
+    const normalized = window.location.pathname.replace(/\/$/, '') || '/'
+    if (!Object.values(pagePaths).includes(normalized)) window.history.replaceState({ page, }, '', pagePaths[page])
+    return () => window.removeEventListener('popstate', syncRoute)
+  }, [])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileNavOpen(false) }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [mobileNavOpen])
 
   async function refreshWorkspace(sessionToken: string, roles: string[]) {
     const canLoadReviews = roles.some((role) => ['admin', 'operator'].includes(role))
@@ -419,10 +461,12 @@ function App() {
 
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      {mobileNavOpen && <button className="mobile-nav-backdrop" aria-label="Tutup navigasi" onClick={() => setMobileNavOpen(false)} />}
+      <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'sidebar-open' : ''}`} aria-label="Navigasi aplikasi">
         <div className="brand-lockup">
           <span className="brand-mark"><span /><span /><span /></span>
           <span>vteki<span className="brand-dot">.</span></span>
+          <button className="sidebar-collapse" aria-label={sidebarCollapsed ? 'Perluas navigasi' : 'Ciutkan navigasi'} title={sidebarCollapsed ? 'Perluas navigasi' : 'Ciutkan navigasi'} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><PanelLeftClose size={17} /></button>
         </div>
         
         <div className="workspace-switch">
@@ -474,6 +518,7 @@ function App() {
       <div className="main-column">
         <header className="topbar">
           <div className="breadcrumb">
+            <button className="mobile-menu-button icon-button" aria-label="Buka navigasi" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen(true)}><Menu size={19} /></button>
             <span>Workspace</span>
             <span className="crumb-slash">/</span>
             <b>{pageTitle(page)}</b>
@@ -530,7 +575,9 @@ function App() {
           )}
           {page === 'monitoring' && <MonitoringPage token={token ?? ''} data={monitoringData} canTrace={canTrace} />}
           {page === 'governance' && <GovernancePage token={token} user={user} />}
-          {page === 'models' && user.roles.some((role) => ['admin', 'analyst'].includes(role)) && <ModelPredictionReviewPage token={token} userId={user.id} canLinkIdentity={user.roles.includes('admin')} />}
+          {page === 'models' && (user.roles.some((role) => ['admin', 'analyst'].includes(role))
+            ? <ModelPredictionReviewPage token={token} userId={user.id} canLinkIdentity={user.roles.includes('admin')} />
+            : <section className="panel access-state"><ShieldCheck size={22} /><h2>Akses terbatas</h2><p>Review model tersedia untuk pengguna dengan peran admin atau analyst.</p></section>)}
         </main>
       </div>
 
@@ -573,7 +620,7 @@ function explainPredictionReason(reason: Record<string, unknown>): string {
 }
 
 function NavItem({ active, icon, label, count, onClick }: { active: boolean; icon: React.ReactNode; label: string; count?: string; onClick: () => void }) {
-  return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <small>{count}</small>}</button>
+  return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick} title={label} aria-current={active ? 'page' : undefined}>{icon}<span>{label}</span>{count && <small>{count}</small>}</button>
 }
 
 function PageHeading({ eyebrow, title, subtitle, action, className = '' }: { eyebrow: string; title: string; subtitle: string; action?: React.ReactNode; className?: string }) {
@@ -1408,7 +1455,7 @@ function CampaignBuilder({ customers, decisions, onClose, onSave }: { customers:
                 <p>Jumlah audiens belum tersedia untuk draf ini.</p>
               </div>
               <div className="preview-safety">
-                <ShieldCheck size={15} /> Menggunakan Channel Simulator Murni (T-SEC-03 Compliant)
+                <ShieldCheck size={15} /> Hanya simulasi; pesan tidak dikirim ke luar aplikasi.
               </div>
             </aside>
           </div>
@@ -1435,6 +1482,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: st
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [loginError, setLoginError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSubmitting(true)
@@ -1449,7 +1497,7 @@ function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: st
   }
   return <main className="login-shell">
     <div className="login-aside"><span className="login-ornament ornament-a" /><span className="login-ornament ornament-b" /><div className="login-brand"><span className="brand-mark"><span /><span /><span /></span><b>vteki<span>.</span></b></div><div className="login-aside-copy"><small>VTEKI · CUSTOMER INTELLIGENCE</small><h1>Pahami pelanggan,<br />tentukan langkah berikutnya.</h1><p>Kelola profil, tinjau kampanye, dan telusuri keputusan dalam satu workspace.</p></div><div className="login-aside-foot"><ShieldCheck size={15} /> Akses berbasis peran · Aktivitas tercatat</div></div>
-    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">RUANG KERJA AMAN</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Kata sandi<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{(loginError || error) && <p className="field-error">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memeriksa…' : 'Masuk'}<ArrowRight size={15} /></button></form><div className="login-security"><ShieldCheck size={15} /><span>Akses berbasis peran · Audit aktif</span></div></section>
+    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">RUANG KERJA AMAN</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Kata sandi<div className="password-control"><input type={showPassword ? 'text' : 'password'} autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /><button type="button" className="password-toggle" aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'} onClick={() => setShowPassword((visible) => !visible)}>{showPassword ? <EyeOff size={17} /> : <Eye size={17} />}</button></div></label>{(loginError || error) && <p className="field-error" role="alert">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memeriksa…' : 'Masuk'}<ArrowRight size={15} /></button></form><div className="login-security"><ShieldCheck size={15} /><span>Akses berbasis peran · Audit aktif</span></div></section>
   </main>
 }
 
