@@ -33,6 +33,17 @@ SEED = 42
 LOCAL_TIMEZONE = timezone(timedelta(hours=7))
 
 
+def _estimator_metadata(estimator) -> dict:
+    """Describe a fitted classifier, independently of transforms and fixed rules."""
+    cls = type(estimator)
+    return {
+        "algorithm": f"{cls.__module__}.{cls.__qualname__}",
+        "hyperparameters": json.loads(
+            json.dumps(estimator.get_params(deep=False), allow_nan=False)
+        ),
+    }
+
+
 def _matrix(rows: list[dict]) -> list[list[float]]:
     matrix = []
     for row in rows:
@@ -170,7 +181,10 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
         float(predict_churn(None if math.isnan(values[0]) else values[0]))
         for values in x_test
     ]
+    fitted = logistic.named_steps["logisticregression"]
+    tree_fitted = tree.named_steps["decisiontreeclassifier"]
     report = {
+        **_estimator_metadata(fitted),
         "model_version": MODEL_VERSION,
         "feature_version": FEATURE_VERSION,
         "label_version": CHRIST_VERSION,
@@ -186,8 +200,14 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
         "purged_rows": len(rows) - len(train) - len(test),
         "train_cutoffs": train_cutoffs,
         "test_cutoffs": test_cutoffs,
-        "logistic": _metrics(y_test, logistic_scores),
-        "shallow_tree": _metrics(y_test, tree_scores),
+        "logistic": {
+            **_estimator_metadata(fitted),
+            **_metrics(y_test, logistic_scores),
+        },
+        "shallow_tree": {
+            **_estimator_metadata(tree_fitted),
+            **_metrics(y_test, tree_scores),
+        },
         "baseline": _metrics(y_test, baseline_scores, binary=True),
         "limitations": [
             "Synthetic retrospective identity; no point-in-time historical guarantee",
@@ -214,8 +234,6 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
             test, y_test, logistic_scores, tree_scores, baseline_scores
         )
     ]
-    fitted = logistic.named_steps["logisticregression"]
-    tree_fitted = tree.named_steps["decisiontreeclassifier"]
     parameters = {
         "model_version": MODEL_VERSION,
         "feature_version": FEATURE_VERSION,

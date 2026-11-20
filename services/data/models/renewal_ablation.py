@@ -15,6 +15,7 @@ from pathlib import Path
 from services.data.ingestion.validator import sha256
 from services.data.models.baseline import temporal_split
 from services.data.models.churn_diagnostics import _metrics
+from services.data.models.churn_experiment import _estimator_metadata
 from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp
 from services.data.models.membership_features import FIELDS as MEMBERSHIP_FIELDS
@@ -182,6 +183,7 @@ def ablate(rows: list[dict]) -> dict:
             intercept=logistic.intercept_.tolist(),
         )
         variants[name] = dict(
+            **_estimator_metadata(logistic),
             kind="logistic",
             features=list(features),
             **_summary(y_test, [float(p) for p in scores]),
@@ -215,6 +217,8 @@ def ablate(rows: list[dict]) -> dict:
             for k, v in variant["metrics"].items()
         }
     report = {
+        "algorithm": variants["full"]["algorithm"],
+        "hyperparameters": variants["full"]["hyperparameters"],
         **IDENTITY,
         **STATUS,
         "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,

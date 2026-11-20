@@ -8,7 +8,11 @@ from pathlib import Path
 from unittest.mock import patch
 
 from services.data.ingestion.validator import sha256
-from services.data.models.model_inventory import PROMOTION_REQUIREMENTS, build_inventory
+from services.data.models.model_inventory import (
+    EVIDENCE_FIELDS,
+    PROMOTION_REQUIREMENTS,
+    build_inventory,
+)
 
 
 def write_json(path: Path, value) -> None:
@@ -222,6 +226,137 @@ class ModelInventoryTests(unittest.TestCase):
         self.assertEqual(
             build_inventory([first, second]), build_inventory([second, first])
         )
+
+    def add_verified(self, directory: Path, name: str, value) -> None:
+        write_json(directory / name, value)
+        manifest = json.loads((directory / "experiment_manifest.json").read_text())
+        manifest["output_sha256"][name] = sha256(directory / name)
+        write_json(directory / "experiment_manifest.json", manifest)
+
+    def test_evidence_metadata_names_value_source_and_checksum(self):
+        directory = self.make_model()
+        self.add_verified(
+            directory,
+            "evaluation.json",
+            {
+                "features": ["a", "b"],
+                "train_cutoffs": ["2026-03-01"],
+                "test_cutoffs": ["2026-06-01"],
+                "train_rows": 10,
+                "test_rows": 5,
+                "seed": 42,
+            },
+        )
+        self.add_verified(
+            directory,
+            "model_parameters.json",
+            {"sklearn_version": "1.9.1", "serialization": "JSON only"},
+        )
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        values = meta["values"]
+        self.assertEqual(values["features"], ["a", "b"])
+        self.assertEqual(values["train_rows"], 10)
+        self.assertEqual(values["test_cutoffs"], ["2026-06-01"])
+        self.assertEqual(values["seed"], 42)
+        self.assertEqual(values["sklearn_version"], "1.9.1")
+        self.assertEqual(values["serialization"], "JSON only")
+        self.assertEqual(
+            meta["sources"]["sklearn_version"],
+            {
+                "file": "model_parameters.json",
+                "sha256": sha256(directory / "model_parameters.json"),
+            },
+        )
+        self.assertEqual(
+            meta["sources"]["seed"]["sha256"], sha256(directory / "evaluation.json")
+        )
+
+    def test_missing_evidence_is_explicit_null_and_listed(self):
+        meta = build_inventory([self.make_model()])["models"][0]["evidence_metadata"]
+        self.assertEqual(set(meta["values"]), set(EVIDENCE_FIELDS))
+        for field in EVIDENCE_FIELDS:
+            self.assertIsNone(meta["values"][field])
+            self.assertIsNone(meta["sources"][field])
+        self.assertEqual(meta["missing_metadata"], list(EVIDENCE_FIELDS))
+
+    def test_serialization_note_key_is_accepted(self):
+        directory = self.make_model()
+        self.add_verified(
+            directory, "model_parameters.json", {"serialization_note": "note"}
+        )
+        values = build_inventory([directory])["models"][0]["evidence_metadata"][
+            "values"
+        ]
+        self.assertEqual(values["serialization"], "note")
+
+    def test_algorithm_and_hyperparameters_never_inferred_from_logistic_key(self):
+        directory = self.make_model()
+        self.add_verified(
+            directory,
+            "model_parameters.json",
+            {"logistic": {"coef": [1.0], "intercept": [0.0]}, "shallow_tree": {}},
+        )
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        self.assertIsNone(meta["values"]["algorithm"])
+        self.assertIsNone(meta["values"]["hyperparameters"])
+        self.assertIn("algorithm", meta["missing_metadata"])
+        self.assertIn("hyperparameters", meta["missing_metadata"])
+
+    def test_explicit_algorithm_and_hyperparameters_are_reported(self):
+        directory = self.make_model()
+        self.add_verified(
+            directory,
+            "model_parameters.json",
+            {"algorithm": "LogisticRegression", "hyperparameters": {"C": 1.0}},
+        )
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        self.assertEqual(meta["values"]["algorithm"], "LogisticRegression")
+        self.assertEqual(meta["values"]["hyperparameters"], {"C": 1.0})
+        self.assertNotIn("algorithm", meta["missing_metadata"])
+
+    def test_unverified_source_is_not_used_for_evidence(self):
+        directory = self.make_model()
+        self.add_verified(directory, "model_parameters.json", {"seed": 7})
+        write_json(directory / "model_parameters.json", {"seed": 8})
+        entry = build_inventory([directory])["models"][0]
+        self.assertFalse(entry["checksums_verified"])
+        self.assertIsNone(entry["evidence_metadata"]["values"]["seed"])
+
+    def test_unlisted_parameter_file_is_not_evidence(self):
+        directory = self.make_model()
+        write_json(directory / "model_parameters.json", {"seed": 123})
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        self.assertIsNone(meta["values"]["seed"])
+        self.assertIsNone(meta["sources"]["seed"])
+
+    def test_wrong_types_count_as_missing(self):
+        directory = self.make_model()
+        self.add_verified(
+            directory,
+            "model_parameters.json",
+            {"seed": True, "train_rows": "10", "features": "a"},
+        )
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        for field in ("seed", "train_rows", "features"):
+            self.assertIsNone(meta["values"][field])
+            self.assertIn(field, meta["missing_metadata"])
+
+    def test_conflicting_sources_are_nulled_and_reported(self):
+        directory = self.make_model()
+        self.add_verified(directory, "evaluation.json", {"seed": 1})
+        self.add_verified(directory, "model_parameters.json", {"seed": 2})
+        meta = build_inventory([directory])["models"][0]["evidence_metadata"]
+        self.assertIsNone(meta["values"]["seed"])
+        self.assertIn("seed", meta["missing_metadata"])
+        self.assertEqual(meta["conflicting_metadata"], ["seed"])
+
+    def test_evidence_metadata_does_not_promote_or_fill_governance(self):
+        directory = self.make_model()
+        self.add_verified(directory, "model_parameters.json", {"seed": 42})
+        entry = build_inventory([directory])["models"][0]
+        self.assertFalse(entry["promotable"])
+        self.assertEqual(entry["state"], "UNREGISTERED_DEV_ONLY")
+        self.assertEqual(entry["missing_for_promotion"], list(PROMOTION_REQUIREMENTS))
 
     def test_carries_synthetic_data_disclaimer(self):
         report = build_inventory([self.make_model()])

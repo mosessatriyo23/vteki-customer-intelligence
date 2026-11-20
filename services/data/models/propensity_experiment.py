@@ -22,6 +22,7 @@ from services.data.models.churn_experiment import (
     FEATURES,
     LOCAL_TIMEZONE,
     SEED,
+    _estimator_metadata,
     _matrix,
 )
 from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
@@ -192,8 +193,10 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
         model_version=MODEL_VERSION,
     )
     notes = limitations(target)
+    metadata = _estimator_metadata(model.named_steps["logisticregression"])
     report = {
         **identity,
+        **metadata,
         "label_version": version,
         "features": list(FEATURES),
         "training_ready": False,
@@ -213,7 +216,13 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
             "base_rate": "constant train-fold positive rate",
             "fixed_rule": RULES[target],
         },
-        "models": {name: _summary(y_test, scores[name]) for name in MODELS},
+        "models": {
+            name: {
+                **(metadata if name == "logistic" else {}),
+                **_summary(y_test, scores[name]),
+            }
+            for name in MODELS
+        },
         "limitations": notes,
     }
     predictions = [
