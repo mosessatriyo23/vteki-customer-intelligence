@@ -13,8 +13,7 @@ from api.security import (
     require_roles,
     verify_password,
 )
-from api.validation import EMAIL_SCHEMA_PATTERN, email_field
-
+from api.validation import email_field
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 

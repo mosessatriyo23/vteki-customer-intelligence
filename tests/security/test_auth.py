@@ -92,7 +92,7 @@ def token_for(client: TestClient, email: str) -> str:
 
 
 def test_auth_openapi_declares_runtime_email_domain_restriction():
-    from api.auth import EMAIL_SCHEMA_PATTERN
+    from api.validation import EMAIL_SCHEMA_PATTERN
 
     schemas = app.openapi()["components"]["schemas"]
     user_schema = schemas["UserCreate"]
@@ -1001,7 +1001,7 @@ def test_measurement_integral_float_campaign_id(client):
 
 
 def test_email_schema_pattern_handles_many_subdomains():
-    from api.auth import EMAIL_SCHEMA_PATTERN
+    from api.validation import EMAIL_SCHEMA_PATTERN
 
     email = f"person@{'.'.join(['a'] * 25)}.example.com"
     assert re.fullmatch(EMAIL_SCHEMA_PATTERN, email) is not None
