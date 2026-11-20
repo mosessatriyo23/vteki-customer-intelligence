@@ -771,6 +771,10 @@ def test_options_uses_static_endpoint_methods(client):
     allow = {item.strip() for item in response.headers["allow"].split(",")}
     assert "POST" in allow
     assert "GET" not in allow
+    seed_operation = client.get("/openapi.json").json()["paths"]["/customers/seed"][
+        "post"
+    ]
+    assert seed_operation["deprecated"] is True
 
 
 def test_invalid_role_and_resolution_decision_are_documented_validation(client):

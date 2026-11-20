@@ -357,6 +357,7 @@ jobs:
 
           st run http://127.0.0.1:8000/openapi.json \
             --checks all \
+            --exclude-deprecated \
             --phases coverage,fuzzing,stateful \
             --max-examples 10 \
             --max-time 30 \

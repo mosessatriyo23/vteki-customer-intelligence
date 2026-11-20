@@ -105,7 +105,6 @@ def get_customer(
     "/seed",
     status_code=status.HTTP_410_GONE,
     deprecated=True,
-    include_in_schema=False,
 )
 def disable_demo_seed(_: User = Depends(require_roles("admin"))) -> None:
     raise HTTPException(
