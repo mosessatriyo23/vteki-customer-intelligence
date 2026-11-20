@@ -30,6 +30,13 @@ LIMITATIONS = [
     "No calibration; probabilities are uncalibrated",
     "No reason codes, approval, serving handoff, or NBA adapter",
 ]
+EXPLANATION_VERSION = "moses-propensity-log-odds-dev-1.0"
+EXPLANATION_METHOD = (
+    "Exact signed log-odds contribution per feature: "
+    "(imputed_value - scaler_mean) / scaler_scale * coefficient. "
+    "Mathematical decomposition of the logistic score only; not causal and not "
+    "a business reason code."
+)
 
 
 def _strict_json(path: Path) -> dict:
@@ -211,6 +218,7 @@ def predict_rows(
             raise ValueError("Duplicate customer/cutoff")
         seen.add(key)
         log_odds = model.intercept
+        contributions = []
         for i, field in enumerate(FEATURES):
             raw = _raw(row, field)
             imputed = model.imputer_medians[i] if raw is None else raw
@@ -220,6 +228,15 @@ def predict_rows(
             if not math.isfinite(contribution):
                 raise ValueError("Nonfinite model contribution")
             log_odds += contribution
+            contributions.append(
+                dict(
+                    feature=field,
+                    feature_value=raw,
+                    missing=raw is None,
+                    imputed_value=imputed,
+                    log_odds_contribution=contribution,
+                )
+            )
         if not math.isfinite(log_odds):
             raise ValueError("Nonfinite log odds")
         probability = (
@@ -238,6 +255,11 @@ def predict_rows(
                 feature_version=FEATURE_VERSION,
                 generated_at=generated_at.isoformat(),
                 uncalibrated_probability=probability,
+                intercept=model.intercept,
+                log_odds=log_odds,
+                feature_contributions=contributions,
+                explanation_method=EXPLANATION_METHOD,
+                explanation_version=EXPLANATION_VERSION,
                 development_only=True,
                 serving_ready=False,
                 valid_until=None,
