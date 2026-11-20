@@ -1,6 +1,6 @@
 # Permintaan tindak lanjut antar tim (Moses → Christ, James)
 
-Tanggal 20 November 2026. Status kerja, bukan persetujuan. Semua artefak Moses saat ini development-only (`serving_ready=false`). Dokumen ini hanya mendaftar keputusan/input yang tidak bisa Moses ambil sendiri, beserta acceptance konkret agar tiap butir bisa ditutup dan diverifikasi.
+Tanggal 20 November 2026. Status kerja, bukan persetujuan. Semua artefak Moses saat ini development-only (`serving_ready=false`). **Catatan historis v1.3:** butir C1/C3/C5 dan daftar pekerjaan mandiri di bawah ditulis sebelum audit Christ v1.4 dan sebelum PR #48–#53; jangan dipakai sebagai status/keputusan terkini. Rekonsiliasi v1.4 P1–P8 dan acceptance yang lebih tepat ada di [pesan untuk Christ](CHRIST_V14_RECONCILIATION_MESSAGE_2026-11-20.md); status implementasi kini di [ledger mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md). Requirement_Capstone menyebut definisi churn 180 hari ke depan dan horizon prediksi 90 hari ke depan sebagai dua konsep berbeda; C1 di bawah bukan resolusinya. `actual_revenue` aggregate/projection dev sudah ada, tetapi retensi 365 hari belum disepakati. Lifecycle v1.4 masih menunggu keputusan fallback/REACTIVATED/ACTIVE. Bagian tabel tetap disimpan sebagai catatan permintaan pada saat ditulis, bukan sebagai approval.
 
 ## Untuk Christ (keputusan bisnis)
 
