@@ -16,6 +16,7 @@ from pathlib import Path
 from services.data.ingestion.validator import sha256
 from services.data.models.baseline import temporal_split
 from services.data.models.churn_diagnostics import _metrics, _operating
+from services.data.models.churn_experiment import _estimator_metadata
 from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp
 from services.data.models.membership_features import FIELDS as MEMBERSHIP_FIELDS
@@ -246,7 +247,10 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
             metrics=_metrics(scored),
             operating_metrics=_operating(scored),
         )
+    metadata = _estimator_metadata(model.named_steps["logisticregression"])
+    summaries["logistic"].update(metadata)
     report = {
+        **metadata,
         **IDENTITY,
         **STATUS,
         "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
