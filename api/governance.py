@@ -272,34 +272,6 @@ def get_model_drift_metrics(
     _: User = Depends(require_roles("admin", "analyst")),
 ) -> list[dict[str, Any]]:
     metrics = db.query(ModelDriftMetric).order_by(ModelDriftMetric.id.desc()).all()
-    if not metrics:
-        # Return default drift metrics for monitoring dashboard
-        return [
-            {
-                "model_name": "churn_risk_v2",
-                "metric_name": "PSI",
-                "metric_value": 0.08,
-                "threshold": 0.25,
-                "status": "healthy",
-                "measured_at": datetime.now(timezone.utc),
-            },
-            {
-                "model_name": "nba_recommender_v1",
-                "metric_name": "PSI",
-                "metric_value": 0.14,
-                "threshold": 0.25,
-                "status": "healthy",
-                "measured_at": datetime.now(timezone.utc),
-            },
-            {
-                "model_name": "ltv_predictor_v3",
-                "metric_name": "PSI",
-                "metric_value": 0.28,
-                "threshold": 0.25,
-                "status": "warning",
-                "measured_at": datetime.now(timezone.utc),
-            },
-        ]
     return [
         {
             "id": m.id,
@@ -322,33 +294,6 @@ def get_observed_vs_incremental(
     measurements = (
         db.query(CampaignMeasurement).order_by(CampaignMeasurement.id.desc()).all()
     )
-    if not measurements:
-        return [
-            {
-                "campaign_id": 101,
-                "campaign_name": "Ramadan Radiance",
-                "metric_name": "Conversion Rate",
-                "observed_value": 18.5,
-                "incremental_value": 6.2,
-                "lift_percentage": 50.4,
-            },
-            {
-                "campaign_id": 102,
-                "campaign_name": "Come Back & Glow",
-                "metric_name": "Retention Rate",
-                "observed_value": 12.4,
-                "incremental_value": 4.1,
-                "lift_percentage": 49.3,
-            },
-            {
-                "campaign_id": 103,
-                "campaign_name": "New Member Welcome",
-                "metric_name": "First Purchase",
-                "observed_value": 24.0,
-                "incremental_value": 8.8,
-                "lift_percentage": 57.8,
-            },
-        ]
     return [
         {
             "id": m.id,

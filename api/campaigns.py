@@ -27,6 +27,7 @@ class CampaignResponse(BaseModel):
     correlation_id: str | None
     created_by: int | None
     created_at: datetime
+    latest_execution: dict | None = None
 
 
 class CampaignCreate(BaseModel):
@@ -56,8 +57,45 @@ def list_campaigns(
     _: User = Depends(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
-) -> list[Campaign]:
-    return db.query(Campaign).order_by(Campaign.id.desc()).all()
+) -> list[dict]:
+    campaigns = db.query(Campaign).order_by(Campaign.id.desc()).all()
+    if not campaigns:
+        return []
+
+    job_ids = [campaign.execution_job_id for campaign in campaigns if campaign.execution_job_id]
+    jobs = db.query(BatchJob).filter(BatchJob.id.in_(job_ids)).all() if job_ids else []
+    jobs_by_id = {job.id: job for job in jobs}
+
+    response = []
+    for campaign in campaigns:
+        job = jobs_by_id.get(campaign.execution_job_id)
+        response.append(
+            {
+                "id": campaign.id,
+                "name": campaign.name,
+                "target_segment": campaign.target_segment,
+                "channel": campaign.channel,
+                "ab_test_ratio": campaign.ab_test_ratio,
+                "status": campaign.status,
+                "message_draft": campaign.message_draft,
+                "approved_by": campaign.approved_by,
+                "approved_at": campaign.approved_at,
+                "correlation_id": campaign.correlation_id,
+                "created_by": campaign.created_by,
+                "created_at": campaign.created_at,
+                "latest_execution": (
+                    {
+                        "job_id": job.id,
+                        "status": job.status,
+                        "result": job.result,
+                        "attempts": job.attempts,
+                    }
+                    if job is not None
+                    else None
+                ),
+            }
+        )
+    return response
 
 
 @router.post("", response_model=CampaignResponse, status_code=status.HTTP_201_CREATED)
@@ -189,6 +227,7 @@ def launch_campaign(
     )
     db.add(job)
     db.flush()
+    campaign.execution_job_id = job.id
     record_audit_event(
         db,
         correlation_id=campaign.correlation_id or request.state.correlation_id,
@@ -202,7 +241,7 @@ def launch_campaign(
     db.refresh(job)
 
     return {
-        "message": f"Campaign '{campaign.name}' successfully launched!",
+        "message": f"Simulasi kampanye '{campaign.name}' masuk antrean worker.",
         "campaign_id": campaign.id,
         "status": campaign.status,
         "batch_job_id": job.id,

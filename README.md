@@ -49,11 +49,30 @@ Untuk pengembangan, instal `requirements-dev.txt`. `python -m worker --once` mem
 
 ## Frontend
 
-Web app memakai `POST /auth/login` dan menyimpan JWT di local storage. Dashboard, Customer 360/provenance, campaign draft/approval/launch, identity review, NBA override, model drift, measurements, audit events, dan reconstruction memakai endpoint backend; setelah mutasi halaman memuat ulang data dari server. Role yang tampil berasal dari `/auth/me`, sedangkan setiap aksi tetap diperiksa RBAC oleh API.
+Web app memakai `POST /auth/login` dan menyimpan JWT di local storage. Dashboard, Customer 360/provenance, campaign draft/approval/launch, identity review, NBA override, model drift, measurements, audit events, dan reconstruction memakai endpoint backend; setelah mutasi halaman memuat ulang data dari server. Role yang tampil berasal dari `/auth/me`, sedangkan setiap aksi tetap diperiksa RBAC oleh API. Tidak ada mode preview berisi data contoh di web app; data yang belum tersedia ditampilkan sebagai kosong.
 
-Data telepon, riwayat kunjungan, consent per channel, dan segmentasi membership belum ada pada response customer saat ini. UI tidak mengarang field tersebut; campaign delivery hanya memakai simulator dan estimasi audiens dihitung server-side. `POST /customers/seed` dapat mengisi customer contoh pada database kosong dan hanya dapat dipanggil admin.
+Data telepon, riwayat kunjungan, consent per channel, dan segmentasi membership belum ada pada response customer saat ini. UI tidak mengarang field tersebut. Campaign tetap memakai simulator; setelah worker berjalan, daftar campaign menampilkan status job, jumlah audiens, dan pembagian varian A/B dari hasil tersimpan.
 
-Jalankan API/database dengan Docker Compose, lalu masuk ke `web/`, jalankan `npm install` dan `npm run dev`. Proxy `/api` Vite meneruskan request ke API pada port 8000; web dev server tersedia di `http://localhost:5173`.
+Jalankan API/database dengan Docker Compose, lalu masuk ke `web/`, jalankan `npm ci` dan `npm run dev`. Proxy `/api` Vite meneruskan request ke API pada port 8000; web dev server tersedia di `http://localhost:5173`.
+
+`POST /customers/seed` hanya menyediakan record contoh untuk pengembangan dan tes; jangan gunakan pada database demo atau produksi yang datanya harus mencerminkan sumber asli. Tombol pemuatan record contoh tidak ditampilkan di web app.
+
+## Handoff Moses dan pemeriksaan model
+
+Halaman **Review model Moses** menerima `contract_manifest.json` dan `records.jsonl` keluaran `services.data.models.prediction_contract`, memeriksa checksum/versi, dan menyimpan run serta baris skor ke `ml.prediction_review_runs` dan `ml.prediction_review_records`. Role admin/analis dapat mengimpor artefak; run hanya dapat ditinjau oleh pengguna lain. Catatan import dan review masuk ke audit trail.
+
+Artefak di halaman review tetap diberi status **development/non-serving**. Kontrak I-04 masih draft, tidak ada output Moses di repo yang disetujui untuk serving, dan teks alasan/band bisnis belum disetujui. Review teknis mencatat pemeriksaan orang kedua; itu tidak mengaktifkan serving dan tidak menghubungkan skor ke NBA. Proposal NBA yang ada tetap tersimpan di `dec.nba_decisions` sebagai proposal manual. Jangan gunakan skor di halaman review untuk memilih pelanggan atau campaign sebelum kontrak bisnis dan handoff serving disetujui.
+
+Untuk menjalankan handoff dari direktori artefak Moses yang sudah tersedia:
+
+```powershell
+python -m services.data.models.prediction_contract `
+  --predictions-dir artifacts/predictions/prediction-run `
+  --reasons-dir artifacts/predictions/reason-run `
+  --output-dir artifacts/predictions/contract-run
+```
+
+Ganti tiga nama direktori dengan output Moses yang memang tersedia di checkout. Impor `contract_manifest.json` dan `records.jsonl` dari folder output itu di halaman Review model Moses. Artefak model dan input datanya tidak disertakan di repo ini; halaman akan tetap kosong sampai run nyata diimpor.
 
 ## CI/CD
 

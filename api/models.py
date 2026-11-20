@@ -185,6 +185,9 @@ class Campaign(Base):
         String(128), nullable=True, index=True
     )
     created_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    execution_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("act.batch_jobs.id", ondelete="RESTRICT"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -247,6 +250,62 @@ class ModelDriftMetric(Base):
     threshold: Mapped[float] = mapped_column()
     status: Mapped[str] = mapped_column(String(16), default="healthy", index=True)
     measured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class ModelPredictionRun(Base):
+    __tablename__ = "prediction_review_runs"
+    __table_args__ = {"schema": "ml"}
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_version: Mapped[str] = mapped_column(String(128), index=True)
+    feature_set_version: Mapped[str] = mapped_column(String(128))
+    label_version: Mapped[str] = mapped_column(String(128))
+    prediction_type: Mapped[str] = mapped_column(String(64))
+    producer_version: Mapped[str] = mapped_column(String(64))
+    manifest_hash: Mapped[str] = mapped_column(String(64))
+    record_count: Mapped[int] = mapped_column(Integer)
+    review_status: Mapped[str] = mapped_column(String(24), default="pending_review", index=True)
+    manifest: Mapped[dict] = mapped_column(JSON)
+    submitted_by: Mapped[int] = mapped_column(Integer)
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    reviewed_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ModelPredictionRecord(Base):
+    __tablename__ = "prediction_review_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "customer_id", "cutoff_at", name="uq_ml_prediction_review_key"
+        ),
+        {"schema": "ml"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("ml.prediction_review_runs.id", ondelete="RESTRICT"), index=True
+    )
+    customer_id: Mapped[str] = mapped_column(String(64), index=True)
+    cutoff_at: Mapped[str] = mapped_column(String(64))
+    prediction_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    band: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    contract_status: Mapped[str] = mapped_column(String(32))
+    reason_codes: Mapped[list] = mapped_column(JSON)
+    record_fingerprint: Mapped[str] = mapped_column(String(64))
+    source_record: Mapped[dict] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,

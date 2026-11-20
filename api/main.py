@@ -16,6 +16,7 @@ from api.identity_reviews import router as identity_reviews_router
 from api.jobs import router as jobs_router
 from api.models import User
 from api.monitoring import router as monitoring_router
+from api.model_predictions import router as model_predictions_router
 from api.security import require_roles
 
 
@@ -103,6 +104,7 @@ app.include_router(audit_router)
 app.include_router(identity_reviews_router)
 app.include_router(decisions_router)
 app.include_router(monitoring_router)
+app.include_router(model_predictions_router)
 app.include_router(governance_router)
 
 

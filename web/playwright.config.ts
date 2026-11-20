@@ -26,7 +26,6 @@ export default defineConfig({
     timeout: 30_000,
     env: {
       VITE_API_PROXY_TARGET: 'http://localhost:8001',
-      VITE_ENABLE_LOCAL_PREVIEW: 'false',
     },
   },
 })

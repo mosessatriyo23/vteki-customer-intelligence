@@ -38,6 +38,12 @@ export type ApiCampaign = {
   approved_at: string | null
   created_by: number | null
   created_at: string
+  latest_execution: {
+    job_id: number
+    status: string
+    result: Record<string, unknown> | null
+    attempts: number
+  } | null
 }
 export type ApiReview = {
   id: number
@@ -64,6 +70,35 @@ export type ApiDecision = {
   overridden_by: number | null
   override_reason: string | null
   created_at: string
+}
+export type ApiModelPredictionRun = {
+  id: number
+  model_version: string
+  feature_set_version: string
+  label_version: string
+  prediction_type: string
+  producer_version: string
+  manifest_hash: string
+  record_count: number
+  review_status: 'pending_review' | 'reviewed' | 'rejected'
+  submitted_by: number
+  imported_at: string
+  reviewed_by: number | null
+  reviewed_at: string | null
+  review_note: string | null
+  serving_ready: false
+  manifest: Record<string, unknown>
+}
+export type ApiModelPredictionRecord = {
+  id: number
+  customer_id: string
+  cutoff_at: string
+  prediction_date: string | null
+  score: number | null
+  band: string | null
+  contract_status: string
+  reason_codes: Array<Record<string, unknown>>
+  source_record: Record<string, unknown>
 }
 
 const API_ROOT = '/api'
@@ -117,7 +152,6 @@ export const api = {
   goldenCustomers: (token: string) => request<ApiGoldenCustomer[]>('/customers/golden?limit=200', token),
   goldenProvenance: (token: string, goldenId: string) => request<Record<string, unknown>>(`/customers/golden/${encodeURIComponent(goldenId)}/provenance`, token),
   customerProvenance: (token: string, id: number) => request<Record<string, unknown>>(`/customers/${id}/provenance`, token),
-  seedCustomers: (token: string) => request<{ message: string }>('/customers/seed', token, { method: 'POST' }),
   campaigns: (token: string) => request<ApiCampaign[]>('/campaigns', token),
   createCampaign: (token: string, payload: { name: string; target_segment: string; channel: string; message_draft: string }) => request<ApiCampaign>('/campaigns', token, { method: 'POST', body: JSON.stringify(payload) }),
   submitCampaign: (token: string, id: number) => request<ApiCampaign>(`/campaigns/${id}/request-approval`, token, { method: 'POST' }),
@@ -127,6 +161,10 @@ export const api = {
   reviews: (token: string) => request<ApiReview[]>('/governance/identity-reviews?status_filter=all', token),
   resolveReview: (token: string, id: number, approved: boolean, note: string) => request<ApiReview>(`/governance/identity-reviews/${id}/resolve`, token, { method: 'POST', body: JSON.stringify({ decision: approved ? 'approved' : 'rejected', review_note: note }) }),
   decisions: (token: string) => request<ApiDecision[]>('/governance/nba-decisions', token),
+  modelPredictionRuns: (token: string) => request<ApiModelPredictionRun[]>('/model-predictions/runs', token),
+  modelPredictionRecords: (token: string, runId: number, offset = 0) => request<{ total: number; offset: number; records: ApiModelPredictionRecord[] }>(`/model-predictions/runs/${runId}/records?limit=100&offset=${offset}`, token),
+  importModelPredictionRun: (token: string, manifest: Record<string, unknown>, records: Array<Record<string, unknown>>) => request<ApiModelPredictionRun>('/model-predictions/runs/import', token, { method: 'POST', body: JSON.stringify({ manifest, records }) }),
+  reviewModelPredictionRun: (token: string, runId: number, decision: 'reviewed' | 'rejected', reviewNote: string) => request<ApiModelPredictionRun>(`/model-predictions/runs/${runId}/review`, token, { method: 'POST', body: JSON.stringify({ decision, review_note: reviewNote }) }),
   createReview: (token: string, payload: { subject_reference: string; candidate_references: string[]; confidence: number; reason: string }) => request<{ id: number; status: string }>('/identity-reviews', token, { method: 'POST', body: JSON.stringify(payload) }),
   createDecision: (token: string, payload: { customer_id: number; recommended_action: string; rationale: Record<string, unknown> }) => request<{ id: number; status: string }>('/decisions/next-best-actions', token, { method: 'POST', body: JSON.stringify(payload) }),
   overrideDecision: (token: string, id: number, selectedAction: string, reason: string) => request<Record<string, unknown>>(`/governance/nba-decisions/${id}/override`, token, { method: 'POST', body: JSON.stringify({ selected_action: selectedAction, override_reason: reason }) }),

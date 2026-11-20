@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
-  ArrowDownRight,
   ArrowRight,
-  ArrowUpRight,
   Bell,
   ChartNoAxesCombined,
   Check,
   ChevronDown,
   CircleHelp,
   Clock3,
-  Command,
   ClipboardCheck,
   Download,
   Filter,
@@ -34,17 +31,16 @@ import {
 } from 'lucide-react'
 import { api, ApiError, getStoredToken, storeToken } from './api'
 import { GoldenSnapshotsPanel } from './GoldenSnapshotsPanel'
-import type { ApiCampaign, ApiCustomer, ApiDecision, ApiReview, ApiUser } from './api'
+import type { ApiCampaign, ApiCustomer, ApiDecision, ApiModelPredictionRecord, ApiModelPredictionRun, ApiReview, ApiUser } from './api'
 
-type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring'
+type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring' | 'models'
 
 type Customer = {
   apiId: number
   id: string
   name: string
   initials: string
-  city: string
-  tier: 'Platinum' | 'Gold' | 'Silver'
+  segment: string
   value: string
   lastSeen: string
   email: string
@@ -60,10 +56,12 @@ type Campaign = {
   name: string
   segment: string
   channel: string
-  status: 'Live' | 'Draft' | 'Scheduled' | 'Pending approval' | 'Approved' | 'Rejected' | 'Completed'
+  status: 'Live' | 'Draft' | 'Scheduled' | 'Running' | 'Pending approval' | 'Approved' | 'Rejected' | 'Completed' | 'Failed'
   reach: string
   color: string
   messageDraft?: string
+  executionStatus?: string
+  executionSummary?: string
 }
 
 type IdentityReview = {
@@ -92,54 +90,14 @@ const initialCampaigns: Campaign[] = []
 const initialReviews: IdentityReview[] = []
 const initialDecisions: Decision[] = []
 
-// VTEKI_LOCAL_PREVIEW_ENABLED
-// Ubah ke false ketika login wajib diterapkan kembali.
-// Preview hanya menggunakan data contoh; endpoint FastAPI tetap memerlukan JWT.
-const PREVIEW_ENABLED = import.meta.env.DEV && import.meta.env.VITE_ENABLE_LOCAL_PREVIEW === 'true'
-const previewUser: ApiUser = { id: 0, email: 'preview@vteki.local', roles: ['preview'] }
-const previewCustomers: Customer[] = [
-  { apiId: 9001, id: 'DEMO-001', name: 'Pelanggan Demo Satu', initials: 'PS', city: 'Jakarta', tier: 'Platinum', value: 'Rp12.500.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo1@example.invalid', phone: '—', since: 'Jan 2026', visits: 16, nextBest: 'Program loyalitas VIP', color: 'coral' },
-  { apiId: 9002, id: 'DEMO-002', name: 'Pelanggan Demo Dua', initials: 'PD', city: 'Surabaya', tier: 'Gold', value: 'Rp6.700.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo2@example.invalid', phone: '—', since: 'Mar 2026', visits: 9, nextBest: 'Promo retensi', color: 'teal' },
-  { apiId: 9003, id: 'DEMO-003', name: 'Pelanggan Demo Tiga', initials: 'PT', city: 'Bandung', tier: 'Silver', value: 'Rp2.300.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo3@example.invalid', phone: '—', since: 'Jun 2026', visits: 4, nextBest: 'Follow-up personal', color: 'yellow' },
-  { apiId: 9004, id: 'DEMO-004', name: 'Pelanggan Demo Empat', initials: 'PE', city: 'Medan', tier: 'Gold', value: 'Rp7.850.000', lastSeen: 'Okt 2026 (contoh)', email: 'demo4@example.invalid', phone: '—', since: 'Feb 2026', visits: 11, nextBest: 'Rekomendasi produk', color: 'teal' },
-]
-const previewCampaigns: Campaign[] = [
-  { apiId: 9001, name: 'Loyalty VIP (Demo)', segment: 'Platinum', channel: 'email_sim (Simulator)', status: 'Draft', reach: '120 (contoh)', color: 'coral' },
-  { apiId: 9002, name: 'Win-back Oktober (Demo)', segment: 'Gold', channel: 'sms_sim (Simulator)', status: 'Pending approval', reach: '230 (contoh)', color: 'teal' },
-  { apiId: 9003, name: 'Re-engagement (Demo)', segment: 'Silver', channel: 'email_sim (Simulator)', status: 'Approved', reach: '340 (contoh)', color: 'blue' },
-]
-const previewReviews: IdentityReview[] = [
-  { apiId: 9001, id: 'IR-DEMO-01', subject: 'DEMO-001', candidates: ['DEMO-004'], confidence: 0.77, reason: 'Kemiripan data pelanggan — kasus simulasi', status: 'Pending' },
-  { apiId: 9002, id: 'IR-DEMO-02', subject: 'DEMO-002', candidates: ['DEMO-003'], confidence: 0.68, reason: 'Perlu validasi identitas — kasus simulasi', status: 'Pending' },
-]
-const previewDecisions: Decision[] = [
-  { id: 'NBA-DEMO-01', apiId: 9001, customer: 'Pelanggan Demo Satu · DEMO-001', recommendation: 'Penawaran member VIP', rationale: 'Simulasi: loyalitas tinggi', status: 'Proposed' },
-  { id: 'NBA-DEMO-02', apiId: 9002, customer: 'Pelanggan Demo Dua · DEMO-002', recommendation: 'Voucher retensi', rationale: 'Simulasi: potensi churn', status: 'Proposed' },
-]
-const previewMonitoring = {
-  drift: [
-    { model: 'churn-risk (demo)', metric: 'PSI', value: 0.08, threshold: 0.2, status: 'healthy' },
-    { model: 'customer-ltv (demo)', metric: 'PSI', value: 0.11, threshold: 0.2, status: 'healthy' },
-  ],
-  campaign_measurements: [
-    { campaign_id: 'DEMO-001', metric: 'Engagement (demo)', observed: 72, incremental: 16 },
-    { campaign_id: 'DEMO-002', metric: 'Conversion (demo)', observed: 54, incremental: 9 },
-  ],
-  audit: [],
-  pipeline_runs: [{ id: 'DEMO-RUN', status: 'completed', started_at: 'Simulasi' }],
-}
-
-
 function mapCustomer(row: ApiCustomer): Customer {
-  const tier = row.churn_risk === 'High' ? 'Silver' : row.ltv >= 10000 ? 'Platinum' : 'Gold'
-  const colors = { Platinum: 'coral', Gold: 'teal', Silver: 'yellow' } as const
+  const colors = ['coral', 'teal', 'blue', 'yellow'] as const
   return {
     apiId: row.id,
     id: row.customer_code,
     name: row.full_name,
     initials: row.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
-    city: row.segment,
-    tier,
+    segment: row.segment,
     value: new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(row.ltv),
     lastSeen: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(row.created_at)),
     email: row.email,
@@ -147,23 +105,44 @@ function mapCustomer(row: ApiCustomer): Customer {
     since: new Intl.DateTimeFormat('id-ID', { month: 'short', year: 'numeric' }).format(new Date(row.created_at)),
     visits: '—',
     nextBest: row.next_best_action ?? 'Belum ada rekomendasi',
-    color: colors[tier],
+    color: colors[row.id % colors.length],
   }
 }
 
 function mapCampaign(row: ApiCampaign): Campaign {
   const statusMap: Record<string, Campaign['status']> = {
-    Active: 'Live', Draft: 'Draft', PendingApproval: 'Pending approval', Approved: 'Approved', Rejected: 'Rejected', Completed: 'Completed',
+    Draft: 'Draft', PendingApproval: 'Pending approval', Approved: 'Approved', Rejected: 'Rejected', Completed: 'Completed',
   }
+  const executionResult = row.latest_execution?.result
+  const audience = executionResult?.audience_size
+  const variantA = executionResult?.variant_a_count
+  const variantB = executionResult?.variant_b_count
+  const executionStatus = row.latest_execution?.status
+  const status: Campaign['status'] = row.status === 'Active'
+    ? executionStatus === 'completed' ? 'Completed'
+      : executionStatus === 'failed' || executionStatus === 'cancelled' ? 'Failed'
+        : executionStatus === 'running' || executionStatus === 'cancel_requested' ? 'Running'
+          : executionStatus === 'queued' ? 'Scheduled'
+            : 'Live'
+    : statusMap[row.status] ?? 'Draft'
+  const executionSummary = typeof audience === 'number'
+    ? `${audience.toLocaleString('id-ID')} pelanggan · A ${typeof variantA === 'number' ? variantA.toLocaleString('id-ID') : '—'} / B ${typeof variantB === 'number' ? variantB.toLocaleString('id-ID') : '—'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
+    : executionStatus === 'failed'
+      ? 'Simulasi gagal'
+      : executionStatus
+        ? `Simulasi ${executionStatus}`
+        : undefined
   return {
     apiId: row.id,
     name: row.name,
     segment: row.target_segment,
     channel: `${row.channel} (Simulator)`,
-    status: statusMap[row.status] ?? 'Draft',
-    reach: '—',
+    status,
+    reach: typeof audience === 'number' ? audience.toLocaleString('id-ID') : 'Belum dihitung',
     color: ['coral', 'teal', 'blue', 'yellow'][row.id % 4],
     messageDraft: row.message_draft ?? '',
+    executionStatus,
+    executionSummary,
   }
 }
 
@@ -180,12 +159,13 @@ function mapReview(row: ApiReview): IdentityReview {
 }
 
 function mapDecision(row: ApiDecision): Decision {
+  const explanation = row.rationale.reason
   return {
     apiId: row.id,
     id: `NBA-${row.id}`,
     customer: `${row.customer_name} · ${row.customer_code}`,
     recommendation: row.recommended_action,
-    rationale: Object.entries(row.rationale).map(([key, value]) => `${key}: ${String(value)}`).join(' · ') || 'Rationale belum tersedia',
+    rationale: typeof explanation === 'string' && explanation.trim() ? explanation : 'Alasan belum tersedia',
     status: row.status === 'overridden' ? 'Overridden' : 'Proposed',
     selected: row.selected_action ?? undefined,
     reason: row.override_reason ?? undefined,
@@ -195,18 +175,17 @@ function mapDecision(row: ApiDecision): Decision {
 function App() {
   const [page, setPage] = useState<Page>('dashboard')
   const [token, setToken] = useState<string | null>(() => getStoredToken())
-  const [isPreview, setIsPreview] = useState(() => PREVIEW_ENABLED && !getStoredToken())
-  const [user, setUser] = useState<ApiUser | null>(() => PREVIEW_ENABLED && !getStoredToken() ? previewUser : null)
+  const [user, setUser] = useState<ApiUser | null>(null)
   const [authLoading, setAuthLoading] = useState(() => Boolean(getStoredToken()))
   const [dataLoading, setDataLoading] = useState(false)
   const [apiError, setApiError] = useState('')
-  const [customerRows, setCustomerRows] = useState<Customer[]>(() => PREVIEW_ENABLED && !getStoredToken() ? previewCustomers : customers)
-  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(() => PREVIEW_ENABLED && !getStoredToken() ? previewCustomers[0] : null)
+  const [customerRows, setCustomerRows] = useState<Customer[]>(customers)
+  const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null)
   const [search, setSearch] = useState('')
-  const [campaigns, setCampaigns] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewCampaigns : initialCampaigns)
-  const [reviews, setReviews] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewReviews : initialReviews)
-  const [decisions, setDecisions] = useState(() => PREVIEW_ENABLED && !getStoredToken() ? previewDecisions : initialDecisions)
-  const [monitoringData, setMonitoringData] = useState<{ drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }>(PREVIEW_ENABLED && !getStoredToken() ? previewMonitoring : { drift: [], campaign_measurements: [], audit: [], pipeline_runs: [] })
+  const [campaigns, setCampaigns] = useState<Campaign[]>(initialCampaigns)
+  const [reviews, setReviews] = useState<IdentityReview[]>(initialReviews)
+  const [decisions, setDecisions] = useState<Decision[]>(initialDecisions)
+  const [monitoringData, setMonitoringData] = useState<{ drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }>({ drift: [], campaign_measurements: [], audit: [], pipeline_runs: [] })
   const [builderOpen, setBuilderOpen] = useState(false)
   const [notice, setNotice] = useState('')
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null)
@@ -263,8 +242,9 @@ function App() {
       } catch (error) {
         if (!mounted) return
         if (error instanceof ApiError && error.status === 401) {
-          if (PREVIEW_ENABLED) enterPreview()
-          else { storeToken(null); setToken(null); setUser(null) }
+          storeToken(null)
+          setToken(null)
+          setUser(null)
         } else {
           setApiError(error instanceof Error ? error.message : 'Gagal memuat data platform.')
         }
@@ -278,43 +258,27 @@ function App() {
     return () => { mounted = false }
   }, [token])
 
+  useEffect(() => {
+    if (!token || !campaigns.some((campaign) => ['queued', 'running'].includes(campaign.executionStatus ?? ''))) return
+    const timer = window.setInterval(() => {
+      void api.campaigns(token).then((rows) => setCampaigns(rows.map(mapCampaign))).catch(() => undefined)
+    }, 2500)
+    return () => window.clearInterval(timer)
+  }, [token, campaigns])
+
   const filteredCustomers = useMemo(
-    () => customerRows.filter((customer) => `${customer.name} ${customer.city} ${customer.id}`.toLowerCase().includes(search.toLowerCase())),
+    () => customerRows.filter((customer) => `${customer.name} ${customer.segment} ${customer.id}`.toLowerCase().includes(search.toLowerCase())),
     [customerRows, search],
   )
 
   async function handleLogin(email: string, password: string) {
     const result = await api.login(email, password)
-    setIsPreview(false)
     setUser(null)
     storeToken(result.access_token)
     setToken(result.access_token)
   }
 
-  function enterPreview() {
-    storeToken(null)
-    setToken(null)
-    setIsPreview(true)
-    setUser(previewUser)
-    setCustomerRows(previewCustomers)
-    setSelectedCustomer(previewCustomers[0])
-    setCampaigns(previewCampaigns)
-    setReviews(previewReviews)
-    setDecisions(previewDecisions)
-    setMonitoringData(previewMonitoring)
-    setProvenance(null)
-    setApiError('')
-    setPage('dashboard')
-  }
-
-  function showLogin() {
-    setIsPreview(false)
-    setUser(null)
-    setApiError('')
-  }
-
   function logout() {
-    if (PREVIEW_ENABLED) { enterPreview(); return }
     storeToken(null)
     setToken(null)
     setUser(null)
@@ -343,13 +307,17 @@ function App() {
     if (!token) return
     const campaign = campaigns.find((item) => item.name === name)
     if (!campaign) return
+    let successNotice = `Status kampanye "${name}" diperbarui menjadi ${status}.`
     try {
       if (campaign.status === 'Draft' && status === 'Pending approval') await api.submitCampaign(token, campaign.apiId)
       else if (campaign.status === 'Pending approval' && status === 'Approved') await api.approveCampaign(token, campaign.apiId)
       else if (campaign.status === 'Pending approval' && status === 'Rejected') await api.rejectCampaign(token, campaign.apiId, 'Ditolak melalui review workflow')
-      else if (campaign.status === 'Approved' && status === 'Live') await api.launchCampaign(token, campaign.apiId)
+      else if (campaign.status === 'Approved' && status === 'Live') {
+        const launched = await api.launchCampaign(token, campaign.apiId)
+        successNotice = `Simulasi masuk antrean worker sebagai job #${launched.batch_job_id}.`
+      }
       await refreshWorkspace(token, user?.roles ?? [])
-      setNotice(`Status kampanye "${name}" diperbarui menjadi ${status}.`)
+      setNotice(successNotice)
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal memperbarui status kampanye.')
     }
@@ -363,17 +331,6 @@ function App() {
       setProvenance(await api.customerProvenance(token, customer.apiId))
     } catch (error) {
       setApiError(error instanceof Error ? error.message : 'Gagal memuat provenance.')
-    }
-  }
-
-  async function seedCustomers() {
-    if (!token) return
-    try {
-      const result = await api.seedCustomers(token)
-      await refreshWorkspace(token, user?.roles ?? [])
-      setNotice(result.message)
-    } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Gagal memuat data contoh.')
     }
   }
 
@@ -426,7 +383,7 @@ function App() {
   }
 
   if (authLoading) return <LoadingScreen />
-  if ((!token && !isPreview) || !user) return <LoginScreen onLogin={handleLogin} error={apiError} onPreview={PREVIEW_ENABLED ? enterPreview : undefined} />
+  if (!token || !user) return <LoginScreen onLogin={handleLogin} error={apiError} />
   const canManageCampaigns = user.roles.some((role) => ['admin', 'campaign_manager'].includes(role))
   const canReviewIdentity = user.roles.some((role) => ['admin', 'operator'].includes(role))
   const canCreateNBA = user.roles.some((role) => ['admin', 'analyst'].includes(role))
@@ -442,41 +399,42 @@ function App() {
         </div>
         
         <div className="workspace-switch">
-          <span className="workspace-icon">N</span>
+          <span className="workspace-icon">V</span>
           <span className="workspace-copy">
-            <b>Nusa Beauty Group</b>
-            <small>Customer Intelligence</small>
+            <b>Customer Intelligence</b>
+            <small>Workspace</small>
           </span>
           <ChevronDown size={15} />
         </div>
 
         <div className="persona-box">
-          <div className="persona-label">{isPreview ? 'MODE PREVIEW — DATA SIMULASI' : 'ROLE AKTIF DARI SERVER'}</div>
+          <div className="persona-label">ROLE AKTIF DARI SERVER</div>
           <div className="role-list">{user.roles.map((role) => <span className="role-chip" key={role}>{role}</span>)}</div>
         </div>
 
         <div className="nav-label">NAVIGASI UTAMA</div>
         <nav className="main-nav" aria-label="Main navigation">
-          <NavItem active={page === 'dashboard'} icon={<LayoutDashboard size={18} />} label="Overview" onClick={() => setPage('dashboard')} />
+          <NavItem active={page === 'dashboard'} icon={<LayoutDashboard size={18} />} label="Ringkasan" onClick={() => setPage('dashboard')} />
           <NavItem active={page === 'customers'} icon={<UsersRound size={18} />} label="Customer 360" onClick={() => setPage('customers')} count={customerRows.length ? `${customerRows.length}` : undefined} />
-          <NavItem active={page === 'campaigns'} icon={<Send size={18} />} label="Campaigns & Approval" onClick={() => setPage('campaigns')} count={campaigns.filter(c => c.status === 'Pending approval').length ? `${campaigns.filter(c => c.status === 'Pending approval').length}` : undefined} />
+          <NavItem active={page === 'campaigns'} icon={<Send size={18} />} label="Kampanye & Persetujuan" onClick={() => setPage('campaigns')} count={campaigns.filter(c => c.status === 'Pending approval').length ? `${campaigns.filter(c => c.status === 'Pending approval').length}` : undefined} />
           <NavItem active={page === 'reviews'} icon={<ClipboardCheck size={18} />} label="Manual Review Identitas" onClick={() => setPage('reviews')} count={reviews.filter(r => r.status === 'Pending').length ? `${reviews.filter(r => r.status === 'Pending').length}` : undefined} />
-          <NavItem active={page === 'decisions'} icon={<Sparkles size={18} />} label="Next-Best-Action & Override" onClick={() => setPage('decisions')} />
-          <NavItem active={page === 'monitoring'} icon={<ChartNoAxesCombined size={18} />} label="Monitoring & Audit Trace" onClick={() => setPage('monitoring')} />
+          <NavItem active={page === 'decisions'} icon={<Sparkles size={18} />} label="Proposal Tindakan" onClick={() => setPage('decisions')} />
+          <NavItem active={page === 'monitoring'} icon={<ChartNoAxesCombined size={18} />} label="Pemantauan & Audit" onClick={() => setPage('monitoring')} />
+          {user.roles.some((role) => ['admin', 'analyst'].includes(role)) && <NavItem active={page === 'models'} icon={<ChartNoAxesCombined size={18} />} label="Review model Moses" onClick={() => setPage('models')} />}
         </nav>
 
         <div className="nav-label tools-label">GOVERNANCE & NFR</div>
         <nav className="main-nav" aria-label="Governance">
-          <NavItem active={false} icon={<WalletCards size={18} />} label="PostgreSQL Schemas (8)" onClick={() => setNotice('PostgreSQL Schemas: core, stg, feat, ml, dec, act, msr, gov')} />
+          <NavItem active={false} icon={<WalletCards size={18} />} label="Skema data" onClick={() => setNotice('Skema data: core, stg, feat, ml, dec, act, msr, gov')} />
           <NavItem active={false} icon={<ShieldCheck size={18} />} label="RBAC & Audit Service" onClick={() => setNotice('JWT Auth + bcrypt + append-only audit_event (correlation_id)')} />
         </nav>
 
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
           <button className="plain-nav" onClick={() => setNotice('CI/CD Pipeline: GitHub Actions + mypy + Schemathesis + T-SEC-03 Allowlist')}><CircleHelp size={17} /> CI/CD & Security</button>
-          <button className="plain-nav" onClick={isPreview ? showLogin : logout}><LogOut size={17} /> {isPreview ? 'Login ke data asli' : 'Keluar'}</button>
+          <button className="plain-nav" onClick={logout}><LogOut size={17} /> Keluar</button>
           <div className="profile-row">
-            <div className="avatar avatar-dark">PA</div>
+          <div className="avatar avatar-dark">{user.email.slice(0, 2).toUpperCase()}</div>
             <div className="profile-copy">
               <b>{user.email}</b>
               <small>{user.roles.join(', ')}</small>
@@ -489,46 +447,40 @@ function App() {
       <div className="main-column">
         <header className="topbar">
           <div className="breadcrumb">
-            <span>Platform Architect</span>
+            <span>Workspace</span>
             <span className="crumb-slash">/</span>
             <b>{pageTitle(page)}</b>
           </div>
           <div className="top-actions">
             <button className="global-search" onClick={() => setPage('customers')}>
               <Search size={16} />
-              <span>Search customer, audit, campaign</span>
-              <kbd><Command size={11} /> K</kbd>
+              <span>Cari pelanggan</span>
             </button>
-            <button className="icon-button notification-button" aria-label="Notifications" onClick={() => setNotice('Sistem Audit & Pipeline 60-min berjalan normal')}>
+            <button className="icon-button notification-button" aria-label="Buka pemantauan" onClick={() => setPage('monitoring')}>
               <Bell size={18} />
-              <i />
             </button>
             <div className="avatar avatar-coral">{user.email.slice(0, 2).toUpperCase()}</div>
           </div>
         </header>
 
-        {isPreview && <div className="preview-banner" role="status"><strong>MODE PREVIEW</strong><span>Data simulasi, bukan data pelanggan asli. Fitur penyimpanan dan akses API membutuhkan login.</span><button onClick={showLogin}>Login untuk data asli →</button></div>}
         {apiError && <div className="api-alert" role="alert"><span>{apiError}</span><button onClick={() => setApiError('')} aria-label="Tutup pesan"><X size={15} /></button></div>}
         {dataLoading && <div className="sync-note">Sinkronisasi data dari API…</div>}
 
         <main className="page-content" key={page}>
           {page === 'dashboard' && (
             <Dashboard 
-              isPreview={isPreview}
               campaigns={campaigns} 
               customers={customerRows}
               reviews={reviews}
               decisions={decisions}
               monitoring={monitoringData}
-              onSeedCustomers={seedCustomers}
-              canSeed={user.roles.includes('admin')}
               canManageCampaigns={canManageCampaigns}
               onOpenCustomers={() => setPage('customers')} 
               onNewCampaign={() => setBuilderOpen(true)} 
               onNavigate={(p) => setPage(p)}
             />
           )}
-          {page === 'customers' && <><CustomerPage customers={filteredCustomers} selected={selectedCustomer} provenance={provenance} onSelect={selectCustomer} search={search} onSearch={setSearch} onSeed={seedCustomers} canSeed={user.roles.includes('admin')} /><GoldenSnapshotsPanel token={token} canReview={user.roles.includes('admin') || user.roles.includes('analyst')} /></>}
+          {page === 'customers' && <><CustomerPage customers={filteredCustomers} selected={selectedCustomer} provenance={provenance} onSelect={selectCustomer} search={search} onSearch={setSearch} /><GoldenSnapshotsPanel token={token} canReview={user.roles.includes('admin') || user.roles.includes('analyst')} /></>}
           {page === 'campaigns' && <CampaignPage campaigns={campaigns} canManage={canManageCampaigns} onNew={() => setBuilderOpen(true)} onTransition={transitionCampaign} />}
           {page === 'reviews' && (
             <IdentityReviewPage 
@@ -549,6 +501,7 @@ function App() {
             />
           )}
           {page === 'monitoring' && <MonitoringPage token={token ?? ''} data={monitoringData} canTrace={canTrace} />}
+          {page === 'models' && user.roles.some((role) => ['admin', 'analyst'].includes(role)) && <ModelPredictionReviewPage token={token} userId={user.id} />}
         </main>
       </div>
 
@@ -566,12 +519,13 @@ function App() {
 
 function pageTitle(page: Page) {
   return {
-    dashboard: 'Overview Governance & Operations',
+    dashboard: 'Ringkasan operasional',
     customers: 'Customer 360 & Data Provenance',
     campaigns: 'Campaign Studio & Approval Workflow',
     reviews: 'Antrean Manual Review Identitas',
     decisions: 'Layar Eksekusi NBA & Human Override',
     monitoring: 'Dashboard Monitoring, Drift & Audit Trace',
+    models: 'Review output model Moses',
   }[page]
 }
 
@@ -579,11 +533,11 @@ function NavItem({ active, icon, label, count, onClick }: { active: boolean; ico
   return <button className={`nav-item ${active ? 'active' : ''}`} onClick={onClick}>{icon}<span>{label}</span>{count && <small>{count}</small>}</button>
 }
 
-function PageHeading({ eyebrow, title, subtitle, action }: { eyebrow: string; title: string; subtitle: string; action?: React.ReactNode }) {
-  return <div className="page-heading"><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{action && <div className="heading-action">{action}</div>}</div>
+function PageHeading({ eyebrow, title, subtitle, action, className = '' }: { eyebrow: string; title: string; subtitle: string; action?: React.ReactNode; className?: string }) {
+  return <div className={`page-heading ${className}`}><div><div className="eyebrow">{eyebrow}</div><h1>{title}</h1><p>{subtitle}</p></div>{action && <div className="heading-action">{action}</div>}</div>
 }
 
-function Dashboard({ isPreview, campaigns, customers: customerRows, reviews, decisions, monitoring, onSeedCustomers, canSeed, canManageCampaigns, onOpenCustomers, onNewCampaign, onNavigate }: { isPreview: boolean; campaigns: Campaign[]; customers: Customer[]; reviews: IdentityReview[]; decisions: Decision[]; monitoring: { drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }; onSeedCustomers: () => void; canSeed: boolean; canManageCampaigns: boolean; onOpenCustomers: () => void; onNewCampaign: () => void; onNavigate: (p: Page) => void }) {
+function Dashboard({ campaigns, customers: customerRows, reviews, decisions, monitoring, canManageCampaigns, onOpenCustomers, onNewCampaign, onNavigate }: { campaigns: Campaign[]; customers: Customer[]; reviews: IdentityReview[]; decisions: Decision[]; monitoring: { drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }; canManageCampaigns: boolean; onOpenCustomers: () => void; onNewCampaign: () => void; onNavigate: (p: Page) => void }) {
   const measurements = monitoring.campaign_measurements
   const driftMetrics = monitoring.drift
   const pipelineRun = monitoring.pipeline_runs[0]
@@ -593,43 +547,44 @@ function Dashboard({ isPreview, campaigns, customers: customerRows, reviews, dec
   const pipelineLabel = pipelineRun ? String(pipelineRun.status) : 'Belum ada run'
   return <>
     <PageHeading 
-      eyebrow="CAPSTONE INTELLIGENCE PLATFORM" 
-      title="Architecture & Governance Dashboard" 
-      subtitle="Monitoring skema PostgreSQL terpartisi (core, stg, feat, ml, dec, act, msr, gov), pipeline APScheduler (NFR-01), dan alur persetujuan." 
+      className="dashboard-heading"
+      eyebrow="VTEKI · CUSTOMER INTELLIGENCE"
+      title="Kenali pelanggan.\nAmbil langkah berikutnya."
+      subtitle="Ringkasan pelanggan, persetujuan kampanye, dan aktivitas tim dalam satu tempat."
       action={
         <>
-          <button className="button button-secondary" onClick={() => onNavigate('monitoring')}><FileSearch size={15} /> Audit Trace (SLA &le; 5m)</button>
+          <button className="button button-secondary" onClick={() => onNavigate('monitoring')}><FileSearch size={15} /> Lihat aktivitas</button>
           {canManageCampaigns && <button className="button button-primary" onClick={onNewCampaign}><Plus size={16} /> Buat Kampanye</button>}
         </>
       } 
     />
 
-    <section className="metric-grid" aria-label="Key metrics">
-      <Metric label="Total Pelanggan 360" value={customerRows.length.toLocaleString('id-ID')} change={isPreview ? "Contoh" : "API"} detail={isPreview ? "Data simulasi" : "core.customers"} icon={<UsersRound size={16} />} positive />
-      <Metric label="Antrean Review Identitas" value={`${reviews.filter(r => r.status === 'Pending').length}`} change="Saat ini" detail="manual review pending" icon={<UserCheck size={16} />} positive={false} />
-      <Metric label="Keputusan NBA" value={`${decisions.length}`} change={isPreview ? "Contoh" : "Persisten"} detail={isPreview ? "Data simulasi" : "dec.nba_decisions"} icon={<Sparkles size={16} />} positive />
-      <Metric label="Pipeline NFR-01" value={pipelineLabel} change={pipelineRun ? 'Scheduler' : 'Menunggu'} detail="advisory run lock · budget 60m" icon={<Clock3 size={16} />} positive={pipelineRun?.status === 'completed'} />
+    <section className="metric-grid" aria-label="Ringkasan data">
+      <Metric label="Pelanggan" value={customerRows.length.toLocaleString('id-ID')} change="Dari server" detail="Profil tersimpan" icon={<UsersRound size={16} />} />
+      <Metric label="Perlu tinjauan" value={`${reviews.filter(r => r.status === 'Pending').length}`} change="Saat ini" detail="Review identitas" icon={<UserCheck size={16} />} />
+      <Metric label="Proposal tindakan" value={`${decisions.length}`} change="Tersimpan" detail="Riwayat keputusan" icon={<Sparkles size={16} />} />
+      <Metric label="Pembaruan data" value={pipelineLabel} change={pipelineRun ? 'Otomatis' : 'Belum berjalan'} detail="Status pipeline" icon={<Clock3 size={16} />} />
     </section>
 
     <section className="insight-grid">
       <article className="panel revenue-panel">
-        <div className="panel-heading"><div><div className="panel-kicker">ANALISIS HASIL TERAMATI VS INKREMENTAL</div><h2>Hasil Teramati vs Inkremen Lift (A/B Test)</h2></div><button className="more-button" aria-label="More options"><MoreHorizontal size={20} /></button></div>
+        <div className="panel-heading"><div><div className="panel-kicker">HASIL KAMPANYE</div><h2>Hasil tercatat</h2></div></div>
         {measurements.length ? <>
-          <div className="revenue-total"><strong>{observedTotal.toLocaleString('id-ID')} observed</strong><span className="delta">{incrementalTotal.toLocaleString('id-ID')} incremental</span><small>Jumlah record hasil pengukuran dari msr.campaign_measurements</small></div>
+          <div className="revenue-total"><strong>{observedTotal.toLocaleString('id-ID')} teramati</strong><span className="delta">{incrementalTotal.toLocaleString('id-ID')} inkremental</span><small>Ringkasan pengukuran yang tersimpan</small></div>
           <div className="measurement-list">{measurements.slice(0, 6).map((item, index) => <div className="measurement-row" key={`${item.campaign_id}-${index}`}><span>{String(item.metric ?? `Campaign ${item.campaign_id}`)}</span><div className="measurement-bars"><i style={{ width: `${Math.min(100, Math.max(2, Number(item.observed ?? 0)))}%` }} /><b style={{ width: `${Math.min(100, Math.max(2, Number(item.incremental ?? 0)))}%` }} /></div><small>{Number(item.observed ?? 0)} / {Number(item.incremental ?? 0)}</small></div>)}</div>
         </> : <div className="empty-state">Belum ada hasil observed-vs-incremental yang tercatat di API.</div>}
       </article>
 
       <article className="panel segment-panel">
-        <div className="panel-heading"><div><div className="panel-kicker">MONITORING PERGESERAN MODEL</div><h2>Model Drift (PSI Status)</h2></div><button className="more-button" aria-label="More segment options"><MoreHorizontal size={20} /></button></div>
-        {driftValue !== null ? <><div className="segment-total"><strong>PSI {driftValue.toFixed(2)}</strong><span>{driftMetrics.length} measured models</span></div><div className="segment-stack"><span className="segment-platinum" /><span className="segment-gold" /><span className="segment-silver" /><span className="segment-risk" /></div><div className="segment-legend">{driftMetrics.slice(0, 4).map((item, index) => <SegmentRow key={`${item.model}-${index}`} label={String(item.model ?? 'model')} count={`PSI ${Number(item.value ?? 0).toFixed(2)}`} percent={String(item.status ?? '')} tone={index % 2 ? 'gold' : 'platinum'} />)}</div></> : <div className="empty-state">Belum ada metrik drift model di API.</div>}
+        <div className="panel-heading"><div><div className="panel-kicker">KUALITAS MODEL</div><h2>Pergeseran data</h2></div></div>
+        {driftValue !== null ? <><div className="segment-total"><strong>PSI {driftValue.toFixed(2)}</strong><span>{driftMetrics.length} model terukur</span></div><div className="segment-legend">{driftMetrics.slice(0, 4).map((item, index) => <SegmentRow key={`${item.model}-${index}`} label={String(item.model ?? 'model')} count={`PSI ${Number(item.value ?? 0).toFixed(2)}`} percent={String(item.status ?? '')} tone={index % 2 ? 'gold' : 'platinum'} />)}</div></> : <div className="empty-state">Belum ada metrik drift model di API.</div>}
         <button className="text-link" onClick={() => onNavigate('monitoring')}>Lihat detail Monitoring & Audit Log <ArrowRight size={15} /></button>
       </article>
     </section>
 
     <section className="bottom-grid">
       <article className="panel table-panel">
-        <div className="panel-heading panel-heading-table"><div><div className="panel-kicker">ANTREAN IDENTITAS</div><h2>Identity Review Pending</h2></div><button className="button button-quiet" onClick={() => onNavigate('reviews')}>Lihat Semua <ArrowRight size={14} /></button></div>
+        <div className="panel-heading panel-heading-table"><div><div className="panel-kicker">TINJAUAN IDENTITAS</div><h2>Menunggu pemeriksaan</h2></div><button className="button button-quiet" onClick={() => onNavigate('reviews')}>Lihat semua <ArrowRight size={14} /></button></div>
         <div className="mini-review-list">
           {reviews.filter((review) => review.status === 'Pending').map(r => (
             <div className="mini-review-item" key={r.id}>
@@ -645,7 +600,7 @@ function Dashboard({ isPreview, campaigns, customers: customerRows, reviews, dec
       </article>
 
       <article className="panel campaign-mini-panel">
-        <div className="panel-heading panel-heading-table"><div><div className="panel-kicker">HUMAN APPROVAL WORKFLOW</div><h2>Draf Kampanye Menunggu Persetujuan</h2></div><button className="more-button" aria-label="Options"><MoreHorizontal size={20} /></button></div>
+        <div className="panel-heading panel-heading-table"><div><div className="panel-kicker">KAMPANYE</div><h2>Menunggu persetujuan</h2></div></div>
         <div className="mini-campaign-list">{campaigns.filter((campaign) => ['Draft', 'Pending approval', 'Approved'].includes(campaign.status)).slice(0, 3).map((campaign) => <div className="mini-campaign" key={campaign.apiId}><div className={`campaign-symbol ${campaign.color}`}><Gift size={16} /></div><div className="mini-campaign-copy"><b>{campaign.name}</b><small>{campaign.segment}</small></div><StatusBadge status={campaign.status} /></div>)}{!campaigns.some((campaign) => ['Draft', 'Pending approval', 'Approved'].includes(campaign.status)) && <div className="empty-state">Belum ada campaign yang menunggu workflow.</div>}</div>
         <button className="text-link" onClick={() => onNavigate('campaigns')}>Buka Studio Kampanye <ArrowRight size={15} /></button>
       </article>
@@ -653,27 +608,27 @@ function Dashboard({ isPreview, campaigns, customers: customerRows, reviews, dec
 
     <article className="panel table-panel dashboard-customer-panel">
       <div className="panel-heading panel-heading-table">
-        <div><div className="panel-kicker">CUSTOMER 360</div><h2>Pelanggan terakhir aktif</h2></div>
+        <div><div className="panel-kicker">CUSTOMER 360</div><h2>Pelanggan terbaru</h2></div>
         <button className="button button-quiet" onClick={onOpenCustomers}>Buka Customer 360 <ArrowRight size={14} /></button>
       </div>
-      {customerRows.length ? <CustomerTable rows={customerRows.slice(0, 3)} compact /> : <div className="empty-state">Belum ada customer di core.customers.{canSeed && <button className="button button-secondary" onClick={onSeedCustomers}>Muat data contoh</button>}</div>}
+      {customerRows.length ? <CustomerTable rows={customerRows.slice(0, 3)} compact /> : <div className="empty-state">Belum ada customer di core.customers.</div>}
     </article>
 
     <div className="data-note">
-      <ShieldCheck size={14} /> {isPreview ? 'Preview saja — data fiktif, tidak ada aktivitas server' : 'Keamanan & Compliance T-SEC-03: Channel Simulator aktif (Tanpa vendor email/SMS eksternal)'} <span>{isPreview ? 'Login diperlukan untuk data asli' : 'Append-only Audit Log Active'}</span>
+      <ShieldCheck size={14} /> Pengiriman kampanye memakai simulator <span>Aktivitas tercatat di audit</span>
     </div>
   </>
 }
 
-function Metric({ label, value, change, detail, icon, positive }: { label: string; value: string; change: string; detail: string; icon: React.ReactNode; positive: boolean }) {
-  return <article className="metric"><div className="metric-top"><span>{label}</span><i>{icon}</i></div><strong>{value}</strong><div className={`metric-foot ${positive ? 'is-positive' : 'is-negative'}`}>{positive ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}<b>{change}</b><span>{detail}</span></div></article>
+function Metric({ label, value, change, detail, icon }: { label: string; value: string; change: string; detail: string; icon: React.ReactNode }) {
+  return <article className="metric"><div className="metric-top"><span>{label}</span><i>{icon}</i></div><strong>{value}</strong><div className="metric-foot"><b>{change}</b><span>{detail}</span></div></article>
 }
 
 function SegmentRow({ label, count, percent, tone }: { label: string; count: string; percent: string; tone: string }) {
   return <div className="segment-row"><span className={`legend-dot ${tone}`} /><span className="segment-name">{label}</span><b>{count}</b><small>{percent}</small></div>
 }
 
-function CustomerPage({ customers: rows, selected, provenance, onSelect, search, onSearch, onSeed, canSeed }: { customers: Customer[]; selected: Customer | null; provenance: Record<string, unknown> | null; onSelect: (customer: Customer) => void; search: string; onSearch: (value: string) => void; onSeed: () => void; canSeed: boolean }) {
+function CustomerPage({ customers: rows, selected, provenance, onSelect, search, onSearch }: { customers: Customer[]; selected: Customer | null; provenance: Record<string, unknown> | null; onSelect: (customer: Customer) => void; search: string; onSearch: (value: string) => void }) {
   return <>
     <PageHeading eyebrow="CUSTOMER DATA PLATFORM" title="Customer 360 & Provenance" subtitle="Tampilan menyeluruh pelanggan dengan riwayat data provenance dan consent." action={<><button className="button button-secondary"><Filter size={15} /> Filter Segment</button><button className="button button-primary"><Download size={15} /> Ekspor Data</button></>} />
     <div className="customer-layout">
@@ -681,8 +636,8 @@ function CustomerPage({ customers: rows, selected, provenance, onSelect, search,
         <div className="list-toolbar"><div className="inline-search"><Search size={16} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Cari pelanggan berdasarkan kode/nama" aria-label="Search customers" /></div><button className="icon-button filter-icon" aria-label="Filter customers"><Filter size={16} /></button></div>
         <div className="customer-count"><b>Semua Pelanggan</b><span>{rows.length}</span><ChevronDown size={14} /></div>
         <CustomerTable rows={rows} onSelect={onSelect} selectedId={selected?.id} />
-        {rows.length === 0 && <div className="empty-state">{search ? `Tidak ada pelanggan dengan kata kunci “${search}”.` : 'Belum ada customer di API.'}{!search && canSeed && <button className="button button-secondary" onClick={onSeed}>Muat data contoh</button>}</div>}
-        <div className="list-footer">Menampilkan {rows.length} pelanggan dari API <button onClick={onSeed} disabled={!canSeed || rows.length > 0}>Muat data contoh</button></div>
+        {rows.length === 0 && <div className="empty-state">{search ? `Tidak ada pelanggan dengan kata kunci “${search}”.` : 'Belum ada customer di API.'}</div>}
+        <div className="list-footer">Menampilkan {rows.length} pelanggan dari API</div>
       </section>
       {selected && <CustomerProfile customer={selected} provenance={provenance} />}
     </div>
@@ -690,7 +645,7 @@ function CustomerPage({ customers: rows, selected, provenance, onSelect, search,
 }
 
 function CustomerTable({ rows, compact = false, onSelect, selectedId }: { rows: Customer[]; compact?: boolean; onSelect?: (customer: Customer) => void; selectedId?: string }) {
-  return <div className={`customer-table-wrap ${compact ? 'compact-table' : ''}`}><table className="customer-table"><thead><tr><th>Pelanggan</th><th>Value band</th><th>Lifetime Value</th><th>Tercatat</th></tr></thead><tbody>{rows.map((customer) => <tr key={customer.id} className={selectedId === customer.id ? 'selected-row' : ''} onClick={() => onSelect?.(customer)}><td><div className="table-customer"><div className={`avatar avatar-${customer.color}`}>{customer.initials}</div><div><b>{customer.name}</b><small>{customer.city} · {customer.id}</small></div></div></td><td><TierBadge tier={customer.tier} /></td><td className="value-cell">{customer.value}</td><td className="last-active">{customer.lastSeen}</td></tr>)}</tbody></table></div>
+  return <div className={`customer-table-wrap ${compact ? 'compact-table' : ''}`}><table className="customer-table"><thead><tr><th>Pelanggan</th><th>Segmen</th><th>Nilai seumur hidup</th><th>Tercatat</th></tr></thead><tbody>{rows.map((customer) => <tr key={customer.id} className={selectedId === customer.id ? 'selected-row' : ''} onClick={() => onSelect?.(customer)}><td><div className="table-customer"><div className={`avatar avatar-${customer.color}`}>{customer.initials}</div><div><b>{customer.name}</b><small>{customer.id}</small></div></div></td><td><span className="segment-chip">{customer.segment}</span></td><td className="value-cell">{customer.value}</td><td className="last-active">{customer.lastSeen}</td></tr>)}</tbody></table></div>
 }
 
 function CustomerProfile({ customer, provenance }: { customer: Customer; provenance: Record<string, unknown> | null }) {
@@ -700,12 +655,12 @@ function CustomerProfile({ customer, provenance }: { customer: Customer; provena
   return <aside className="panel profile-panel">
     <div className="profile-cover"><span className="cover-orbit cover-orbit-one" /><span className="cover-orbit cover-orbit-two" /><button className="more-button cover-more" aria-label="More customer options"><MoreHorizontal size={20} /></button><div className={`profile-avatar avatar-${customer.color}`}>{customer.initials}</div></div>
     <div className="profile-main">
-      <div className="profile-name-row"><div><h2>{customer.name}</h2><span>{customer.id}</span></div><TierBadge tier={customer.tier} /></div>
-      <p className="profile-location">Segmen {customer.city} <span>·</span> Tercatat sejak {customer.since}</p>
-      <div className="profile-actions"><button className="button button-secondary" disabled title="Tidak ada pengiriman pesan eksternal pada platform ini"><ShieldCheck size={14} /> Channel simulator only</button><button className="button button-secondary" aria-label="Opsi profil"><MoreHorizontal size={17} /></button></div>
-      <div className="profile-stats"><div><small>Lifetime Value</small><b>{customer.value}</b></div><div><small>Total Kunjungan</small><b>{customer.visits}</b></div></div>
+      <div className="profile-name-row"><div><h2>{customer.name}</h2><span>{customer.id}</span></div><span className="segment-chip">{customer.segment}</span></div>
+      <p className="profile-location">Tercatat sejak {customer.since}</p>
+      <div className="profile-actions"><button className="button button-secondary" disabled title="Tidak ada pengiriman pesan eksternal pada platform ini"><ShieldCheck size={14} /> Simulator saja</button><button className="button button-secondary" aria-label="Opsi profil"><MoreHorizontal size={17} /></button></div>
+      <div className="profile-stats"><div><small>Nilai seumur hidup</small><b>{customer.value}</b></div><div><small>Total kunjungan</small><b>{customer.visits}</b></div></div>
       <div className="profile-section"><div className="profile-section-title">KONTAK VERIFIKASI <button aria-label="Edit contact details"><MoreHorizontal size={16} /></button></div><div className="contact-line"><span className="contact-icon">@</span>{customer.email}</div><div className="contact-line"><span className="contact-icon">#</span>{customer.phone}</div></div>
-      <div className="profile-section"><div className="profile-section-title">NEXT-BEST-ACTION (AI) <Sparkles size={15} /></div><div className="next-action"><div className="next-action-icon"><Gift size={17} /></div><div><b>{customer.nextBest}</b><small>Affinities Tinggi · 78% Likelihood</small></div><ArrowRight size={15} /></div></div>
+      <div className="profile-section"><div className="profile-section-title">REKOMENDASI TERSIMPAN <Sparkles size={15} /></div><div className="next-action"><div className="next-action-icon"><Gift size={17} /></div><div><b>{customer.nextBest || 'Belum ada rekomendasi'}</b></div></div></div>
       
       <div className="profile-section">
         <div className="profile-section-title">RIWAYAT PROVENANCE DATA <GitBranch size={14} /></div>
@@ -750,21 +705,21 @@ function CustomerProfile({ customer, provenance }: { customer: Customer; provena
 function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns: Campaign[]; canManage: boolean; onNew: () => void; onTransition: (name: string, status: Campaign['status']) => void }) {
   const [activeFilter, setActiveFilter] = useState('All campaigns')
   const visible = campaigns.filter((campaign) => activeFilter === 'All campaigns' || campaign.status === activeFilter)
-  const liveCount = campaigns.filter((campaign) => campaign.status === 'Live').length
+  const runningCount = campaigns.filter((campaign) => ['Scheduled', 'Running'].includes(campaign.status)).length
   const pendingCount = campaigns.filter((campaign) => campaign.status === 'Pending approval').length
 
   return <>
     <PageHeading eyebrow="ENGAGEMENT & APPROVAL WORKFLOW" title="Campaign Studio & Persetujuan Draf" subtitle="Formulir pembuatan kampanye, peninjauan draf pesan, dan alur persetujuan (Human Approval Workflow)." action={canManage && <button className="button button-primary" onClick={onNew}><Plus size={16} /> Kampanye Baru</button>} />
     <section className="campaign-summary">
       <div><span>Total campaign</span><b>{campaigns.length}</b><small>Data tersimpan pada act.campaigns</small></div>
-      <div><span>Live / berjalan</span><b>{liveCount}</b><small>Dari respons API</small></div>
+      <div><span>Simulasi berjalan</span><b>{runningCount}</b><small>Job worker aktif</small></div>
       <div><span>Menunggu approval</span><b>{pendingCount}</b><small><ShieldCheck size={14} /> Channel simulator only</small></div>
       <div className="summary-illustration"><span className="summary-ring ring-one" /><span className="summary-ring ring-two" /><span className="summary-star"><Sparkles size={21} /></span></div>
     </section>
 
     <div className="campaign-toolbar">
       <div className="filter-tabs">
-        {['All campaigns', 'Live', 'Pending approval', 'Draft', 'Approved'].map((filter) => (
+        {['All campaigns', 'Scheduled', 'Running', 'Pending approval', 'Draft', 'Approved', 'Completed', 'Failed'].map((filter) => (
           <button className={activeFilter === filter ? 'selected' : ''} onClick={() => setActiveFilter(filter)} key={filter}>
             {filter}
             <span>{filter === 'All campaigns' ? campaigns.length : campaigns.filter((c) => c.status === filter).length}</span>
@@ -781,7 +736,7 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
             <th>Kampanye & Draf Pesan</th>
             <th>Segmen Audiens</th>
             <th>Channel</th>
-            <th>Estimasi Jangkauan</th>
+            <th>Jangkauan simulasi</th>
             <th>Status Workflow</th>
             <th>Aksi Persetujuan</th>
           </tr>
@@ -801,7 +756,7 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
               <td>{campaign.segment}</td>
               <td><span className="channel-pill">{campaign.channel}</span></td>
               <td>{campaign.reach}</td>
-              <td><StatusBadge status={campaign.status} /></td>
+              <td><StatusBadge status={campaign.status} />{campaign.executionSummary && <small className="campaign-execution-note">{campaign.executionSummary}</small>}</td>
               <td>
                 <div className="action-button-group">
                   {!canManage ? <span className="text-muted-sm">Read only</span> : campaign.status === 'Draft' ? (
@@ -840,7 +795,7 @@ function IdentityReviewPage({ reviews, onResolve, onCreate, canResolve }: { revi
   const [createOpen, setCreateOpen] = useState(false)
   const [subject, setSubject] = useState('')
   const [candidates, setCandidates] = useState('')
-  const [confidence, setConfidence] = useState('0.7')
+  const [confidence, setConfidence] = useState('')
   const [reason, setReason] = useState('')
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -928,6 +883,7 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
   const [createOpen, setCreateOpen] = useState(false)
   const [newCustomerId, setNewCustomerId] = useState('')
   const [newAction, setNewAction] = useState('')
+  const [newReason, setNewReason] = useState('')
 
   function handleOverrideSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -942,10 +898,10 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
     <PageHeading 
       eyebrow="NEXT-BEST-ACTION & HUMAN OVERRIDE" 
       title="Layar Eksekusi NBA & Interface Human Override" 
-      subtitle="Peninjauan rekomendasi Next-Best-Action dari model AI beserta fasilitas Human Override manual dengan logging justifikasi."
+      subtitle="Proposal Next-Best-Action yang tersimpan dan fasilitas Human Override manual dengan pencatatan alasannya."
       action={canCreate && <button className="button button-primary" onClick={() => setCreateOpen((open) => !open)} disabled={!customerRows.length}><Plus size={15} /> Buat proposal NBA</button>}
     />
-    {createOpen && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customer = customerRows.find((item) => item.apiId === Number(newCustomerId)); if (!customer || !newAction.trim()) return; onCreate(customer.apiId, newAction.trim(), { source: 'customer_360', customer_code: customer.id, segment: customer.city }); setCreateOpen(false); setNewAction('') }}><label className="field-label">Pelanggan<select required value={newCustomerId} onChange={(event) => setNewCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><label className="field-label">Recommended action<input required value={newAction} onChange={(event) => setNewAction(event.target.value)} placeholder="Tindakan yang direkomendasikan" /></label><button className="button button-primary" type="submit">Simpan proposal</button></form>}
+    {createOpen && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customer = customerRows.find((item) => item.apiId === Number(newCustomerId)); if (!customer || !newAction.trim() || newReason.trim().length < 5) return; onCreate(customer.apiId, newAction.trim(), { source: 'manual', reason: newReason.trim() }); setCreateOpen(false); setNewAction(''); setNewReason('') }}><label className="field-label">Pelanggan<select required value={newCustomerId} onChange={(event) => setNewCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><label className="field-label">Tindakan yang diusulkan<input required value={newAction} onChange={(event) => setNewAction(event.target.value)} placeholder="Jelaskan tindakan yang disarankan" /></label><label className="field-label">Alasan dengan bahasa sederhana<textarea required minLength={5} rows={3} value={newReason} onChange={(event) => setNewReason(event.target.value)} placeholder="Contoh: pelanggan sudah lama tidak bertransaksi; hubungi untuk menanyakan kebutuhan mereka." /></label><button className="button button-primary" type="submit">Simpan proposal</button></form>}
     <div className="decision-grid">
       {decisions.map(d => (
         <article className="panel decision-card" key={d.id}>
@@ -959,7 +915,7 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
 
           <div className="decision-body">
             <div className="nba-box">
-              <div className="nba-label">REKOMENDASI AI MODEL:</div>
+              <div className="nba-label">PROPOSAL NEXT-BEST-ACTION:</div>
               <div className="nba-text"><Sparkles size={16} /> {d.recommendation}</div>
               <small>{d.rationale}</small>
             </div>
@@ -988,22 +944,22 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
         <div className="builder-modal override-modal">
           <div className="builder-header">
             <div>
-              <h2 id="builder-title">Human Override Next-Best-Action</h2>
-              <p>Formulir pengambilalihan rekomendasi AI secara manual untuk {selectedDecision.customer}</p>
+              <h2 id="builder-title">Ubah proposal tindakan</h2>
+              <p>Catat tindakan baru dan alasan perubahannya untuk {selectedDecision.customer}</p>
             </div>
             <button className="icon-button" onClick={() => setSelectedDecision(null)}><X size={18} /></button>
           </div>
           <form onSubmit={handleOverrideSubmit}>
             <div className="builder-body-simple">
               <label className="field-label">
-                Rekomendasi AI Saat Ini
+                Proposal saat ini
                 <input disabled value={selectedDecision.recommendation} />
               </label>
               <label className="field-label">
                 Tindakan Override Baru (Manual Action)
                 <input 
                   required 
-                  placeholder="Contoh: Berikan Pendampingan VIP Roundtable Q4" 
+                  placeholder="Tuliskan tindakan yang dipilih"
                   value={customAction} 
                   onChange={(e) => setCustomAction(e.target.value)} 
                 />
@@ -1119,7 +1075,7 @@ function MonitoringPage({ token, data, canTrace }: { token: string; data: { drif
         <table className="campaign-table">
           <thead>
             <tr>
-              <th>Nama Model AI</th>
+              <th>Nama model</th>
               <th>Metrik</th>
               <th>Nilai Terukur (PSI)</th>
               <th>Ambang Batas (Threshold)</th>
@@ -1127,7 +1083,7 @@ function MonitoringPage({ token, data, canTrace }: { token: string; data: { drif
             </tr>
           </thead>
           <tbody>
-            {data.drift.map((metric, index) => <tr key={`${metric.model}-${index}`}><td><b>{String(metric.model ?? 'model')}</b></td><td>{String(metric.metric ?? 'metric')}</td><td>{String(metric.value)}</td><td>{String(metric.threshold)}</td><td><span className={`tier-badge ${metric.status === 'healthy' ? 'tier-platinum' : 'tier-gold'}`}>{String(metric.status)}</span></td></tr>)}
+            {data.drift.map((metric, index) => <tr key={`${metric.model}-${index}`}><td><b>{String(metric.model ?? 'model')}</b></td><td>{String(metric.metric ?? 'metric')}</td><td>{String(metric.value)}</td><td>{String(metric.threshold)}</td><td><span className={`status-badge ${metric.status === 'healthy' ? 'status-live' : 'status-scheduled'}`}>{String(metric.status)}</span></td></tr>)}
           </tbody>
         </table>
         {!data.drift.length && <div className="empty-state">Belum ada metrik model drift dari API.</div>}
@@ -1152,9 +1108,137 @@ function MonitoringPage({ token, data, canTrace }: { token: string; data: { drif
   </>
 }
 
+function ModelPredictionReviewPage({ token, userId }: { token: string; userId: number }) {
+  const [runs, setRuns] = useState<ApiModelPredictionRun[]>([])
+  const [selectedRun, setSelectedRun] = useState<ApiModelPredictionRun | null>(null)
+  const [records, setRecords] = useState<ApiModelPredictionRecord[]>([])
+  const [totalRecords, setTotalRecords] = useState(0)
+  const [manifestFile, setManifestFile] = useState<File | null>(null)
+  const [recordsFile, setRecordsFile] = useState<File | null>(null)
+  const [reviewNote, setReviewNote] = useState('')
+  const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function refreshRuns() {
+    setRuns(await api.modelPredictionRuns(token))
+  }
+
+  useEffect(() => { void refreshRuns().catch((failure) => setError(failure instanceof Error ? failure.message : 'Gagal memuat antrean model.')) }, [token])
+
+  async function openRun(run: ApiModelPredictionRun) {
+    setSelectedRun(run)
+    setRecords([])
+    setTotalRecords(run.record_count)
+    try {
+      const page = await api.modelPredictionRecords(token, run.id)
+      setRecords(page.records)
+      setTotalRecords(page.total)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Gagal memuat hasil model.')
+    }
+  }
+
+  async function importRun(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!manifestFile || !recordsFile) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const manifest = JSON.parse(await manifestFile.text()) as Record<string, unknown>
+      const rawLines = (await recordsFile.text()).split(/\r?\n/).filter((line) => line.trim())
+      const sourceRecords = rawLines.map((line) => JSON.parse(line) as Record<string, unknown>)
+      const created = await api.importModelPredictionRun(token, manifest, sourceRecords)
+      await refreshRuns()
+      setManifestFile(null)
+      setRecordsFile(null)
+      const form = event.currentTarget
+      form.reset()
+      setNotice(`${created.record_count.toLocaleString('id-ID')} baris tersimpan untuk pemeriksaan independen.`)
+      await openRun(created)
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Berkas Moses tidak dapat diimpor.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function loadMoreRecords() {
+    if (!selectedRun || records.length >= totalRecords) return
+    try {
+      const page = await api.modelPredictionRecords(token, selectedRun.id, records.length)
+      setRecords((current) => [...current, ...page.records])
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Gagal memuat baris berikutnya.')
+    }
+  }
+
+  async function reviewRun(decision: 'reviewed' | 'rejected') {
+    if (!selectedRun || reviewNote.trim().length < 5) return
+    setBusy(true)
+    setError('')
+    try {
+      const updated = await api.reviewModelPredictionRun(token, selectedRun.id, decision, reviewNote.trim())
+      setSelectedRun(updated)
+      setReviewNote('')
+      await refreshRuns()
+      setNotice(decision === 'reviewed' ? 'Pemeriksaan independen tercatat.' : 'Berkas ditandai untuk ditolak.')
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Pemeriksaan tidak dapat disimpan.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <>
+    <PageHeading eyebrow="MOSES · HASIL MODEL" title="Pemeriksaan hasil prediksi" subtitle="Impor artefak Moses, simpan hasil beserta versinya, lalu minta pemeriksaan dari orang lain." />
+    <div className="model-review-notice"><ShieldCheck size={18} /><div><b>Ruang pemeriksaan saja</b><p>Artefak di halaman ini masih berstatus development dan belum dikalibrasi atau disetujui untuk digunakan NBA. Hasil tidak dipasangkan dengan profil pelanggan aplikasi dan tidak memengaruhi tindakan kampanye.</p></div></div>
+    <section className="model-review-layout">
+      <div className="model-review-column">
+        <form className="panel model-import-panel" onSubmit={importRun}>
+          <div className="panel-kicker">IMPOR DARI MOSES</div>
+          <h2>Tambahkan artefak prediksi</h2>
+          <p>Gunakan <code>contract_manifest.json</code> dan <code>records.jsonl</code> dari output <code>prediction_contract</code>.</p>
+          <label className="field-label">Manifest berkas<input type="file" accept="application/json,.json" required onChange={(event) => setManifestFile(event.target.files?.[0] ?? null)} /></label>
+          <label className="field-label">Baris prediksi<input type="file" accept="application/x-ndjson,.jsonl,.txt" required onChange={(event) => setRecordsFile(event.target.files?.[0] ?? null)} /></label>
+          <button className="button button-primary" type="submit" disabled={busy || !manifestFile || !recordsFile}>{busy ? 'Menyimpan…' : 'Simpan untuk ditinjau'}</button>
+        </form>
+        <section className="panel model-run-panel">
+          <div className="panel-heading"><div><div className="panel-kicker">VERSI & REVIEW</div><h2>Artefak tersimpan</h2></div><span className="model-count">{runs.length}</span></div>
+          {!runs.length && <div className="empty-state">Belum ada artefak Moses yang diimpor.</div>}
+          {runs.map((run) => <button className={`model-run-row ${selectedRun?.id === run.id ? 'selected' : ''}`} key={run.id} onClick={() => void openRun(run)}>
+            <span className="model-run-icon"><ChartNoAxesCombined size={17} /></span>
+            <span className="model-run-copy"><b>{run.model_version}</b><small>{run.prediction_type} · {run.record_count.toLocaleString('id-ID')} baris · {new Date(run.imported_at).toLocaleDateString('id-ID')}</small></span>
+            <span className={`model-review-status ${run.review_status}`}>{run.review_status === 'pending_review' ? 'Menunggu review' : run.review_status === 'reviewed' ? 'Sudah ditinjau' : 'Ditolak'}</span>
+          </button>)}
+        </section>
+      </div>
+      <div className="model-review-column">
+        {selectedRun ? <section className="panel model-record-panel">
+          <div className="panel-heading"><div><div className="panel-kicker">VERSI {selectedRun.model_version}</div><h2>Baris prediksi</h2></div><span className="model-review-status">DEVELOPMENT · NON-SERVING</span></div>
+          <div className="model-lineage-grid"><div><small>Fitur</small><b>{selectedRun.feature_set_version}</b></div><div><small>Label</small><b>{selectedRun.label_version}</b></div><div><small>Produser</small><b>{selectedRun.producer_version}</b></div><div><small>Checksum manifest</small><code>{selectedRun.manifest_hash.slice(0, 16)}…</code></div></div>
+          <div className="model-table-wrap"><table className="model-score-table"><thead><tr><th>Golden Customer ID</th><th>Cutoff</th><th>Skor mentah</th><th>Status kontrak</th><th>Kode alasan</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><code>{record.customer_id}</code></td><td>{record.cutoff_at}</td><td>{record.score === null ? 'Kosong' : record.score.toFixed(4)}{record.band && <small>Band usulan: {record.band}</small>}</td><td>{record.contract_status}</td><td>{record.reason_codes.length ? record.reason_codes.map((reason) => String(reason.code ?? 'kode')).join(', ') : 'Belum tersedia'}</td></tr>)}</tbody></table></div>
+          <div className="model-record-footer">Menampilkan {records.length.toLocaleString('id-ID')} dari {totalRecords.toLocaleString('id-ID')} baris. Skor ditampilkan apa adanya; label dan alasan bisnis pada artefak belum disetujui.</div>
+          {records.length < totalRecords && <button className="button button-secondary model-load-more" onClick={() => void loadMoreRecords()}>Muat 100 baris berikutnya</button>}
+          <div className="model-review-form">
+            <div className="panel-kicker">TINJAUAN INDEPENDEN</div>
+            {selectedRun.review_status !== 'pending_review' ? <p>Ditinjau oleh pengguna #{selectedRun.reviewed_by}. Catatan: {selectedRun.review_note}</p> : selectedRun.submitted_by === userId ? <p>Run ini Anda kirim. Minta admin atau analis lain memeriksanya.</p> : <>
+              <label className="field-label">Catatan pemeriksa<textarea rows={3} minLength={5} value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} placeholder="Catat versi, kelengkapan alasan, dan temuan pemeriksaan." /></label>
+              <div className="model-review-actions"><button className="button button-secondary" disabled={busy || reviewNote.trim().length < 5} onClick={() => void reviewRun('rejected')}>Tolak artefak</button><button className="button button-primary" disabled={busy || reviewNote.trim().length < 5} onClick={() => void reviewRun('reviewed')}>Catat sudah ditinjau</button></div>
+              <small>“Sudah ditinjau” hanya mencatat pemeriksaan independen; status serving tetap nonaktif.</small>
+            </>}
+          </div>
+        </section> : <div className="panel empty-state model-select-empty">Pilih run yang tersimpan atau impor artefak Moses untuk memulai pemeriksaan.</div>}
+      </div>
+    </section>
+    {(error || notice) && <div className={error ? 'api-alert model-page-alert' : 'sync-note model-page-alert'} role={error ? 'alert' : 'status'}>{error || notice}{error && <button onClick={() => setError('')} aria-label="Tutup pesan"><X size={15} /></button>}</div>}
+  </>
+}
+
 function CampaignBuilder({ customers, onClose, onSave }: { customers: Customer[]; onClose: () => void; onSave: (name: string, segment: string, channel: string, draft: string) => void }) {
   const [name, setName] = useState('')
-  const segments = [...new Set(customers.map((customer) => customer.city).filter(Boolean))]
+  const segments = [...new Set(customers.map((customer) => customer.segment).filter(Boolean))]
   const [segment, setSegment] = useState(segments[0] ?? '')
   const [channel, setChannel] = useState('WhatsApp')
   const [draft, setDraft] = useState('')
@@ -1187,7 +1271,7 @@ function CampaignBuilder({ customers, onClose, onSave }: { customers: Customer[]
             <div className="builder-fields">
               <label className="field-label">
                 Nama Kampanye
-                <input autoFocus value={name} onChange={(e) => { setName(e.target.value); setError('') }} placeholder="Contoh: Ramadan Skin Renewal 2026" />
+                <input autoFocus value={name} onChange={(e) => { setName(e.target.value); setError('') }} placeholder="Nama kampanye" />
               </label>
 
               <label className="field-label">
@@ -1225,9 +1309,9 @@ function CampaignBuilder({ customers, onClose, onSave }: { customers: Customer[]
 
             <aside className="builder-preview">
               <div className="preview-top">
-                <div className="preview-label">ESTIMASI AUDIENS TERJANGKAU</div>
-                <div className="preview-count">Server-side <small>audience estimate</small></div>
-                <p>Audiens dan consent untuk {channel} akan divalidasi oleh service sebelum eksekusi.</p>
+                <div className="preview-label">JANGKAUAN AUDIENS</div>
+                <div className="preview-count">Belum dihitung</div>
+                <p>Jumlah audiens belum tersedia untuk draf ini.</p>
               </div>
               <div className="preview-safety">
                 <ShieldCheck size={15} /> Menggunakan Channel Simulator Murni (T-SEC-03 Compliant)
@@ -1252,7 +1336,7 @@ function LoadingScreen() {
   return <main className="login-shell"><div className="login-panel loading-panel"><span className="brand-mark"><span /><span /><span /></span><h1>VTEKI Intelligence</h1><p>Memverifikasi sesi dan memuat data platform…</p><div className="loading-line"><i /></div></div></main>
 }
 
-function LoginScreen({ onLogin, error, onPreview }: { onLogin: (email: string, password: string) => Promise<void>; error: string; onPreview?: () => void }) {
+function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: string) => Promise<void>; error: string }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -1270,12 +1354,11 @@ function LoginScreen({ onLogin, error, onPreview }: { onLogin: (email: string, p
     }
   }
   return <main className="login-shell">
-    <div className="login-aside"><span className="login-ornament ornament-a" /><span className="login-ornament ornament-b" /><div className="login-brand"><span className="brand-mark"><span /><span /><span /></span><b>vteki<span>.</span></b></div><div className="login-aside-copy"><small>CUSTOMER INTELLIGENCE PLATFORM</small><h1>Decisions with<br />a clear lineage.</h1><p>Secure access to customer profiles, campaign governance, and decision traceability.</p></div><div className="login-aside-foot"><ShieldCheck size={15} /> Role-based access · Audited workflows</div></div>
-    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">SECURE WORKSPACE</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Password<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{(loginError || error) && <p className="field-error">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memverifikasi…' : 'Masuk'}<ArrowRight size={15} /></button></form>{onPreview && <button className="preview-return" onClick={onPreview}>← Kembali ke dashboard preview</button>}<div className="login-security"><ShieldCheck size={15} /><span>JWT session · role permissions · append-only audit</span></div></section>
+    <div className="login-aside"><span className="login-ornament ornament-a" /><span className="login-ornament ornament-b" /><div className="login-brand"><span className="brand-mark"><span /><span /><span /></span><b>vteki<span>.</span></b></div><div className="login-aside-copy"><small>VTEKI · CUSTOMER INTELLIGENCE</small><h1>Pahami pelanggan,<br />tentukan langkah berikutnya.</h1><p>Kelola profil, tinjau kampanye, dan telusuri keputusan dalam satu workspace.</p></div><div className="login-aside-foot"><ShieldCheck size={15} /> Akses berbasis peran · Aktivitas tercatat</div></div>
+    <section className="login-panel"><div className="login-form-heading"><span className="eyebrow">RUANG KERJA AMAN</span><h2>Masuk ke platform</h2><p>Gunakan akun yang dibuat administrator untuk melanjutkan.</p></div><form onSubmit={submit}><label className="field-label">Email<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} placeholder="nama@organisasi.id" /></label><label className="field-label">Kata sandi<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label>{(loginError || error) && <p className="field-error">{loginError || error}</p>}<button className="button button-primary login-submit" type="submit" disabled={submitting}>{submitting ? 'Memeriksa…' : 'Masuk'}<ArrowRight size={15} /></button></form><div className="login-security"><ShieldCheck size={15} /><span>Akses berbasis peran · Audit aktif</span></div></section>
   </main>
 }
 
-function TierBadge({ tier }: { tier: Customer['tier'] }) { return <span className={`tier-badge tier-${tier.toLowerCase()}`}><i />{tier}</span> }
 function StatusBadge({ status }: { status: Campaign['status'] }) { return <span className={`status-badge status-${status.toLowerCase().replace(' ', '-')}`}><i />{status}</span> }
 
 export default App
