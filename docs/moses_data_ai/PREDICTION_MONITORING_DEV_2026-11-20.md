@@ -1,6 +1,6 @@
 # Monitoring distribusi skor development
 
-Status: implemented/tested locally; independent review pending. Not production monitoring or a complete FR-MON-002 closure.
+Status: implemented/tested locally; two independent reviews done (first: 3 required fixes, applied; second: none). Not production monitoring or a complete FR-MON-002 closure.
 
 Module: `services.data.models.prediction_monitoring`. Consumes existing offline propensity prediction artifacts and their checksummed manifest. Compares two explicit timestamp cutoffs from the same model/target identity. Uses the existing PSI implementation, fixed probability edges 0.1 through 0.9, and its epsilon smoothing / 0.10 and 0.25 advisory thresholds. These are numeric probability bins, NOT business score bands.
 
@@ -25,7 +25,7 @@ Reproduce with a NEW output directory:
 
 Unavailable fields are explicitly null: `band_mix` (approved band thresholds needed), `segment_performance` (segment definition plus point-in-time outcome join needed). This slice does not estimate AUC, campaign eligibility, or actual customer outcome performance. Drift alerts are records in the JSON, not delivery to an operational alerting service.
 
-Verification after first review fixes: 27 focused tests; full suite 1381 passed, 19 skipped (Postgres), 3 xfailed; Ruff, Black and Mypy passed. Latest manifest-family restriction additionally passed the data suite (501 passed) and real-artifact v2 runs. Second independent review pending.
+Verification after first review fixes: 27 focused tests; full suite 1381 passed, 19 skipped (Postgres), 3 xfailed; Ruff, Black and Mypy passed. Latest manifest-family restriction additionally passed the data suite (501 passed) and real-artifact v2 runs. Second independent review: no required findings.
 
 The runner now requires propensity-style manifests with input_sha256[model_parameters.json]; model hash, row count, target/version identity, output checksum, manifest flags and input stability are checked. Duplicate JSON keys, malformed shapes and cutoffs outside the two requested periods are refused. Timestamp validation currently reuses evaluator._aware_timestamp, a private helper; consolidating timestamp helpers is deferred rather than expanding this slice.
 
