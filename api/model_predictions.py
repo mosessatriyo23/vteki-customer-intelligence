@@ -178,25 +178,39 @@ def list_prediction_records(
     )
     records = query.offset(offset).limit(limit).all()
     record_customer_ids = {record.customer_id for record in records}
-    golden_status = {
-        row.golden_customer_id: row.status
-        for row in db.query(GoldenCustomer)
-        .filter(GoldenCustomer.golden_customer_id.in_(record_customer_ids))
-        .all()
-    } if record_customer_ids else {}
-    application_customers = {
-        customer.golden_customer_id: customer
-        for customer in db.query(Customer)
-        .filter(
-            Customer.golden_customer_id.in_(record_customer_ids),
-            Customer.is_demo.is_(False),
-        )
-        .all()
-    } if record_customer_ids else {}
+    golden_status = (
+        {
+            row.golden_customer_id: row.status
+            for row in db.query(GoldenCustomer)
+            .filter(GoldenCustomer.golden_customer_id.in_(record_customer_ids))
+            .all()
+        }
+        if record_customer_ids
+        else {}
+    )
+    application_customers = (
+        {
+            customer.golden_customer_id: customer
+            for customer in db.query(Customer)
+            .filter(
+                Customer.golden_customer_id.in_(record_customer_ids),
+                Customer.is_demo.is_(False),
+            )
+            .all()
+        }
+        if record_customer_ids
+        else {}
+    )
     candidate_rows = (
         db.query(SourceIdentityMapping, Customer)
-        .join(Customer, Customer.customer_code == SourceIdentityMapping.source_customer_id)
-        .join(GoldenCustomer, GoldenCustomer.golden_customer_id == SourceIdentityMapping.golden_customer_id)
+        .join(
+            Customer, Customer.customer_code == SourceIdentityMapping.source_customer_id
+        )
+        .join(
+            GoldenCustomer,
+            GoldenCustomer.golden_customer_id
+            == SourceIdentityMapping.golden_customer_id,
+        )
         .filter(
             SourceIdentityMapping.golden_customer_id.in_(record_customer_ids),
             GoldenCustomer.status == "APPROVED",
@@ -243,8 +257,12 @@ def list_prediction_records(
                 "application_customer": (
                     {
                         "id": application_customers[record.customer_id].id,
-                        "customer_code": application_customers[record.customer_id].customer_code,
-                        "full_name": application_customers[record.customer_id].full_name,
+                        "customer_code": application_customers[
+                            record.customer_id
+                        ].customer_code,
+                        "full_name": application_customers[
+                            record.customer_id
+                        ].full_name,
                     }
                     if record.customer_id in application_customers
                     else None
@@ -272,7 +290,9 @@ def review_prediction_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Prediction review run not found")
     if run.review_status != "pending_review":
-        raise HTTPException(status_code=409, detail="This run has already been reviewed")
+        raise HTTPException(
+            status_code=409, detail="This run has already been reviewed"
+        )
     if run.submitted_by == actor.id:
         raise HTTPException(
             status_code=409,

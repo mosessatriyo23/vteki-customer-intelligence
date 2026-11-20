@@ -52,7 +52,9 @@ class CampaignCreate(BaseModel):
     message_draft: str | None = Field(
         default=None, max_length=2000, pattern=r"^[^\x00]*$"
     )
-    nba_decision_id: int | None = Field(default=None, ge=1, le=2_147_483_647, strict=True)
+    nba_decision_id: int | None = Field(
+        default=None, ge=1, le=2_147_483_647, strict=True
+    )
 
     @field_validator("ab_test_ratio", mode="before")
     @classmethod
@@ -75,7 +77,9 @@ def list_campaigns(
     if not campaigns:
         return []
 
-    job_ids = [campaign.execution_job_id for campaign in campaigns if campaign.execution_job_id]
+    job_ids = [
+        campaign.execution_job_id for campaign in campaigns if campaign.execution_job_id
+    ]
     jobs = db.query(BatchJob).filter(BatchJob.id.in_(job_ids)).all() if job_ids else []
     jobs_by_id = {job.id: job for job in jobs}
     campaign_ids = [campaign.id for campaign in campaigns]
@@ -93,7 +97,8 @@ def list_campaigns(
 
     response = []
     for campaign in campaigns:
-        job = jobs_by_id.get(campaign.execution_job_id)
+        execution_job_id = campaign.execution_job_id
+        job = jobs_by_id.get(execution_job_id) if execution_job_id is not None else None
         response.append(
             {
                 "id": campaign.id,
@@ -123,8 +128,12 @@ def list_campaigns(
                 "latest_measurement": (
                     {
                         "metric_name": measurement_by_campaign[campaign.id].metric_name,
-                        "observed_value": measurement_by_campaign[campaign.id].observed_value,
-                        "incremental_value": measurement_by_campaign[campaign.id].incremental_value,
+                        "observed_value": measurement_by_campaign[
+                            campaign.id
+                        ].observed_value,
+                        "incremental_value": measurement_by_campaign[
+                            campaign.id
+                        ].incremental_value,
                         "source_mode": measurement_by_campaign[campaign.id].source_mode,
                         "measured_at": measurement_by_campaign[campaign.id].measured_at,
                     }
@@ -150,18 +159,26 @@ def create_campaign(
         if decision is None:
             raise HTTPException(status_code=404, detail="NBA recommendation not found")
         if decision.status not in {"proposed", "overridden"}:
-            raise HTTPException(status_code=409, detail="NBA recommendation is not available for campaign use")
+            raise HTTPException(
+                status_code=409,
+                detail="NBA recommendation is not available for campaign use",
+            )
         if decision.selected_action or decision.recommended_action == "NO_ACTION":
             action = decision.selected_action or decision.recommended_action
             if action == "NO_ACTION":
-                raise HTTPException(status_code=409, detail="NO_ACTION decisions cannot be used for campaigns")
+                raise HTTPException(
+                    status_code=409,
+                    detail="NO_ACTION decisions cannot be used for campaigns",
+                )
         target_customer = (
             db.query(Customer)
             .filter(Customer.id == decision.customer_id, Customer.is_demo.is_(False))
             .first()
         )
         if target_customer is None:
-            raise HTTPException(status_code=409, detail="NBA customer is missing or marked as demo data")
+            raise HTTPException(
+                status_code=409, detail="NBA customer is missing or marked as demo data"
+            )
         target_customer_id = target_customer.id
         target_segment = target_customer.segment
     campaign = Campaign(

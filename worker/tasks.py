@@ -38,7 +38,9 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
             Customer.is_demo.is_(False),
         )
         if target_customer_id is not None:
-            if isinstance(target_customer_id, bool) or not isinstance(target_customer_id, int):
+            if isinstance(target_customer_id, bool) or not isinstance(
+                target_customer_id, int
+            ):
                 raise ValueError("target_customer_id must be an integer")
             query = query.filter(Customer.id == target_customer_id)
         customer_ids = [row[0] for row in query.order_by(Customer.id).all()]

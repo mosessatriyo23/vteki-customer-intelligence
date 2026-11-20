@@ -46,7 +46,9 @@ class CustomerCreate(BaseModel):
 
 
 class GoldenIdentityLinkRequest(BaseModel):
-    golden_customer_id: str = Field(min_length=36, max_length=36, pattern=r"^[0-9a-fA-F-]{36}$")
+    golden_customer_id: str = Field(
+        min_length=36, max_length=36, pattern=r"^[0-9a-fA-F-]{36}$"
+    )
 
 
 @router.get("", response_model=list[CustomerResponse])
@@ -89,13 +91,17 @@ def get_customer(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
 ) -> Customer:
-    customer = db.query(Customer).filter(Customer.id == customer_id, Customer.is_demo.is_(False)).first()
+    customer = (
+        db.query(Customer)
+        .filter(Customer.id == customer_id, Customer.is_demo.is_(False))
+        .first()
+    )
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
     return customer
 
 
-@router.post("/seed", include_in_schema=False)
+@router.post("/seed", status_code=status.HTTP_410_GONE, deprecated=True)
 def disable_demo_seed(_: User = Depends(require_roles("admin"))) -> None:
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
@@ -110,7 +116,11 @@ def create_customer(
     db: Session = Depends(get_db),
     actor: User = Depends(require_roles("admin")),
 ) -> Customer:
-    if db.query(Customer).filter(Customer.customer_code == payload.customer_code).first():
+    if (
+        db.query(Customer)
+        .filter(Customer.customer_code == payload.customer_code)
+        .first()
+    ):
         raise HTTPException(status_code=409, detail="Customer code already exists")
     customer = Customer(**payload.model_dump(), source_type="registered")
     db.add(customer)
@@ -122,7 +132,10 @@ def create_customer(
         actor_id=actor.id,
         entity_type="customer",
         entity_id=customer.id,
-        details={"customer_code": customer.customer_code, "source_type": customer.source_type},
+        details={
+            "customer_code": customer.customer_code,
+            "source_type": customer.source_type,
+        },
     )
     db.commit()
     db.refresh(customer)
@@ -142,7 +155,9 @@ def link_approved_golden_identity(
         raise HTTPException(status_code=404, detail="Customer not found")
     golden = db.get(GoldenCustomer, payload.golden_customer_id)
     if golden is None or golden.status != "APPROVED":
-        raise HTTPException(status_code=409, detail="Golden Customer identity is not approved")
+        raise HTTPException(
+            status_code=409, detail="Golden Customer identity is not approved"
+        )
     exact_source_match = (
         db.query(SourceIdentityMapping)
         .filter(
@@ -151,9 +166,11 @@ def link_approved_golden_identity(
         )
         .first()
     )
-    approved_profile = db.query(ProfileSnapshot.id).filter(
-        ProfileSnapshot.golden_customer_id == golden.golden_customer_id
-    ).first()
+    approved_profile = (
+        db.query(ProfileSnapshot.id)
+        .filter(ProfileSnapshot.golden_customer_id == golden.golden_customer_id)
+        .first()
+    )
     if exact_source_match is None or approved_profile is None:
         raise HTTPException(
             status_code=409,
@@ -171,7 +188,9 @@ def link_approved_golden_identity(
     if other is not None:
         raise HTTPException(status_code=409, detail="Golden identity is already linked")
     if customer.golden_customer_id not in (None, golden.golden_customer_id):
-        raise HTTPException(status_code=409, detail="Customer already has a different Golden identity")
+        raise HTTPException(
+            status_code=409, detail="Customer already has a different Golden identity"
+        )
     customer.golden_customer_id = golden.golden_customer_id
     record_audit_event(
         db,
@@ -180,10 +199,17 @@ def link_approved_golden_identity(
         actor_id=actor.id,
         entity_type="customer",
         entity_id=customer.id,
-        details={"golden_customer_id": golden.golden_customer_id, "identity_status": golden.status},
+        details={
+            "golden_customer_id": golden.golden_customer_id,
+            "identity_status": golden.status,
+        },
     )
     db.commit()
-    return {"customer_id": customer.id, "golden_customer_id": golden.golden_customer_id, "status": "linked"}
+    return {
+        "customer_id": customer.id,
+        "golden_customer_id": golden.golden_customer_id,
+        "status": "linked",
+    }
 
 
 @router.get("/{customer_id}/provenance")
@@ -195,7 +221,11 @@ def customer_provenance(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
 ) -> dict:
-    customer = db.query(Customer).filter(Customer.id == customer_id, Customer.is_demo.is_(False)).first()
+    customer = (
+        db.query(Customer)
+        .filter(Customer.id == customer_id, Customer.is_demo.is_(False))
+        .first()
+    )
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
     features = (

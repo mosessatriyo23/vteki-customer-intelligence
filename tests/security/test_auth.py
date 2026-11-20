@@ -210,9 +210,7 @@ def test_nba_evaluation_is_persisted_fail_closed_and_not_campaign_eligible(
     assert result["degraded_input"] is True
     assert result["serving_ready"] is False
 
-    decisions = client.get(
-        "/governance/nba-decisions", headers=analyst_headers
-    ).json()
+    decisions = client.get("/governance/nba-decisions", headers=analyst_headers).json()
     persisted = next(item for item in decisions if item["id"] == result["id"])
     assert persisted["customer_code"] == "NBA-REAL-001"
     assert persisted["rationale"]["serving_ready"] is False
@@ -355,7 +353,9 @@ def test_audit_records_authenticated_actor(client: TestClient):
     assert trace_payload["audit_events_truncated"] is False
 
 
-def test_customer_seed_is_disabled_and_registered_customer_search_requires_authentication(client: TestClient):
+def test_customer_seed_is_disabled_and_registered_customer_search_requires_authentication(
+    client: TestClient,
+):
     admin_token = token_for(client, "admin@example.com")
     seed = client.post(
         "/customers/seed", headers={"Authorization": f"Bearer {admin_token}"}
@@ -630,7 +630,12 @@ def test_nba_override_and_monitoring_dashboard(client: TestClient):
     customer = client.post(
         "/customers",
         headers=admin_headers,
-        json={"customer_code": "REAL-NBA", "full_name": "NBA Customer", "email": "nba@example.com", "segment": "Premium"},
+        json={
+            "customer_code": "REAL-NBA",
+            "full_name": "NBA Customer",
+            "email": "nba@example.com",
+            "segment": "Premium",
+        },
     )
     assert customer.status_code == 201
     correlation_id = "nba-human-override-4821"
@@ -704,7 +709,12 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
     customer = client.post(
         "/customers",
         headers=headers,
-        json={"customer_code": "REAL-TRACE", "full_name": "Trace Customer", "email": "trace@example.com", "segment": "Premium"},
+        json={
+            "customer_code": "REAL-TRACE",
+            "full_name": "Trace Customer",
+            "email": "trace@example.com",
+            "segment": "Premium",
+        },
     )
     assert customer.status_code == 201
     created = client.post(

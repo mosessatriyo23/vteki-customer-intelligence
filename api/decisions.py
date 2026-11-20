@@ -47,7 +47,11 @@ def list_decisions(
         require_roles("admin", "analyst", "campaign_manager", "operator")
     ),
 ) -> list[dict]:
-    query = db.query(NBADecision).join(Customer, Customer.id == NBADecision.customer_id).filter(Customer.is_demo.is_(False))
+    query = (
+        db.query(NBADecision)
+        .join(Customer, Customer.id == NBADecision.customer_id)
+        .filter(Customer.is_demo.is_(False))
+    )
     if customer_id is not None:
         query = query.filter(NBADecision.customer_id == customer_id)
     if status != "all":

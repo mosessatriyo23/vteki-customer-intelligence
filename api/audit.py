@@ -79,7 +79,9 @@ class AuditMiddleware(BaseHTTPMiddleware):
                                 method=request.method,
                                 path=request.url.path[:512],
                                 status_code=status_code,
-                                client_ip=request.client.host if request.client else None,
+                                client_ip=(
+                                    request.client.host if request.client else None
+                                ),
                                 user_agent=request.headers.get("user-agent", "")[:512]
                                 or None,
                             )

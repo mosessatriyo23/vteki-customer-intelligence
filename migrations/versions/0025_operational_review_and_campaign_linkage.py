@@ -15,7 +15,9 @@ def upgrade() -> None:
 
     op.add_column(
         "customers",
-        sa.Column("source_type", sa.String(24), server_default="unknown", nullable=False),
+        sa.Column(
+            "source_type", sa.String(24), server_default="unknown", nullable=False
+        ),
         schema="core",
     )
     op.add_column(
@@ -41,9 +43,15 @@ def upgrade() -> None:
     op.create_unique_constraint(
         "uq_customer_golden_id", "customers", ["golden_customer_id"], schema="core"
     )
-    op.alter_column("customers", "ltv", existing_type=sa.Float(), nullable=True, schema="core")
     op.alter_column(
-        "customers", "churn_risk", existing_type=sa.String(length=16), nullable=True, schema="core"
+        "customers", "ltv", existing_type=sa.Float(), nullable=True, schema="core"
+    )
+    op.alter_column(
+        "customers",
+        "churn_risk",
+        existing_type=sa.String(length=16),
+        nullable=True,
+        schema="core",
     )
     op.execute(
         sa.text(
@@ -97,7 +105,9 @@ def upgrade() -> None:
 
     op.add_column(
         "campaign_measurements",
-        sa.Column("source_mode", sa.String(24), server_default="unclassified", nullable=False),
+        sa.Column(
+            "source_mode", sa.String(24), server_default="unclassified", nullable=False
+        ),
         schema="msr",
     )
     op.create_check_constraint(
@@ -111,30 +121,55 @@ def upgrade() -> None:
 def downgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
         raise RuntimeError("Migration 0025 requires PostgreSQL.")
-    missing_customer_metrics = op.get_bind().execute(
-        sa.text(
-            "SELECT 1 FROM core.customers "
-            "WHERE ltv IS NULL OR churn_risk IS NULL LIMIT 1"
+    missing_customer_metrics = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "SELECT 1 FROM core.customers "
+                "WHERE ltv IS NULL OR churn_risk IS NULL LIMIT 1"
+            )
         )
-    ).first()
+        .first()
+    )
     if missing_customer_metrics:
         raise RuntimeError(
             "Cannot downgrade migration 0025 while registered customers have "
             "unknown LTV or churn values; preserve the honest empty values."
         )
     op.drop_constraint(
-        "ck_campaign_measurement_source_mode", "campaign_measurements", schema="msr", type_="check"
+        "ck_campaign_measurement_source_mode",
+        "campaign_measurements",
+        schema="msr",
+        type_="check",
     )
     op.drop_column("campaign_measurements", "source_mode", schema="msr")
-    op.drop_constraint("uq_campaign_nba_decision", "campaigns", schema="act", type_="unique")
-    op.drop_constraint("fk_campaign_target_customer", "campaigns", schema="act", type_="foreignkey")
-    op.drop_constraint("fk_campaign_nba_decision", "campaigns", schema="act", type_="foreignkey")
+    op.drop_constraint(
+        "uq_campaign_nba_decision", "campaigns", schema="act", type_="unique"
+    )
+    op.drop_constraint(
+        "fk_campaign_target_customer", "campaigns", schema="act", type_="foreignkey"
+    )
+    op.drop_constraint(
+        "fk_campaign_nba_decision", "campaigns", schema="act", type_="foreignkey"
+    )
     op.drop_column("campaigns", "target_customer_id", schema="act")
     op.drop_column("campaigns", "nba_decision_id", schema="act")
-    op.alter_column("customers", "churn_risk", existing_type=sa.String(length=16), nullable=False, schema="core")
-    op.alter_column("customers", "ltv", existing_type=sa.Float(), nullable=False, schema="core")
-    op.drop_constraint("uq_customer_golden_id", "customers", schema="core", type_="unique")
-    op.drop_constraint("fk_customers_golden_customer", "customers", schema="core", type_="foreignkey")
+    op.alter_column(
+        "customers",
+        "churn_risk",
+        existing_type=sa.String(length=16),
+        nullable=False,
+        schema="core",
+    )
+    op.alter_column(
+        "customers", "ltv", existing_type=sa.Float(), nullable=False, schema="core"
+    )
+    op.drop_constraint(
+        "uq_customer_golden_id", "customers", schema="core", type_="unique"
+    )
+    op.drop_constraint(
+        "fk_customers_golden_customer", "customers", schema="core", type_="foreignkey"
+    )
     op.drop_column("customers", "golden_customer_id", schema="core")
     op.drop_column("customers", "is_demo", schema="core")
     op.drop_column("customers", "source_type", schema="core")

@@ -28,41 +28,51 @@ class GovernanceFastAPI(FastAPI):
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["method"] == "OPTIONS":
             path = scope.get("path", "")
-            paths = self.openapi().get("paths", {})
-            operations = paths.get(path)
-
-            if operations is None:
-                for template, item in paths.items():
-                    pattern, _, _ = compile_path(template)
-                    if pattern.fullmatch(path):
-                        operations = item
-                        break
-
+            operations = self.openapi().get("paths", {}).get(path)
             if operations is not None:
                 supported = {
                     method.upper()
                     for method in operations
                     if method.lower()
-                    in {
-                        "get",
-                        "post",
-                        "put",
-                        "patch",
-                        "delete",
-                        "head",
-                        "options",
-                        "trace",
-                    }
+                    in {"get", "post", "put", "patch", "delete", "head", "trace"}
                 }
-
-                if supported:
-                    allow = ", ".join(sorted(supported | {"OPTIONS"}))
-                    response = Response(
-                        status_code=204,
-                        headers={"Allow": allow},
+            else:
+                route_candidates = [
+                    route
+                    for included in self.routes
+                    for route in getattr(
+                        getattr(included, "original_router", None), "routes", [included]
                     )
-                    await response(scope, receive, send)
-                    return
+                ]
+                exact_routes = [
+                    route
+                    for route in route_candidates
+                    if getattr(route, "path", None) == path
+                ]
+                matched_routes = exact_routes
+                if not matched_routes:
+                    matched_routes = []
+                    for route in route_candidates:
+                        template = getattr(route, "path", None)
+                        if template is None:
+                            continue
+                        pattern, _, _ = compile_path(template)
+                        if pattern.fullmatch(path):
+                            matched_routes.append(route)
+
+                supported = {
+                    method.upper()
+                    for route in matched_routes
+                    for method in (getattr(route, "methods", None) or set())
+                }
+            if supported:
+                allow = ", ".join(sorted(supported | {"OPTIONS"}))
+                response = Response(
+                    status_code=204,
+                    headers={"Allow": allow},
+                )
+                await response(scope, receive, send)
+                return
 
         await super().__call__(scope, receive, send)
 
@@ -117,7 +127,9 @@ def health() -> dict[str, str]:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
     except SQLAlchemyError as error:
-        raise HTTPException(status_code=503, detail="Database is unavailable") from error
+        raise HTTPException(
+            status_code=503, detail="Database is unavailable"
+        ) from error
     return {"status": "ok", "database": "ok"}
 
 

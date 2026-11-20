@@ -42,23 +42,28 @@ def validate_prediction_import(
         raise ValueError("A manifest and a non-empty record list are required")
     if manifest.get("development_only") is not True:
         raise ValueError("Only development-only artifacts can enter this review queue")
-    if manifest.get("serving_ready") is not False or manifest.get("approved") is not False:
-        raise ValueError("Serving-ready or approved artifacts are not accepted by this importer")
+    if (
+        manifest.get("serving_ready") is not False
+        or manifest.get("approved") is not False
+    ):
+        raise ValueError(
+            "Serving-ready or approved artifacts are not accepted by this importer"
+        )
     if manifest.get("prediction_id_produced") is not False:
-        raise ValueError("Unexpected prediction identity contract; review its adapter first")
+        raise ValueError(
+            "Unexpected prediction identity contract; review its adapter first"
+        )
     if len(records) > 100_000:
         raise ValueError("At most 100,000 records can be imported at once")
     if manifest.get("rows") != len(records):
         raise ValueError("Record count does not match the source manifest")
 
-    versions = {
-        "model_version": manifest.get("model_version"),
-        "feature_set_version": manifest.get("feature_set_version"),
-        "label_version": manifest.get("label_version"),
-    }
-    for key, value in versions.items():
+    versions: dict[str, str] = {}
+    for version_name in ("model_version", "feature_set_version", "label_version"):
+        value = manifest.get(version_name)
         if not isinstance(value, str) or not value.strip() or len(value) > 128:
-            raise ValueError(f"{key} is missing or invalid")
+            raise ValueError(f"{version_name} is missing or invalid")
+        versions[version_name] = value
 
     prediction_type = manifest.get("prediction_type")
     producer_version = manifest.get("producer_version")
@@ -72,7 +77,10 @@ def validate_prediction_import(
     for row in records:
         if not isinstance(row, dict):
             raise ValueError("Every prediction record must be an object")
-        if any(row.get(key) != value for key, value in versions.items()):
+        if any(
+            row.get(version_name) != version_value
+            for version_name, version_value in versions.items()
+        ):
             raise ValueError("A row's model or data version differs from its manifest")
         customer_id = row.get("customer_id")
         cutoff_at = row.get("cutoff_at")
@@ -82,10 +90,10 @@ def validate_prediction_import(
             UUID(customer_id)
         except ValueError as error:
             raise ValueError("customer_id must be a Golden Customer UUID") from error
-        key = (customer_id, cutoff_at)
-        if key in seen:
+        record_identity = (customer_id, cutoff_at)
+        if record_identity in seen:
             raise ValueError("Duplicate customer and cutoff in imported predictions")
-        seen.add(key)
+        seen.add(record_identity)
 
         score = row.get("score")
         if score is not None and not _finite_score(score):
@@ -102,8 +110,13 @@ def validate_prediction_import(
     if not isinstance(hashes, dict):
         raise ValueError("Manifest output_sha256 is missing or invalid")
     expected_hash = hashes.get("records.jsonl")
-    if not isinstance(expected_hash, str) or hashlib.sha256(record_bytes).hexdigest() != expected_hash:
-        raise ValueError("Prediction records checksum does not match the Moses manifest")
+    if (
+        not isinstance(expected_hash, str)
+        or hashlib.sha256(record_bytes).hexdigest() != expected_hash
+    ):
+        raise ValueError(
+            "Prediction records checksum does not match the Moses manifest"
+        )
 
     manifest_hash = hashlib.sha256(
         json.dumps(manifest, sort_keys=True, allow_nan=False).encode("utf-8")
