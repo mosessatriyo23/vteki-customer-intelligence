@@ -112,6 +112,54 @@ def test_known_imputation_and_development_output(artifacts):
     assert "eligible" not in result and "reasons" not in result
 
 
+@pytest.mark.parametrize("target", ["retail_purchase30", "renewal60"])
+def test_local_contributions_reconstruct_uncalibrated_score(artifacts, target):
+    model_dir, _, row = artifacts
+    if target != TARGET:
+        path = model_dir / "model_parameters.json"
+        params = json.loads(path.read_text(encoding="utf-8"))
+        params.update(target=target, target_version=TARGETS[target][0], horizon_days=60)
+        params["logistic"]["coef"][0] = -0.2
+        write_json(path, params)
+        manifest_path = model_dir / "experiment_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(target=target, target_version=TARGETS[target][0])
+        manifest["output_sha256"][path.name] = sha256(path)
+        write_json(manifest_path, manifest)
+    output = predict_rows(load_model(model_dir, target), [row], generated_at=NOW)[0]
+    contributions = output["feature_contributions"]
+    assert [entry["feature"] for entry in contributions] == list(FEATURES)
+    assert contributions[0]["missing"] is True
+    assert contributions[0]["feature_value"] is None
+    assert contributions[0]["imputed_value"] == 2.0
+    # Hand-calculated from fixture: missing (2-1)/2, observed (3-1)/2.
+    expected_first = 0.05 if target == TARGET else -0.1
+    expected_log_odds = 0.35 if target == TARGET else 0.2
+    assert [entry["log_odds_contribution"] for entry in contributions] == pytest.approx(
+        [expected_first, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], abs=1e-12
+    )
+    for entry in contributions[1:]:
+        assert entry["missing"] is False
+        assert entry["feature_value"] == 3.0
+        assert entry["imputed_value"] == 3.0
+    assert output["intercept"] == -0.3
+    assert output["log_odds"] == pytest.approx(expected_log_odds, abs=1e-12)
+    assert output["uncalibrated_probability"] == pytest.approx(
+        1 / (1 + math.exp(-expected_log_odds)), abs=1e-12
+    )
+    total = output["intercept"] + sum(
+        entry["log_odds_contribution"] for entry in contributions
+    )
+    assert total == pytest.approx(output["log_odds"], abs=1e-12)
+    assert output["uncalibrated_probability"] == pytest.approx(
+        1 / (1 + math.exp(-total)), abs=1e-12
+    )
+    assert output["explanation_method"].startswith("Exact signed log-odds")
+    assert output["explanation_version"] == "moses-propensity-log-odds-dev-1.0"
+    assert "reason_codes" not in output
+    assert output["serving_ready"] is False
+
+
 def test_reload_matches_sklearn_fitted_parameters(artifacts):
     from sklearn.impute import SimpleImputer
     from sklearn.linear_model import LogisticRegression
