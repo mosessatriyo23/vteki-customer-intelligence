@@ -18,9 +18,7 @@ def _normalize(value: str) -> str:
 
 class FeatureRegistry:
     def __init__(self, restricted_attributes: set[str] | None) -> None:
-        if restricted_attributes is None or isinstance(
-            restricted_attributes, (str, bytes)
-        ):
+        if not isinstance(restricted_attributes, (set, frozenset, list, tuple)):
             raise ValueError(
                 "restricted_attributes must be an explicit set/list/tuple of "
                 "strings (an empty collection is allowed; None or a bare "

@@ -62,6 +62,11 @@ def test_restricted_attributes_string_cannot_disable_refusal():
         FeatureRegistry(restricted_attributes="religion")
 
 
+def test_iterator_cannot_consume_and_disable_restricted_list():
+    with pytest.raises(ValueError, match="restricted_attributes"):
+        FeatureRegistry(restricted_attributes=iter(["religion"]))
+
+
 def test_empty_restricted_list_is_refused_when_not_explicit():
     with pytest.raises(ValueError, match="explicit"):
         FeatureRegistry(restricted_attributes=None)
