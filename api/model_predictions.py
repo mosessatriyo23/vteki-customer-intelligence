@@ -70,7 +70,11 @@ def list_prediction_runs(
     return [_run_response(run) for run in runs]
 
 
-@router.post("/runs/import", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/runs/import",
+    status_code=status.HTTP_201_CREATED,
+    responses={400: {"description": "Prediction artifact is invalid or unregistered"}},
+)
 def import_prediction_run(
     payload: PredictionImportRequest,
     request: Request,
@@ -80,7 +84,7 @@ def import_prediction_run(
     try:
         candidate = validate_prediction_import(payload.manifest, payload.records)
     except (ValueError, TypeError, OverflowError) as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=400, detail=str(error)) from error
 
     existing = (
         db.query(ModelPredictionRun)
@@ -103,7 +107,7 @@ def import_prediction_run(
     unknown_ids = sorted(golden_ids - known_golden_ids)
     if unknown_ids:
         raise HTTPException(
-            status_code=422,
+            status_code=400,
             detail=f"Golden Customer IDs are not in the identity registry: {', '.join(unknown_ids[:5])}",
         )
 

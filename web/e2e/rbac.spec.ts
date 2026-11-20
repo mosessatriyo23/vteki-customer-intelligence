@@ -19,7 +19,7 @@ async function login(page: Page, email: string) {
 
   await page.goto('/')
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Kata sandi').fill(password)
+  await page.getByRole('textbox', { name: 'Kata sandi' }).fill(password)
   await page.getByRole('button', { name: 'Masuk' }).click()
 
   await expect(

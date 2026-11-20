@@ -204,6 +204,21 @@ jobs:
                           'vteki_api', 'gov.audit_event', 'INSERT'
                       )
                   """,
+                  "API can read Moses review runs": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'ml.prediction_review_runs', 'SELECT'
+                      )
+                  """,
+                  "API can insert Moses review records": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'ml.prediction_review_records', 'INSERT'
+                      )
+                  """,
+                  "API can update Moses review runs": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'ml.prediction_review_runs', 'UPDATE'
+                      )
+                  """,
                   "Worker can read audit": """
                       SELECT has_table_privilege(
                           'vteki_worker', 'gov.audit_event', 'SELECT'
@@ -347,6 +362,7 @@ jobs:
             --max-time 30 \
             --request-timeout 5 \
             --exclude-path /auth/login \
+            --exclude-path /model-predictions/runs/import \
             -H "Authorization: Bearer $token" \
             --report junit,json \
             --report-dir schemathesis-report

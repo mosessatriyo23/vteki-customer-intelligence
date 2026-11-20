@@ -76,6 +76,14 @@ GRANT SELECT ON feat.customer_features TO vteki_api_runtime;
 
 GRANT SELECT, INSERT ON ml.model_drift_metrics TO vteki_api_runtime;
 
+-- Moses review data is persisted by migrations and accessed through API routes.
+GRANT SELECT, INSERT, UPDATE ON
+    ml.prediction_review_runs
+TO vteki_api_runtime;
+GRANT SELECT, INSERT ON
+    ml.prediction_review_records
+TO vteki_api_runtime;
+
 GRANT SELECT, INSERT ON msr.campaign_measurements TO vteki_api_runtime;
 
 GRANT SELECT ON stg.pipeline_runs TO vteki_api_runtime;
