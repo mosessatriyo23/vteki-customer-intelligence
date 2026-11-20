@@ -1,5 +1,7 @@
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.openapi.utils import get_openapi
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import Response
 from starlette.routing import compile_path
 from starlette.types import Receive, Scope, Send
@@ -9,14 +11,15 @@ from api.audit_router import router as audit_router
 from api.auth import router as auth_router
 from api.campaigns import router as campaigns_router
 from api.customers import router as customers_router
+from api.database import engine
 from api.decisions import router as decisions_router
 from api.golden_customers import router as golden_customers_router
 from api.governance import router as governance_router
 from api.identity_reviews import router as identity_reviews_router
 from api.jobs import router as jobs_router
+from api.model_predictions import router as model_predictions_router
 from api.models import User
 from api.monitoring import router as monitoring_router
-from api.model_predictions import router as model_predictions_router
 from api.security import require_roles
 
 
@@ -110,7 +113,12 @@ app.include_router(governance_router)
 
 @app.get("/health", tags=["health"])
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except SQLAlchemyError as error:
+        raise HTTPException(status_code=503, detail="Database is unavailable") from error
+    return {"status": "ok", "database": "ok"}
 
 
 @app.get("/admin/health", tags=["admin"])

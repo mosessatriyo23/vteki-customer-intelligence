@@ -52,6 +52,16 @@ services:
       PIPELINE_INTERVAL_MINUTES: ${PIPELINE_INTERVAL_MINUTES:-15}
     command: ["python", "-m", "worker"]
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; from pathlib import Path; from sqlalchemy import text; from api.database import engine; cmd=Path('/proc/1/cmdline').read_bytes(); conn=engine.connect(); ok=(b'worker' in cmd and conn.execute(text('SELECT 1')).scalar() == 1); conn.close(); sys.exit(0 if ok else 1)"
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   web:
     build:
@@ -62,6 +72,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
 volumes:
   postgres_data:

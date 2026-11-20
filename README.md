@@ -7,7 +7,7 @@ Platform starter untuk arsitektur data pelanggan dengan PostgreSQL, JWT/RBAC, au
 1. Dari root repo, jalankan `Copy-Item .env.example .env` di PowerShell (atau `cp .env.example .env` di macOS/Linux). Ganti `POSTGRES_PASSWORD`, password admin, dan `JWT_SECRET` dengan nilai unik. Gunakan karakter alfanumerik untuk password PostgreSQL karena Compose menyusunnya ke URL koneksi. Jangan commit `.env`.
 2. Jalankan `docker compose --env-file .env up --build -d` dari root repo. Compose membangun API, web, dan worker, menunggu PostgreSQL sehat, lalu menjalankan migrasi otomatis.
 3. Buat administrator pertama satu kali dengan `docker compose exec api python -m api.bootstrap`.
-4. Buka `http://localhost` untuk web app atau `http://localhost:8000/docs` untuk OpenAPI. Port host dapat diubah lewat `WEB_PORT`, `API_PORT`, dan `POSTGRES_PORT`.
+4. Buka `http://localhost` untuk web app atau `http://localhost:8000/docs` untuk OpenAPI. `/health` memeriksa koneksi API ke database; Compose juga memeriksa worker dan web. Port host dapat diubah lewat `WEB_PORT`, `API_PORT`, dan `POSTGRES_PORT`.
 
 Bootstrap ditolak jika tabel user sudah berisi akun. User berikutnya dibuat admin lewat `POST /auth/users`.
 
@@ -25,6 +25,8 @@ Migration `0005_governance_schemas_and_traceability` dan `0006_governance_workfl
 - `gov`: `audit_event` dan decision trace.
 
 Password di-hash dengan bcrypt (rounds 12) setelah pre-hash SHA-256 agar passphrase panjang tidak terpotong oleh batas input bcrypt. JWT HS256 memerlukan `JWT_SECRET`. Role awal: `admin`, `analyst`, `campaign_manager`, `operator`.
+
+Compose pada repo ini disiapkan untuk demo/development dan saat ini memakai kredensial DB admin yang sama untuk API, worker, dan migrasi. Sebelum dipakai pada deployment produksi, siapkan kredensial dan grant terpisah dengan hak minimum untuk runtime API, worker, dan migrator; skrip `scripts/db_permissions.sql` belum mengonfigurasi seluruh role runtime tersebut.
 
 `AuditMiddleware` mencatat request dan menerima atau membuat `X-Correlation-ID`; respons membawa `X-Request-ID` dan `X-Correlation-ID`. Event bisnis campaign, identity review, NBA override, dan worker memakai correlation ID yang sama. Trigger PostgreSQL menolak UPDATE/DELETE pada `gov.audit_event`.
 
@@ -44,7 +46,7 @@ Endpoint utama:
 
 Worker memproses job PostgreSQL dengan row locking, retry/backoff, dan hasil persisten. Campaign hanya menggunakan channel simulator; tidak ada pengiriman pesan keluar.
 
-APScheduler menjalankan urutan pipeline setiap `PIPELINE_INTERVAL_MINUTES` (default 15). PostgreSQL advisory lock mencegah overlap lintas worker. Setiap pipeline memiliki budget 60 menit, mencatat run/hasil tiap tahap, dan menandai kegagalan bila budget terlewati. Runner memeriksa budget di antara tahap; task yang sedang berjalan harus kooperatif dan memiliki timeout internal jika kelak ditambahkan.
+APScheduler menjalankan ringkasan audit dari database setiap `PIPELINE_INTERVAL_MINUTES` (default 15). PostgreSQL advisory lock mencegah overlap lintas worker. Pipeline tidak membaca fixture atau menghasilkan ringkasan dari data pengembangan. Setiap pipeline memiliki budget 60 menit, mencatat run/hasil tiap tahap, dan menandai kegagalan bila budget terlewati.
 
 Untuk pengembangan, instal `requirements-dev.txt`. `python -m worker --once` memproses paling banyak satu job; `python -m worker` menjalankan polling worker dan scheduler.
 
@@ -57,6 +59,10 @@ Data telepon, riwayat kunjungan, consent per channel, dan segmentasi membership 
 Jalankan API/database dengan Docker Compose, lalu masuk ke `web/`, jalankan `npm ci` dan `npm run dev`. Proxy `/api` Vite meneruskan request ke API pada port 8000; web dev server tersedia di `http://localhost:5173`.
 
 Endpoint demo `POST /customers/seed` dinonaktifkan dan mengembalikan `410 Gone`. Pelanggan hanya muncul setelah dimasukkan melalui sumber resmi atau didaftarkan admin lewat `POST /customers`; nilai LTV dan churn yang belum ada tetap kosong. Record demo lama ditandai dan disembunyikan dari alur pelanggan/NBA/kampanye.
+
+Folder `fixtures/intg_v1` berisi feed sintetis untuk pengujian dan eksperimen lokal saja. Fixture tidak dimasukkan ke image Docker, tidak dibaca oleh API/worker operasional, dan tidak boleh di-ingest sebagai data pelanggan nyata. Checkout ini belum menyertakan feed pelanggan yang memiliki otorisasi. Pada database baru, daftar Customer 360, Golden Customer, campaign, dan metrik akan kosong; audit tetap dapat terisi oleh aktivitas aktual aplikasi.
+
+Untuk mengaktifkan alur produksi dibutuhkan feed CRM/customer, Golden identity mapping yang telah direview, consent per-channel beserta waktu efektif/expiry, transaksi dan koreksi, complaint, membership, riwayat contact aktual, katalog serta ketersediaan produk, dan artefak prediksi Moses yang disetujui serving. Data feed harus punya manifest versi/checksum dan bukti otorisasi. Tidak ada feed seperti itu di checkout; tanpa feed tersebut NBA tetap fail-closed dan tidak menghasilkan campaign yang eligible.
 
 ## Handoff Moses dan pemeriksaan model
 

@@ -19,7 +19,7 @@ from worker.tasks import TASK_HANDLERS
 logger = logging.getLogger(__name__)
 PIPELINE_BUDGET_SECONDS = 60 * 60
 PIPELINE_LOCK_KEY = 7_188_420_261
-PIPELINE_STEPS = ("fixture_rollup", "audit_summary")
+PIPELINE_STEPS = ("audit_summary",)
 PROCESS_SHUTDOWN_GRACE_SECONDS = 1.0
 _local_pipeline_lock = threading.Lock()
 

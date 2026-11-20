@@ -1,6 +1,4 @@
-import csv
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func
@@ -20,15 +18,6 @@ def audit_summary(_: dict[str, Any]) -> dict[str, Any]:
             or 0
         )
     return {"total_requests": total, "failed_requests": failures}
-
-
-def fixture_rollup(_: dict[str, Any]) -> dict[str, Any]:
-    fixture_dir = Path(__file__).resolve().parents[1] / "fixtures" / "intg_v1"
-    row_counts: dict[str, int] = {}
-    for path in sorted(fixture_dir.glob("*.csv")):
-        with path.open("r", encoding="utf-8-sig", newline="") as fixture:
-            row_counts[path.stem] = max(sum(1 for _ in csv.reader(fixture)) - 1, 0)
-    return {"fixture": "intg_v1", "row_counts": row_counts}
 
 
 def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
@@ -64,5 +53,4 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
 TASK_HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "audit_summary": audit_summary,
     "campaign_execution": campaign_execution,
-    "fixture_rollup": fixture_rollup,
 }
