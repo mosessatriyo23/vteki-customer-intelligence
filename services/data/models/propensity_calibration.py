@@ -21,6 +21,7 @@ from services.data.models.churn_calibration import (
     select_threshold,
 )
 from services.data.models.churn_experiment import FEATURES, SEED, _matrix
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _binary
 from services.data.models.propensity_experiment import (
     TARGET_LIMITATIONS,
@@ -166,6 +167,7 @@ def evaluate(rows: list[dict], target: str) -> tuple[dict, list[dict], dict]:
         **identity,
         **info,
         "features": list(FEATURES),
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "label_status": "PROPOSED",
         "proposed_rule": PROPOSED_RULES[target],
         "booking": booking_status(),

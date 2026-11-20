@@ -16,6 +16,7 @@ from pathlib import Path
 from services.data.ingestion.validator import sha256
 from services.data.models.baseline import temporal_split
 from services.data.models.churn_diagnostics import _metrics, _operating
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp
 from services.data.models.membership_features import FIELDS as MEMBERSHIP_FIELDS
 from services.data.models.membership_features import MEMBERSHIP_FEATURE_VERSION
@@ -248,6 +249,7 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
     report = {
         **IDENTITY,
         **STATUS,
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "features": list(FEATURES),
         "seed": SEED,
         "train_rows": len(train),

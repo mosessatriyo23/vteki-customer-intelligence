@@ -26,6 +26,7 @@ from services.data.models.churn_experiment import (
     _matrix,
     _validate,
 )
+from services.data.models.evaluation_disclaimer import SYNTHETIC_DATA_DISCLAIMER
 from services.data.models.evaluator import _aware_timestamp, _binary
 from services.data.models.labels import CHRIST_VERSION, TRAINING_FIELDS
 
@@ -298,6 +299,7 @@ def evaluate(rows: list[dict]) -> tuple[dict, list[dict], dict]:
         "label_version": CHRIST_VERSION,
         "features": list(FEATURES),
         **FLAGS,
+        "synthetic_data_disclaimer": SYNTHETIC_DATA_DISCLAIMER,
         "calibration_method": CALIBRATION_METHOD,
         "threshold_rule": THRESHOLD_RULE,
         "selected_threshold": selected,
