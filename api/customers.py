@@ -101,7 +101,12 @@ def get_customer(
     return customer
 
 
-@router.post("/seed", status_code=status.HTTP_410_GONE, deprecated=True)
+@router.post(
+    "/seed",
+    status_code=status.HTTP_410_GONE,
+    deprecated=True,
+    include_in_schema=False,
+)
 def disable_demo_seed(_: User = Depends(require_roles("admin"))) -> None:
     raise HTTPException(
         status_code=status.HTTP_410_GONE,

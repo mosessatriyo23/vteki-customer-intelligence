@@ -317,6 +317,7 @@ test.describe('Frontend RBAC - empat role', () => {
     await page
       .getByLabel('Kandidat, pisahkan dengan koma')
       .fill(`candidate-${Date.now()}`)
+    await page.getByLabel('Confidence (0–1)').fill('0.52')
     await page
       .getByLabel('Alasan flagging')
       .fill('Acceptance test identity review workflow.')
@@ -325,6 +326,10 @@ test.describe('Frontend RBAC - empat role', () => {
     const reviewCard = page
       .locator('.review-card')
       .filter({ hasText: subject })
+    await expect(reviewCard).toBeVisible()
+    await expect(
+      reviewCard.getByRole('button', { name: 'Tolak Gabung Identitas' }),
+    ).toBeVisible()
     await reviewCard
       .getByRole('button', { name: 'Tolak Gabung Identitas' })
       .click()
