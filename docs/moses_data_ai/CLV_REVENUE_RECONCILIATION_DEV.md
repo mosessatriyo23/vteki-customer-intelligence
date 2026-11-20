@@ -1,6 +1,18 @@
-# CLV revenue reconciliation — development review, 2026-11-19
+# CLV revenue reconciliation — development review, 2026-11-19 (updated 2026-11-20)
 
-**Status: decision requested; no CLV behavior changed.** Christ's [`target_definitions.md` v1.3 §2.1](../christ_business/approved/target_definitions.md) (lines 77–112) says rolling 365 days, `COMPLETED`/`PARTIAL_REFUND`, prefer POS `net_amount` over `gross_amount` when available, and count partial refunds at the amount retained by the business. It simultaneously calls the result **Gross Revenue** (lines 91 and 111–112). The document header still says mentor approval and team review are pending. This note does not grant approval or establish a new revenue definition.
+**Status: decision still requested. `build_clv_aggregates` (gross) is unchanged.
+A new, separately versioned sibling exists:
+`services/data/models/clv_features.py::build_clv_actual_revenue_aggregates`
+(`feature_version="clv-actual-revenue-365d-dev-1.0-christ-v1.4"`), covered by
+`tests/data/test_clv_features.py::ClvActualRevenueTests`. It sums the
+ingestion-provided `actual_revenue` field (net of discount and any refund
+recorded as of the source) instead of `gross_amount`, matching Christ's v1.4
+wording that the historical CLV figure should be `actual_revenue`
+(`target_definitions.md` v1.4 §2.1). Nothing consumes this builder yet —
+`clv_projection.py` still only accepts gross inputs — and this does not
+resolve the open items below: it is not approved, it does not prove
+availability-time (`known_at`) correctness, and no `training_ready`/tier
+decision depends on it.** Christ's [`target_definitions.md` v1.3 §2.1](../christ_business/approved/target_definitions.md) (lines 77–112) says rolling 365 days, `COMPLETED`/`PARTIAL_REFUND`, prefer POS `net_amount` over `gross_amount` when available, and count partial refunds at the amount retained by the business. It simultaneously calls the result **Gross Revenue** (lines 91 and 111–112). The document header still says mentor approval and team review are pending. This note does not grant approval or establish a new revenue definition.
 
 ## Exact discrepancy
 
@@ -22,12 +34,41 @@ With two transactions, the corresponding average transaction values are **150**,
 
 1. **Christ / business approver:** Confirm explicitly whether the CLV historical and average amounts should be `actual_revenue` for both qualifying statuses (equivalent to `net_amount` for `COMPLETED`, and `net_amount - refund_amount` for `PARTIAL_REFUND`), or another mapping. Reconcile the term **Gross Revenue** with the net-after-discount / after-refund instruction and specify the field/definition used in tiers and output labels. Clarify whether any legacy source without `net_amount` may fall back to `gross_amount`, given schema v2 requires `net_amount`; if yes, define provenance and validation. Do not silently call retained revenue gross before this decision.
 2. **James / Moses:** Verify the trusted as-of source, accounting invariants, status/refund version and `known_at` coverage; a final-state `actual_revenue` read at a past cutoff can leak a later refund. Confirm how to handle missing, malformed or contradictory amount fields and whether an updated feature/output name or version is needed. This does not unblock `training_ready` or approve a retention factor.
-3. **After written decisions and review:** Add valid discounted and partially refunded fixtures covering historical total, average and projected component; retain status/window/dedup assertions. Update the feature and its consumers together only after the mapping and PIT semantics are agreed. `business_clv.py`'s pure formula itself needs no revenue-field fallback.
+3. **After written decisions and review:** Point `clv_projection.py` (or a new wrapper) at `build_clv_actual_revenue_aggregates` instead of the gross builder, once the mapping and PIT semantics are agreed. `business_clv.py`'s pure formula itself needs no revenue-field fallback.
 
-## Validation (current behavior only)
+## Update, 2026-11-20: a separately versioned `actual_revenue` builder now exists
+
+`services/data/models/clv_features.py::build_clv_actual_revenue_aggregates`
+(`feature_version="clv-actual-revenue-365d-dev-1.0-christ-v1.4"`) sums the
+ingestion-validated `actual_revenue` field instead of `gross_amount`, using the
+same status filter, 365-day window, and dedup/conflict rules as the gross
+builder. It trusts `actual_revenue` as already validated by ingestion
+(`services/data/ingestion/validator.py`, `transaction_events.py`) and does not
+re-derive or re-check `net_amount - refund_amount` itself; a non-digit or
+negative `actual_revenue` is rejected the same way `gross_amount` already was.
+`tests/data/test_clv_features.py::ClvActualRevenueTests` covers a discounted
+row, a partial refund, the 365-day boundary, a cancelled row (`actual_revenue`
+fixed at 0 under the generator's accounting rule), and a same-ID conflict
+between a `COMPLETED` and a later `PARTIAL_REFUND` record. The original gross
+builder, `build_clv_aggregates`, is unchanged and still the only one consumed
+by `clv_projection.py`.
+
+**This does not resolve items 1–2 above.** It gives Christ and James a
+correctly-computed `actual_revenue` figure to compare against the existing
+gross figure (see the worked example), but: the mapping is still Christ's
+decision pending mentor approval of v1.4; nothing proves `actual_revenue` was
+known at the historical `cutoff` rather than updated later by a subsequent
+refund (James/Moses, item 2); and no consumer, tier boundary, or
+`training_ready` flag depends on this builder yet.
+
+## Validation
 
 ```powershell
-python -m unittest tests.data.test_clv_features tests.data.test_business_clv
+.venv\Scripts\python.exe -m pytest tests/data/test_clv_features.py tests/data/test_clv_projection.py tests/data/test_business_clv.py -q
 ```
 
-At this review the command passed (17 tests). **No new regression test was added:** the current fixture contradicts the ingestion accounting invariant, and a single expected amount cannot be asserted as approved while the gross/net/retained mapping and time-of-knowledge are unresolved. The numerical table above is a decision aid, not a new test oracle or production CLV result.
+Before the review fixture corrections, this command passed **50 tests**.
+The CLV feature module contains 5 existing and 4 new test functions; unittest
+subtests are not additional pytest test cases. Re-run after subsequent edits.
+The numerical table above remains a decision aid, not an approved production
+CLV result.

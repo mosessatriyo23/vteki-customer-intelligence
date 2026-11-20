@@ -156,5 +156,88 @@ class ClvFeatureTests(unittest.TestCase):
             build_clv_aggregates([row], {"source-a": "golden-a"}, aware)
 
 
+class ClvActualRevenueTests(unittest.TestCase):
+    CUTOFF = datetime.fromisoformat("2026-06-01T12:00:00+07:00")
+
+    def _row(self, identifier, days, gross, discount, refund, status="COMPLETED"):
+        net = gross - discount
+        return {
+            "source_transaction_id": identifier,
+            "source_customer_ref": "source-a",
+            "source_system": "POS",
+            "transaction_datetime": (self.CUTOFF + timedelta(days=days)).isoformat(),
+            "gross_amount": str(gross),
+            "discount_amount": str(discount),
+            "net_amount": str(net),
+            "refund_amount": str(refund),
+            "actual_revenue": str(net - refund),
+            "status": status,
+        }
+
+    def test_sums_actual_revenue_after_discount_and_partial_refund(self):
+        from services.data.models.clv_features import (
+            build_clv_actual_revenue_aggregates,
+        )
+
+        rows = [
+            self._row("a", -1, 100, 10, 0),
+            self._row("b", -5, 200, 20, 50, "PARTIAL_REFUND"),
+            self._row("old", -365, 900, 0, 0),
+            {
+                **self._row("cancelled", -2, 500, 0, 0, "CANCELLED"),
+                "actual_revenue": "0",
+            },
+        ]
+        row = build_clv_actual_revenue_aggregates(
+            rows, {"source-a": "golden-a"}, self.CUTOFF
+        )[0]
+        self.assertEqual(row["historical_spend_12m_actual_revenue"], 220)
+        self.assertEqual(row["average_transaction_value_12m"], 110)
+        self.assertEqual(row["transaction_count_12m"], 2)
+        self.assertNotIn("historical_spend_12m_gross", row)
+        self.assertEqual(row["revenue_basis"], "actual_revenue")
+        self.assertEqual(
+            row["feature_version"], "clv-actual-revenue-365d-dev-1.0-christ-v1.4"
+        )
+        self.assertFalse(row["training_ready"])
+        self.assertEqual(row["availability_time_status"], "UNPROVEN")
+        self.assertIsNone(row["retention_factor"])
+
+    def test_gross_builder_is_unchanged(self):
+        rows = [self._row("b", -5, 200, 20, 50, "PARTIAL_REFUND")]
+        row = build_clv_aggregates(rows, {"source-a": "golden-a"}, self.CUTOFF)[0]
+        self.assertEqual(row["historical_spend_12m_gross"], 200)
+
+    def test_conflicting_actual_revenue_for_same_id_is_rejected(self):
+        from services.data.models.clv_features import (
+            build_clv_actual_revenue_aggregates,
+        )
+
+        first = self._row("same", -1, 100, 0, 0)
+        second = {
+            **first,
+            "status": "PARTIAL_REFUND",
+            "refund_amount": "30",
+            "actual_revenue": "70",
+        }
+        with self.assertRaisesRegex(ValueError, "Conflicting in-window records"):
+            build_clv_actual_revenue_aggregates(
+                [first, second], {"source-a": "golden-a"}, self.CUTOFF
+            )
+
+    def test_invalid_actual_revenue_is_rejected(self):
+        from services.data.models.clv_features import (
+            build_clv_actual_revenue_aggregates,
+        )
+
+        for bad in ("", "-5", "1.5", "abc"):
+            row = {**self._row("x", -1, 100, 0, 0), "actual_revenue": bad}
+            with self.subTest(bad=bad):
+                with self.assertRaisesRegex(ValueError, "actual_revenue"):
+                    build_clv_actual_revenue_aggregates(
+                        [row], {"source-a": "golden-a"}, self.CUTOFF
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
