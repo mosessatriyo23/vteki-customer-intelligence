@@ -19,6 +19,7 @@ from pathlib import Path
 
 from services.data.features.snapshot import VERSION as FEATURE_VERSION
 from services.data.ingestion.validator import sha256
+from services.data.models import renewal_membership_experiment as membership
 from services.data.models.baseline import temporal_split
 from services.data.models.churn_experiment import FEATURES, LOCAL_TIMEZONE
 from services.data.models.churn_experiment import _validate as _validate_churn
@@ -38,11 +39,12 @@ REPEATS = 10
 MIN_SEGMENT_N = 100
 # Correlated by construction; single-column permutation understates the group.
 CORRELATED_GROUP = ("purchase_count_60d", "purchase_count_90d", "purchase_count_365d")
-KINDS = ("churn", "retail_purchase30", "renewal60")
+KINDS = ("churn", "retail_purchase30", "renewal60", "renewal60_membership")
 LABEL_KEYS = {
     "churn": "churn90",
     "retail_purchase30": "target_value",
     "renewal60": "target_value",
+    "renewal60_membership": "target_value",
 }
 OUTPUTS = ("importance_report.json",)
 LIMITATIONS = [
@@ -98,8 +100,14 @@ def _logistic(parameters: dict) -> tuple[tuple[str, ...], dict]:
         or parameters.get("serving_ready") is not False
     ):
         raise ValueError("Development-only, non-serving model parameters required")
+    if "isotonic" in parameters:
+        raise ValueError(
+            "Importance for calibrated artifacts is not supported; do not score as raw logistic"
+        )
     features = tuple(parameters.get("features") or ())
-    if features != FEATURES:
+    if features == membership.FEATURES:
+        _membership_contract(parameters)
+    elif features != FEATURES:
         raise ValueError("Unexpected feature contract in model parameters")
     logistic = parameters.get("logistic")
     if not isinstance(logistic, dict):
@@ -118,6 +126,15 @@ def _logistic(parameters: dict) -> tuple[tuple[str, ...], dict]:
         "scaler_scale": scale,
         "imputer_medians": _numbers(logistic.get("imputer_medians"), count),
     }
+
+
+def _membership_contract(parameters: dict) -> None:
+    if any(
+        parameters.get(key) != value for key, value in membership.IDENTITY.items()
+    ) or any(
+        parameters.get(key) is not value for key, value in membership.STATUS.items()
+    ):
+        raise ValueError("Unexpected membership model contract")
 
 
 def _raw(row: dict, field: str) -> float:
@@ -269,7 +286,12 @@ def evaluate(
             "Unexpected feature contract: label_key must not be a feature column"
         )
     # Read-only snapshot of the holdout; the caller's rows are never mutated.
-    matrix = [[_raw(row, field) for field in features] for row in holdout_rows]
+    is_membership = features == membership.FEATURES
+    matrix = (
+        membership._matrix(holdout_rows)
+        if is_membership
+        else [[_raw(row, field) for field in features] for row in holdout_rows]
+    )
     labels = [_binary(row.get(label_key), label_key) for row in holdout_rows]
     baseline = _metrics(labels, _scores(model, matrix))
     importance = [
@@ -313,7 +335,7 @@ def evaluate(
             }
         )
     segments = {}
-    for field in SEGMENT_BUCKETS:
+    for field in (() if is_membership else SEGMENT_BUCKETS):
         if field not in features:
             continue
         index = features.index(field)
@@ -353,12 +375,22 @@ def evaluate(
         "baseline": baseline,
         "global_importance": importance,
         "grouped_importance": grouped,
+        **(membership.STATUS if is_membership else {}),
         "segment_definition": {
             field: [name for name, _ in buckets] + ["missing"]
             for field, buckets in SEGMENT_BUCKETS.items()
+            if field in features
         },
         "segments": segments,
-        "limitations": list(LIMITATIONS),
+        "limitations": list(LIMITATIONS)
+        + (
+            membership.LIMITATIONS
+            + [
+                "No membership segment buckets are predefined; no segment performance is reported"
+            ]
+            if is_membership
+            else []
+        ),
     }
 
 
@@ -467,6 +499,75 @@ def _propensity_holdout(
     return paths, holdout
 
 
+def _membership_holdout(
+    labels_dir: Path, membership_dir: Path
+) -> tuple[dict, list[dict]]:
+    """Rebuild the exact membership experiment cohort, without calling its fitter."""
+    paths = {
+        "propensity_manifest.json": labels_dir / "propensity_manifest.json",
+        "propensity_labels.csv": labels_dir / "propensity_labels.csv",
+        "membership_manifest.json": membership_dir / "membership_manifest.json",
+        "membership_features.csv": membership_dir / "membership_features.csv",
+    }
+    labels_manifest = _load(paths["propensity_manifest.json"])
+    member_manifest = _load(paths["membership_manifest.json"])
+    for manifest in (labels_manifest, member_manifest):
+        if (
+            manifest.get("development_only") is not True
+            or manifest.get("training_ready") is not False
+        ):
+            raise ValueError("Development-only manifests required")
+    if (
+        labels_manifest.get("experiment_ready") is not False
+        or labels_manifest.get("final_model") is not False
+    ):
+        raise ValueError("Development-only label manifest required")
+    if (
+        labels_manifest.get("target_versions", {}).get("renewal60")
+        != membership.RENEWAL_VERSION
+    ):
+        raise ValueError("Unexpected label version")
+    if member_manifest.get("feature_version") != membership.MEMBERSHIP_FEATURE_VERSION:
+        raise ValueError("Unexpected membership feature version")
+    if member_manifest.get("identity_time_policy") != "CURRENT_SNAPSHOT_RETROSPECTIVE":
+        raise ValueError("Unexpected identity time policy")
+    for manifest, filename in (
+        (labels_manifest, "propensity_labels.csv"),
+        (member_manifest, "membership_features.csv"),
+    ):
+        if manifest.get("output_sha256") != {filename: sha256(paths[filename])}:
+            raise ValueError("Input checksum mismatch")
+    cutoffs = membership._cutoffs(labels_manifest)
+    if cutoffs != membership._cutoffs(member_manifest):
+        raise ValueError("Membership and label cutoffs must match")
+    members = membership._read_csv(
+        paths["membership_features.csv"], membership.MEMBERSHIP_FIELDS
+    )
+    labels = membership._read_csv(
+        paths["propensity_labels.csv"], membership.LABEL_FIELDS
+    )
+    if (
+        type(member_manifest.get("row_count")) is not int
+        or len(members) != member_manifest["row_count"]
+    ):
+        raise ValueError("Membership row count mismatch")
+    for rows in (members, labels):
+        if {key[1] for key in membership._index(rows)} != cutoffs:
+            raise ValueError("CSV and manifest cutoffs must match")
+    rows = membership.join_rows(members, labels)
+    eligible_cutoffs = sorted(
+        {_aware_timestamp(row["cutoff_at"], "cutoff_at") for row in rows}
+    )
+    if (
+        len(eligible_cutoffs) != 2
+        or [c.month for c in eligible_cutoffs] != [3, 6]
+        or eligible_cutoffs[0].year != eligible_cutoffs[1].year
+    ):
+        raise ValueError("Exactly March and June cutoffs in the same year required")
+    _, holdout, _, _ = temporal_split(rows)
+    return paths, holdout
+
+
 def run(
     kind: str,
     model_dir: Path,
@@ -475,6 +576,7 @@ def run(
     source_dir: Path | None = None,
     labels_dir: Path | None = None,
     features_dir: Path | None = None,
+    membership_dir: Path | None = None,
     repeats: int = REPEATS,
     seed: int = SEED,
     min_n: int = MIN_SEGMENT_N,
@@ -485,7 +587,15 @@ def run(
     model_dir, output_dir = Path(model_dir), Path(output_dir)
     sources = [
         Path(p)
-        for p in ((source_dir,) if kind == "churn" else (labels_dir, features_dir))
+        for p in (
+            (source_dir,)
+            if kind == "churn"
+            else (
+                (labels_dir, membership_dir)
+                if kind == "renewal60_membership"
+                else (labels_dir, features_dir)
+            )
+        )
         if p
     ]
     _check_paths(
@@ -496,7 +606,11 @@ def run(
         if kind == "churn"
         else (
             ("propensity_manifest.json", "propensity_labels.csv"),
-            ("feature_manifest.json", "features.csv"),
+            (
+                ("membership_manifest.json", "membership_features.csv")
+                if kind == "renewal60_membership"
+                else ("feature_manifest.json", "features.csv")
+            ),
         )
     )
     source_before = {
@@ -510,6 +624,14 @@ def run(
                 "churn requires --source-dir with the labelled training rows"
             )
         source_paths, holdout = _churn_holdout(Path(source_dir))
+    elif kind == "renewal60_membership":
+        if labels_dir is None or membership_dir is None:
+            raise ValueError(
+                "membership renewal requires --labels-dir and --membership-dir"
+            )
+        source_paths, holdout = _membership_holdout(
+            Path(labels_dir), Path(membership_dir)
+        )
     else:
         if labels_dir is None or features_dir is None:
             raise ValueError("propensity kinds require --labels-dir and --features-dir")
@@ -557,7 +679,18 @@ def run(
         if experiment.get("input_sha256", {}).get(name) != before[name]:
             raise ValueError(f"{name} differs from the fitted experiment input")
     parameters = _load(model_paths["model_parameters.json"])
-    if kind != "churn" and parameters.get("target") != kind:
+    if (
+        kind != "renewal60_membership"
+        and tuple(parameters.get("features") or ()) == membership.FEATURES
+    ):
+        raise ValueError("Membership parameters require renewal60_membership kind")
+    if kind == "renewal60_membership":
+        _membership_contract(parameters)
+        _membership_contract(experiment)
+        _membership_contract(evaluation)
+    if kind != "churn" and parameters.get("target") != (
+        "renewal60" if kind == "renewal60_membership" else kind
+    ):
         raise ValueError("Model parameters target does not match the requested kind")
     report = evaluate(
         parameters, holdout, LABEL_KEYS[kind], repeats=repeats, seed=seed, min_n=min_n
@@ -589,7 +722,8 @@ def run(
                 "refitted": False,
                 "input_sha256": before,
                 "input_sha256_after": after,
-                "limitations": list(LIMITATIONS),
+                **(membership.STATUS if kind == "renewal60_membership" else {}),
+                "limitations": report["limitations"],
                 "output_sha256": {name: sha256(output_dir / name) for name in OUTPUTS},
             },
             indent=2,
@@ -609,6 +743,7 @@ def main() -> None:
     parser.add_argument("--source-dir", type=Path)
     parser.add_argument("--labels-dir", type=Path)
     parser.add_argument("--features-dir", type=Path)
+    parser.add_argument("--membership-dir", type=Path)
     parser.add_argument("--repeats", type=int, default=REPEATS)
     parser.add_argument("--min-n", type=int, default=MIN_SEGMENT_N)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -620,6 +755,7 @@ def main() -> None:
         source_dir=args.source_dir,
         labels_dir=args.labels_dir,
         features_dir=args.features_dir,
+        membership_dir=args.membership_dir,
         repeats=args.repeats,
         min_n=args.min_n,
     )
