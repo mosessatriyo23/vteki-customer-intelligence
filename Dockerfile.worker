@@ -7,6 +7,5 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api ./api
 COPY worker ./worker
 COPY services ./services
-COPY fixtures ./fixtures
 
 CMD ["python", "-m", "worker"]

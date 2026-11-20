@@ -160,7 +160,9 @@ class Customer(Base):
         String(16), nullable=True
     )  # Low, Medium, High
     next_best_action: Mapped[str | None] = mapped_column(String(256), nullable=True)
-    source_type: Mapped[str] = mapped_column(String(24), default="unknown", nullable=False)
+    source_type: Mapped[str] = mapped_column(
+        String(24), default="unknown", nullable=False
+    )
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     golden_customer_id: Mapped[str | None] = mapped_column(
         String(36),
@@ -287,7 +289,9 @@ class ModelPredictionRun(Base):
     producer_version: Mapped[str] = mapped_column(String(64))
     manifest_hash: Mapped[str] = mapped_column(String(64))
     record_count: Mapped[int] = mapped_column(Integer)
-    review_status: Mapped[str] = mapped_column(String(24), default="pending_review", index=True)
+    review_status: Mapped[str] = mapped_column(
+        String(24), default="pending_review", index=True
+    )
     manifest: Mapped[dict] = mapped_column(JSON)
     submitted_by: Mapped[int] = mapped_column(Integer)
     imported_at: Mapped[datetime] = mapped_column(
@@ -399,7 +403,9 @@ class CampaignMeasurement(Base):
     metric_name: Mapped[str] = mapped_column(String(100))
     observed_value: Mapped[float] = mapped_column()
     incremental_value: Mapped[float] = mapped_column()
-    source_mode: Mapped[str] = mapped_column(String(24), default="unclassified", nullable=False)
+    source_mode: Mapped[str] = mapped_column(
+        String(24), default="unclassified", nullable=False
+    )
     measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),

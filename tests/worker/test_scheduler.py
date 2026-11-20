@@ -7,6 +7,7 @@ from sqlalchemy.pool import StaticPool
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.models import PipelineRun
 from worker import scheduler
+from worker.tasks import TASK_HANDLERS
 
 
 def extract_handler(_: dict) -> dict:
@@ -47,6 +48,11 @@ def test_pipeline_runs_steps_in_order_and_persists_results(monkeypatch):
         assert run.step_results == {"extract": {"rows": 4}, "measure": {"drift": 0.1}}
         assert run.finished_at is not None
     engine.dispose()
+
+
+def test_default_pipeline_uses_database_results_without_bundled_fixtures():
+    assert scheduler.PIPELINE_STEPS == ("audit_summary",)
+    assert "fixture_rollup" not in TASK_HANDLERS
 
 
 def test_pipeline_skips_when_local_run_lock_is_held(monkeypatch):

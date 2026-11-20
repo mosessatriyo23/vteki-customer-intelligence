@@ -18,8 +18,8 @@
     "identity_mapping.csv": "ad7be6f6e262fe07e3d22d4d9077c1be9669b41bb5be71b47ccd9559bec103b0",
     "injected_campaign_effects.json": "a18968c0bc75a851dbbdb1244a06639fc060dc37bf7e115a90bf4c75d2db3fe1"
   },
-  "ground_truth_dir": "/mnt/d/projects/vteki-customer-intelligence/generator/ground_truth/fixtures",
-  "output_dir": "/mnt/d/projects/vteki-customer-intelligence/fixtures/intg_v1",
+  "ground_truth_dir": "generator/ground_truth/fixtures (development evaluation only)",
+  "output_dir": "fixtures/intg_v1",
   "seed": 20260906,
   "trajectory_distribution": {
     "DECLINING": 350,

@@ -9,16 +9,18 @@ const currency = new Intl.NumberFormat('id-ID', {
 
 export function GoldenSnapshotsPanel({ token, canReview }: { token: string | null; canReview: boolean }) {
   const [snapshots, setSnapshots] = useState<ApiGoldenCustomer[]>([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [provenance, setProvenance] = useState<Record<string, unknown> | null>(null)
   const [selected, setSelected] = useState('')
 
   useEffect(() => {
-    if (!token) return
+    if (!token) { setLoading(false); return }
     let active = true
     void api.goldenCustomers(token)
       .then((rows) => { if (active) setSnapshots(rows) })
       .catch((problem: unknown) => { if (active) setError(problem instanceof Error ? problem.message : 'Gagal memuat snapshot') })
+      .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [token])
 
@@ -39,8 +41,9 @@ export function GoldenSnapshotsPanel({ token, canReview }: { token: string | nul
     <h2>Golden Customer — Snapshot PostgreSQL</h2>
     <p>Data historis hasil identity resolution dan Customer 360; status PROVISIONAL bukan identitas yang sudah disetujui. Tidak memakai data demo core.customers.</p>
     {!token && <p>Login diperlukan untuk melihat snapshot asli.</p>}
+    {token && loading && <p role="status">Memuat snapshot dari API…</p>}
     {error && <p role="alert">{error}</p>}
-    {token && !error && snapshots.length === 0 && <p>Belum ada snapshot terpublikasi. Jalankan pipeline serving setelah ingestion dan identity registry siap.</p>}
+    {token && !loading && !error && snapshots.length === 0 && <p>Belum ada snapshot terpublikasi. Jalankan pipeline serving setelah ingestion dan identity registry siap.</p>}
     {snapshots.length > 0 && <div style={{ overflowX: 'auto' }}><table className="customer-table">
       <thead><tr><th>Golden ID</th><th>Cutoff</th><th>Retained revenue (IDR)</th><th>Lifecycle</th><th>Status identitas</th><th>Provenance</th></tr></thead>
       <tbody>{snapshots.map((row) => <tr key={row.golden_customer_id}>

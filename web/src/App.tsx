@@ -72,7 +72,7 @@ type Campaign = {
   name: string
   segment: string
   channel: string
-  status: 'Live' | 'Draft' | 'Scheduled' | 'Running' | 'Pending approval' | 'Approved' | 'Rejected' | 'Completed' | 'Failed'
+  status: 'Unknown' | 'Draft' | 'Scheduled' | 'Running' | 'Pending approval' | 'Approved' | 'Rejected' | 'Completed' | 'Failed'
   reach: string
   color: string
   messageDraft?: string
@@ -139,12 +139,11 @@ function mapCampaign(row: ApiCampaign): Campaign {
   const variantB = executionResult?.variant_b_count
   const executionStatus = row.latest_execution?.status
   const status: Campaign['status'] = row.status === 'Active'
-    ? executionStatus === 'completed' ? 'Completed'
+    ? (executionStatus === 'completed' ? 'Completed'
       : executionStatus === 'failed' || executionStatus === 'cancelled' ? 'Failed'
         : executionStatus === 'running' || executionStatus === 'cancel_requested' ? 'Running'
-          : executionStatus === 'queued' ? 'Scheduled'
-            : 'Live'
-    : statusMap[row.status] ?? 'Draft'
+          : executionStatus === 'queued' ? 'Scheduled' : 'Unknown')
+    : statusMap[row.status] ?? 'Unknown'
   const executionSummary = typeof audience === 'number'
     ? `${audience.toLocaleString('id-ID')} pelanggan · A ${typeof variantA === 'number' ? variantA.toLocaleString('id-ID') : '—'} / B ${typeof variantB === 'number' ? variantB.toLocaleString('id-ID') : '—'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
     : executionStatus === 'failed'
@@ -368,7 +367,7 @@ function App() {
       if (campaign.status === 'Draft' && status === 'Pending approval') await api.submitCampaign(token, campaign.apiId)
       else if (campaign.status === 'Pending approval' && status === 'Approved') await api.approveCampaign(token, campaign.apiId)
       else if (campaign.status === 'Pending approval' && status === 'Rejected') await api.rejectCampaign(token, campaign.apiId, 'Ditolak melalui review workflow')
-      else if (campaign.status === 'Approved' && status === 'Live') {
+      else if (campaign.status === 'Approved' && status === 'Scheduled') {
         const launched = await api.launchCampaign(token, campaign.apiId)
         successNotice = `Simulasi masuk antrean worker sebagai job #${launched.batch_job_id}.`
       }
@@ -503,7 +502,7 @@ function App() {
 
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
-          <button className="plain-nav" onClick={() => setPage('governance')}><CircleHelp size={17} /> CI/CD & Security</button>
+          <button className="plain-nav" onClick={() => setPage('governance')}><CircleHelp size={17} /> Keamanan & peran</button>
           <button className="plain-nav" onClick={logout}><LogOut size={17} /> Keluar</button>
           <div className="profile-row">
           <div className="avatar avatar-dark">{user.email.slice(0, 2).toUpperCase()}</div>
@@ -827,7 +826,7 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
 
     <div className="campaign-toolbar">
       <div className="filter-tabs">
-        {['All campaigns', 'Scheduled', 'Running', 'Pending approval', 'Draft', 'Approved', 'Completed', 'Failed'].map((filter) => (
+        {['All campaigns', 'Scheduled', 'Running', 'Pending approval', 'Draft', 'Approved', 'Completed', 'Failed', 'Unknown'].map((filter) => (
           <button className={activeFilter === filter ? 'selected' : ''} onClick={() => setActiveFilter(filter)} key={filter}>
             {filter}
             <span>{filter === 'All campaigns' ? campaigns.length : campaigns.filter((c) => c.status === filter).length}</span>
@@ -880,11 +879,11 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
                       </button>
                     </>
                   ) : campaign.status === 'Approved' ? (
-                    <button className="button-sm button-launch" onClick={() => onTransition(campaign.apiId, 'Live')}>
+                    <button className="button-sm button-launch" onClick={() => onTransition(campaign.apiId, 'Scheduled')}>
                       <Send size={13} /> Peluncuran Sim
                     </button>
                   ) : (
-                    <span className="text-muted-sm">Selesai</span>
+                    <span className="text-muted-sm">{['Rejected', 'Completed', 'Failed'].includes(campaign.status) ? 'Aksi selesai' : 'Status tidak tersedia'}</span>
                   )}
                 </div>
               </td>

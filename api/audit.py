@@ -60,31 +60,37 @@ class AuditMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
             status_code = response.status_code
         finally:
-            authorization = request.headers.get("authorization", "")
-            actor_id = self._actor_id(authorization)
-            session_factory = getattr(
-                request.app.state, "audit_session_factory", SessionLocal
-            )
-            try:
-                with session_factory() as session:
-                    session.add(
-                        AuditEvent(
-                            request_id=request_id,
-                            correlation_id=correlation_id,
-                            actor_id=actor_id,
-                            method=request.method,
-                            path=request.url.path[:512],
-                            status_code=status_code,
-                            client_ip=request.client.host if request.client else None,
-                            user_agent=request.headers.get("user-agent", "")[:512]
-                            or None,
-                        )
-                    )
-                    session.commit()
-            except Exception:
-                logger.exception(
-                    "Failed to persist audit event request_id=%s", request_id
+            # Container readiness probes are infrastructure traffic, not
+            # business actions. Excluding them avoids filling the append-only
+            # audit trail with a synthetic health-check event every interval.
+            if request.url.path != "/health":
+                authorization = request.headers.get("authorization", "")
+                actor_id = self._actor_id(authorization)
+                session_factory = getattr(
+                    request.app.state, "audit_session_factory", SessionLocal
                 )
+                try:
+                    with session_factory() as session:
+                        session.add(
+                            AuditEvent(
+                                request_id=request_id,
+                                correlation_id=correlation_id,
+                                actor_id=actor_id,
+                                method=request.method,
+                                path=request.url.path[:512],
+                                status_code=status_code,
+                                client_ip=(
+                                    request.client.host if request.client else None
+                                ),
+                                user_agent=request.headers.get("user-agent", "")[:512]
+                                or None,
+                            )
+                        )
+                        session.commit()
+                except Exception:
+                    logger.exception(
+                        "Failed to persist audit event request_id=%s", request_id
+                    )
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Correlation-ID"] = correlation_id
         return response
