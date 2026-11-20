@@ -161,6 +161,63 @@ class ChurnInferenceTests(unittest.TestCase):
             missing["imputed_value"], self.parameters["logistic"]["imputer_medians"][0]
         )
 
+    def test_rejects_model_replacement_between_parse_and_digest(self):
+        parameter_path = self.model_dir / "model_parameters.json"
+        replacement = {
+            **self.parameters,
+            "logistic": {
+                **self.parameters["logistic"],
+                "intercept": [self.parameters["logistic"]["intercept"][0] + 1],
+            },
+        }
+        original_hash = sha256(parameter_path)
+        original_intercept = self.parameters["logistic"]["intercept"][0]
+        real_read_text = Path.read_text
+        real_read_bytes = Path.read_bytes
+        replaced = False
+
+        def swap_after_read(real):
+            def wrapper(path, *args, **kwargs):
+                nonlocal replaced
+                result = real(path, *args, **kwargs)
+                if path == parameter_path and not replaced:
+                    replaced = True
+                    write_json(parameter_path, replacement)
+                return result
+
+            return wrapper
+
+        with (
+            patch.object(Path, "read_text", swap_after_read(real_read_text)),
+            patch.object(Path, "read_bytes", swap_after_read(real_read_bytes)),
+        ):
+            try:
+                model = load_model(self.model_dir)
+            except ValueError:
+                return  # fail-closed on detected replacement is acceptable
+        self.assertTrue(replaced)
+        self.assertEqual(model.parameters_sha256, original_hash)
+        self.assertEqual(model.intercept, original_intercept)
+
+    def test_run_rejects_model_changes_before_publishing(self):
+        source = self.feature_dir()
+        output = self.root / "predictions"
+        real_predict = predict_rows
+
+        def mutate_after_scoring(*args, **kwargs):
+            result = real_predict(*args, **kwargs)
+            path = self.model_dir / "experiment_manifest.json"
+            path.write_bytes(path.read_bytes() + b" ")
+            return result
+
+        with patch(
+            "services.data.models.churn_inference.predict_rows",
+            side_effect=mutate_after_scoring,
+        ):
+            with self.assertRaisesRegex(ValueError, "Model artifacts changed"):
+                run(self.model_dir, source, output, GENERATED)
+        self.assertFalse(output.exists())
+
     def test_hashes_all_outputs_before_loading_and_rejects_tampering(self):
         for name in (
             "evaluation.json",

@@ -10,6 +10,7 @@ contributions of the chosen linear model, not causal business reason codes.
 
 import argparse
 import csv
+import hashlib
 import json
 import math
 from dataclasses import dataclass
@@ -65,6 +66,8 @@ class ChurnModel:
     scaler_scale: tuple[float, ...]
     imputer_medians: tuple[float, ...]
     parameters_sha256: str
+    manifest_sha256: str
+    artifact_sha256: dict[str, str]
     train_cutoffs: tuple[str, ...]
 
 
@@ -73,7 +76,8 @@ def load_model(experiment_dir: Path) -> ChurnModel:
     experiment_dir = Path(experiment_dir)
     paths = {name: experiment_dir / name for name in _OUTPUT_NAMES}
     manifest_path = experiment_dir / "experiment_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_bytes = manifest_path.read_bytes()
+    manifest = json.loads(manifest_bytes.decode("utf-8"))
     if (
         manifest.get("development_only") is not True
         or manifest.get("serving_ready") is not False
@@ -82,12 +86,17 @@ def load_model(experiment_dir: Path) -> ChurnModel:
     if manifest.get("model_version") != MODEL_VERSION:
         raise ValueError("Unexpected model version")
     expected_hashes = manifest.get("output_sha256", {})
+    raw_bytes: dict[str, bytes] = {}
     for name, path in paths.items():
-        if expected_hashes.get(name) != sha256(path):
+        data = path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        if expected_hashes.get(name) != digest:
             raise ValueError(f"{name} checksum mismatch against experiment_manifest")
-    parameters = json.loads(paths["model_parameters.json"].read_text(encoding="utf-8"))
-    report = json.loads(paths["evaluation.json"].read_text(encoding="utf-8"))
-    json.loads(paths["holdout_predictions.json"].read_text(encoding="utf-8"))
+        raw_bytes[name] = data
+    parameters_sha256 = hashlib.sha256(raw_bytes["model_parameters.json"]).hexdigest()
+    parameters = json.loads(raw_bytes["model_parameters.json"].decode("utf-8"))
+    report = json.loads(raw_bytes["evaluation.json"].decode("utf-8"))
+    json.loads(raw_bytes["holdout_predictions.json"].decode("utf-8"))
     if (
         parameters.get("model_version") != MODEL_VERSION
         or parameters.get("feature_version") != FEATURE_VERSION
@@ -148,7 +157,11 @@ def load_model(experiment_dir: Path) -> ChurnModel:
         scaler_mean=tuple(scaler_mean),
         scaler_scale=tuple(scaler_scale),
         imputer_medians=tuple(imputer_medians),
-        parameters_sha256=sha256(paths["model_parameters.json"]),
+        parameters_sha256=parameters_sha256,
+        manifest_sha256=hashlib.sha256(manifest_bytes).hexdigest(),
+        artifact_sha256={
+            name: hashlib.sha256(data).hexdigest() for name, data in raw_bytes.items()
+        },
         train_cutoffs=train_cutoffs,
     )
 
@@ -341,6 +354,12 @@ def run(
     after = {name: sha256(path) for name, path in feature_paths.items()}
     if after != before:
         raise ValueError("Input changed during prediction")
+    model_files = {
+        "experiment_manifest.json": model.manifest_sha256,
+        **model.artifact_sha256,
+    }
+    if any(sha256(model_dir / name) != digest for name, digest in model_files.items()):
+        raise ValueError("Model artifacts changed during prediction")
     output_dir.mkdir(parents=True)
     (output_dir / "predictions.json").write_text(
         json.dumps(predictions, indent=2, sort_keys=True, allow_nan=False) + "\n",
