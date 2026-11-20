@@ -17,9 +17,7 @@ def _case_insensitive_ascii(value: str) -> str:
 
 EMAIL_SCHEMA_PATTERN = (
     r"^(?![^@\s]+@(?:[^.@\s]+\.)*(?:"
-    + "|".join(
-        _case_insensitive_ascii(suffix) for suffix in _RESERVED_EMAIL_SUFFIXES
-    )
+    + "|".join(_case_insensitive_ascii(suffix) for suffix in _RESERVED_EMAIL_SUFFIXES)
     + r")$)(?=[^@]{1,64}@)"
     + r"[A-Za-z0-9_%+\-]+(?:\.[A-Za-z0-9_%+\-]+)*@"
     + r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
