@@ -31,9 +31,9 @@ import {
 } from 'lucide-react'
 import { api, ApiError, getStoredToken, storeToken } from './api'
 import { GoldenSnapshotsPanel } from './GoldenSnapshotsPanel'
-import type { ApiCampaign, ApiCustomer, ApiDecision, ApiModelPredictionRecord, ApiModelPredictionRun, ApiReview, ApiUser } from './api'
+import type { ApiAuditEvent, ApiCampaign, ApiCustomer, ApiDecision, ApiModelPredictionRecord, ApiModelPredictionRun, ApiReview, ApiUser } from './api'
 
-type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring' | 'models'
+type Page = 'dashboard' | 'customers' | 'campaigns' | 'reviews' | 'decisions' | 'monitoring' | 'governance' | 'models'
 
 type Customer = {
   apiId: number
@@ -42,6 +42,9 @@ type Customer = {
   initials: string
   segment: string
   value: string
+  ltv: number | null
+  churnRisk: string | null
+  goldenCustomerId: string | null
   lastSeen: string
   email: string
   phone: string
@@ -84,9 +87,11 @@ type Decision = {
   customer: string
   recommendation: string
   rationale: string
-  status: 'Proposed' | 'Overridden'
+  status: 'Proposed' | 'Overridden' | 'Evaluated'
   selected?: string
   reason?: string
+  engineVersion?: string
+  noActionReason?: string | null
 }
 
 function mapCustomer(row: ApiCustomer): Customer {
@@ -98,6 +103,9 @@ function mapCustomer(row: ApiCustomer): Customer {
     initials: row.full_name.split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase(),
     segment: row.segment,
     value: row.ltv === null ? 'Belum tersedia' : new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(row.ltv),
+    ltv: row.ltv,
+    churnRisk: row.churn_risk,
+    goldenCustomerId: row.golden_customer_id,
     lastSeen: new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium' }).format(new Date(row.created_at)),
     email: row.email,
     phone: '—',
@@ -169,9 +177,11 @@ function mapDecision(row: ApiDecision): Decision {
     customer: `${row.customer_name} · ${row.customer_code}`,
     recommendation: row.recommended_action,
     rationale: typeof explanation === 'string' && explanation.trim() ? explanation : 'Alasan belum tersedia',
-    status: row.status === 'overridden' ? 'Overridden' : 'Proposed',
+    status: row.status === 'overridden' ? 'Overridden' : row.status === 'accepted' ? 'Evaluated' : 'Proposed',
     selected: row.selected_action ?? undefined,
     reason: row.override_reason ?? undefined,
+    engineVersion: typeof row.rationale.engine_version === 'string' ? row.rationale.engine_version : undefined,
+    noActionReason: typeof row.rationale.no_action_reason === 'string' ? row.rationale.no_action_reason : null,
   }
 }
 
@@ -306,10 +316,11 @@ function App() {
     }
   }
 
-  async function transitionCampaign(name: string, status: Campaign['status']) {
+  async function transitionCampaign(campaignId: number, status: Campaign['status']) {
     if (!token) return
-    const campaign = campaigns.find((item) => item.name === name)
+    const campaign = campaigns.find((item) => item.apiId === campaignId)
     if (!campaign) return
+    const name = campaign.name
     let successNotice = `Status kampanye "${name}" diperbarui menjadi ${status}.`
     try {
       if (campaign.status === 'Draft' && status === 'Pending approval') await api.submitCampaign(token, campaign.apiId)
@@ -385,6 +396,20 @@ function App() {
     }
   }
 
+  async function evaluateNBA(customerId: number) {
+    if (!token) return
+    try {
+      const result = await api.evaluateDecision(token, customerId)
+      await refreshWorkspace(token, user?.roles ?? [])
+      const explanation = result.selected_action === 'NO_ACTION'
+        ? `NBA memilih NO_ACTION karena data consent, skor serving, atau input kelayakan belum tersedia. Engine ${result.engine_version}.`
+        : `NBA menghasilkan ${result.selected_action} dengan engine ${result.engine_version}.`
+      setNotice(explanation)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Gagal menjalankan evaluasi NBA.')
+    }
+  }
+
   if (authLoading) return <LoadingScreen />
   if (!token || !user) return <LoginScreen onLogin={handleLogin} error={apiError} />
   const canManageCampaigns = user.roles.some((role) => ['admin', 'campaign_manager'].includes(role))
@@ -428,13 +453,13 @@ function App() {
 
         <div className="nav-label tools-label">GOVERNANCE & NFR</div>
         <nav className="main-nav" aria-label="Governance">
-          <NavItem active={false} icon={<WalletCards size={18} />} label="Skema data" onClick={() => setNotice('Skema data: core, stg, feat, ml, dec, act, msr, gov')} />
-          <NavItem active={false} icon={<ShieldCheck size={18} />} label="RBAC & Audit Service" onClick={() => setNotice('JWT Auth + bcrypt + append-only audit_event (correlation_id)')} />
+          <NavItem active={page === 'governance'} icon={<ShieldCheck size={18} />} label="Governance, RBAC & Audit" onClick={() => setPage('governance')} />
+          <NavItem active={false} icon={<WalletCards size={18} />} label="Customer 360 & Golden ID" onClick={() => setPage('customers')} />
         </nav>
 
         <div className="sidebar-spacer" />
         <div className="sidebar-bottom">
-          <button className="plain-nav" onClick={() => setNotice('CI/CD Pipeline: GitHub Actions + mypy + Schemathesis + T-SEC-03 Allowlist')}><CircleHelp size={17} /> CI/CD & Security</button>
+          <button className="plain-nav" onClick={() => setPage('governance')}><CircleHelp size={17} /> CI/CD & Security</button>
           <button className="plain-nav" onClick={logout}><LogOut size={17} /> Keluar</button>
           <div className="profile-row">
           <div className="avatar avatar-dark">{user.email.slice(0, 2).toUpperCase()}</div>
@@ -499,11 +524,13 @@ function App() {
               onOverride={applyHumanOverride}
               customers={customerRows}
               onCreate={createNBARecommendation}
+              onEvaluate={evaluateNBA}
               canCreate={canCreateNBA}
               canOverride={canOverrideNBA}
             />
           )}
           {page === 'monitoring' && <MonitoringPage token={token ?? ''} data={monitoringData} canTrace={canTrace} />}
+          {page === 'governance' && <GovernancePage token={token} user={user} />}
           {page === 'models' && user.roles.some((role) => ['admin', 'analyst'].includes(role)) && <ModelPredictionReviewPage token={token} userId={user.id} canLinkIdentity={user.roles.includes('admin')} />}
         </main>
       </div>
@@ -528,6 +555,7 @@ function pageTitle(page: Page) {
     reviews: 'Antrean Manual Review Identitas',
     decisions: 'Layar Eksekusi NBA & Human Override',
     monitoring: 'Dashboard Monitoring, Drift & Audit Trace',
+    governance: 'Governance, RBAC & Audit Trail',
     models: 'Review output model Moses',
   }[page]
 }
@@ -643,15 +671,33 @@ function SegmentRow({ label, count, percent, tone }: { label: string; count: str
 }
 
 function CustomerPage({ customers: rows, selected, provenance, onSelect, search, onSearch }: { customers: Customer[]; selected: Customer | null; provenance: Record<string, unknown> | null; onSelect: (customer: Customer) => void; search: string; onSearch: (value: string) => void }) {
+  const [segmentFilter, setSegmentFilter] = useState('all')
+  const segments = [...new Set(rows.map((customer) => customer.segment))].sort()
+  const visibleRows = segmentFilter === 'all' ? rows : rows.filter((customer) => customer.segment === segmentFilter)
+
+  function exportCustomers() {
+    const quote = (value: string | number | null) => `"${String(value ?? '').replaceAll('"', '""')}"`
+    const csv = [
+      ['customer_code', 'full_name', 'email', 'segment', 'ltv_idr', 'churn_risk', 'golden_customer_id'],
+      ...visibleRows.map((customer) => [customer.id, customer.name, customer.email, customer.segment, customer.ltv, customer.churnRisk, customer.goldenCustomerId]),
+    ].map((line) => line.map(quote).join(',')).join('\r\n')
+    const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'vteki-customers.csv'
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
   return <>
-    <PageHeading eyebrow="CUSTOMER DATA PLATFORM" title="Customer 360 & Provenance" subtitle="Tampilan menyeluruh pelanggan dengan riwayat data provenance dan consent." action={<><button className="button button-secondary"><Filter size={15} /> Filter Segment</button><button className="button button-primary"><Download size={15} /> Ekspor Data</button></>} />
+    <PageHeading eyebrow="CUSTOMER DATA PLATFORM" title="Customer 360 & Provenance" subtitle="Tampilan profil, identitas Golden Customer, dan provenance yang benar-benar tersedia di API." action={<><label className="customer-filter-control"><Filter size={15} /><span className="sr-only">Filter segmen</span><select aria-label="Filter segmen" value={segmentFilter} onChange={(event) => setSegmentFilter(event.target.value)}><option value="all">Semua segmen</option>{segments.map((segment) => <option key={segment} value={segment}>{segment}</option>)}</select></label><button className="button button-primary" onClick={exportCustomers}><Download size={15} /> Ekspor CSV</button></>} />
     <div className="customer-layout">
       <section className="panel customer-list-panel">
-        <div className="list-toolbar"><div className="inline-search"><Search size={16} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Cari pelanggan berdasarkan kode/nama" aria-label="Search customers" /></div><button className="icon-button filter-icon" aria-label="Filter customers"><Filter size={16} /></button></div>
-        <div className="customer-count"><b>Semua Pelanggan</b><span>{rows.length}</span><ChevronDown size={14} /></div>
-        <CustomerTable rows={rows} onSelect={onSelect} selectedId={selected?.id} />
-        {rows.length === 0 && <div className="empty-state">{search ? `Tidak ada pelanggan dengan kata kunci “${search}”.` : 'Belum ada customer di API.'}</div>}
-        <div className="list-footer">Menampilkan {rows.length} pelanggan dari API</div>
+        <div className="list-toolbar"><div className="inline-search"><Search size={16} /><input value={search} onChange={(event) => onSearch(event.target.value)} placeholder="Cari pelanggan berdasarkan kode/nama" aria-label="Search customers" /></div></div>
+        <div className="customer-count"><b>{segmentFilter === 'all' ? 'Semua Pelanggan' : segmentFilter}</b><span>{visibleRows.length}</span><ChevronDown size={14} /></div>
+        <CustomerTable rows={visibleRows} onSelect={onSelect} selectedId={selected?.id} />
+        {visibleRows.length === 0 && <div className="empty-state">{search ? `Tidak ada pelanggan dengan kata kunci “${search}”.` : 'Belum ada customer pada filter ini.'}</div>}
+        <div className="list-footer">Menampilkan {visibleRows.length} pelanggan dari API</div>
       </section>
       {selected && <CustomerProfile customer={selected} provenance={provenance} />}
     </div>
@@ -667,13 +713,13 @@ function CustomerProfile({ customer, provenance }: { customer: Customer; provena
   const audit = (provenance?.audit as Array<Record<string, unknown>> | undefined) ?? []
   const traces = (provenance?.decision_traces as Array<Record<string, unknown>> | undefined) ?? []
   return <aside className="panel profile-panel">
-    <div className="profile-cover"><span className="cover-orbit cover-orbit-one" /><span className="cover-orbit cover-orbit-two" /><button className="more-button cover-more" aria-label="More customer options"><MoreHorizontal size={20} /></button><div className={`profile-avatar avatar-${customer.color}`}>{customer.initials}</div></div>
+    <div className="profile-cover"><span className="cover-orbit cover-orbit-one" /><span className="cover-orbit cover-orbit-two" /><button className="more-button cover-more" aria-label="Opsi profil belum tersedia" title="Opsi profil belum tersedia" disabled><MoreHorizontal size={20} /></button><div className={`profile-avatar avatar-${customer.color}`}>{customer.initials}</div></div>
     <div className="profile-main">
-      <div className="profile-name-row"><div><h2>{customer.name}</h2><span>{customer.id}</span></div><span className="segment-chip">{customer.segment}</span></div>
+      <div className="profile-name-row"><div><h2>{customer.name}</h2><span>{customer.id}</span>{customer.goldenCustomerId && <small className="golden-link-label">Golden Customer · {customer.goldenCustomerId}</small>}</div><span className="segment-chip">{customer.segment}</span></div>
       <p className="profile-location">Tercatat sejak {customer.since}</p>
-      <div className="profile-actions"><button className="button button-secondary" disabled title="Tidak ada pengiriman pesan eksternal pada platform ini"><ShieldCheck size={14} /> Simulator saja</button><button className="button button-secondary" aria-label="Opsi profil"><MoreHorizontal size={17} /></button></div>
+      <div className="profile-actions"><button className="button button-secondary" disabled title="Tidak ada pengiriman pesan eksternal pada platform ini"><ShieldCheck size={14} /> Simulator saja</button><button className="button button-secondary" aria-label="Opsi profil belum tersedia" title="Opsi profil belum tersedia" disabled><MoreHorizontal size={17} /></button></div>
       <div className="profile-stats"><div><small>Nilai seumur hidup</small><b>{customer.value}</b></div><div><small>Total kunjungan</small><b>{customer.visits}</b></div></div>
-      <div className="profile-section"><div className="profile-section-title">KONTAK VERIFIKASI <button aria-label="Edit contact details"><MoreHorizontal size={16} /></button></div><div className="contact-line"><span className="contact-icon">@</span>{customer.email}</div><div className="contact-line"><span className="contact-icon">#</span>{customer.phone}</div></div>
+      <div className="profile-section"><div className="profile-section-title">KONTAK TERCATAT <button aria-label="Edit kontak tidak tersedia" title="Edit kontak tidak tersedia" disabled><MoreHorizontal size={16} /></button></div><div className="contact-line"><span className="contact-icon">@</span>{customer.email}</div><div className="contact-line"><span className="contact-icon">#</span>{customer.phone}</div></div>
       <div className="profile-section"><div className="profile-section-title">REKOMENDASI TERSIMPAN <Sparkles size={15} /></div><div className="next-action"><div className="next-action-icon"><Gift size={17} /></div><div><b>{customer.nextBest || 'Belum ada rekomendasi'}</b></div></div></div>
       
       <div className="profile-section">
@@ -711,12 +757,12 @@ function CustomerProfile({ customer, provenance }: { customer: Customer; provena
         </div>
       </div>
 
-      <div className="consent-footer"><ShieldCheck size={15} /><span>Consent detail belum diekspos oleh Customer API</span><button aria-label="Consent details"><ArrowRight size={14} /></button></div>
+      <div className="consent-footer"><ShieldCheck size={15} /><span>Consent detail belum tersedia dari sumber data; channel customer tetap diblokir.</span></div>
     </div>
   </aside>
 }
 
-function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns: Campaign[]; canManage: boolean; onNew: () => void; onTransition: (name: string, status: Campaign['status']) => void }) {
+function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns: Campaign[]; canManage: boolean; onNew: () => void; onTransition: (campaignId: number, status: Campaign['status']) => void }) {
   const [activeFilter, setActiveFilter] = useState('All campaigns')
   const visible = campaigns.filter((campaign) => activeFilter === 'All campaigns' || campaign.status === activeFilter)
   const runningCount = campaigns.filter((campaign) => ['Scheduled', 'Running'].includes(campaign.status)).length
@@ -741,7 +787,6 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
           </button>
         ))}
       </div>
-      <button className="button button-secondary"><Filter size={15} /> Filter</button>
     </div>
 
     <section className="panel campaign-table-panel">
@@ -775,20 +820,20 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
               <td>
                 <div className="action-button-group">
                   {!canManage ? <span className="text-muted-sm">Read only</span> : campaign.status === 'Draft' ? (
-                    <button className="button-sm button-approve" onClick={() => onTransition(campaign.name, 'Pending approval')}>
+                    <button className="button-sm button-approve" onClick={() => onTransition(campaign.apiId, 'Pending approval')}>
                       <FileSearch size={13} /> Ajukan Approval
                     </button>
                   ) : campaign.status === 'Pending approval' ? (
                     <>
-                      <button className="button-sm button-approve" onClick={() => onTransition(campaign.name, 'Approved')}>
+                      <button className="button-sm button-approve" onClick={() => onTransition(campaign.apiId, 'Approved')}>
                         <Check size={13} /> Setujui
                       </button>
-                      <button className="button-sm button-reject" onClick={() => onTransition(campaign.name, 'Rejected')}>
+                      <button className="button-sm button-reject" onClick={() => onTransition(campaign.apiId, 'Rejected')}>
                         <X size={13} /> Tolak
                       </button>
                     </>
                   ) : campaign.status === 'Approved' ? (
-                    <button className="button-sm button-launch" onClick={() => onTransition(campaign.name, 'Live')}>
+                    <button className="button-sm button-launch" onClick={() => onTransition(campaign.apiId, 'Live')}>
                       <Send size={13} /> Peluncuran Sim
                     </button>
                   ) : (
@@ -801,7 +846,7 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
         </tbody>
       </table>
       {visible.length === 0 && <div className="empty-state">Tidak ada kampanye pada kategori ini.</div>}
-      <div className="list-footer">Menampilkan {visible.length} dari {campaigns.length} kampanye <button>Muat Lebih Banyak</button></div>
+      <div className="list-footer">Menampilkan {visible.length} dari {campaigns.length} kampanye dari API</div>
     </section>
   </>
 }
@@ -891,7 +936,7 @@ function IdentityReviewPage({ reviews, onResolve, onCreate, canResolve }: { revi
   </>
 }
 
-function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate, canCreate, canOverride }: { decisions: Decision[]; onOverride: (id: string, selected: string, reason: string) => void; customers: Customer[]; onCreate: (customerId: number, action: string, rationale: Record<string, unknown>) => void; canCreate: boolean; canOverride: boolean }) {
+function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate, onEvaluate, canCreate, canOverride }: { decisions: Decision[]; onOverride: (id: string, selected: string, reason: string) => void; customers: Customer[]; onCreate: (customerId: number, action: string, rationale: Record<string, unknown>) => void; onEvaluate: (customerId: number) => void; canCreate: boolean; canOverride: boolean }) {
   const [selectedDecision, setSelectedDecision] = useState<Decision | null>(null)
   const [customAction, setCustomAction] = useState('')
   const [reason, setReason] = useState('')
@@ -899,6 +944,7 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
   const [newCustomerId, setNewCustomerId] = useState('')
   const [newAction, setNewAction] = useState('')
   const [newReason, setNewReason] = useState('')
+  const [evaluationCustomerId, setEvaluationCustomerId] = useState('')
 
   function handleOverrideSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -914,9 +960,10 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
       eyebrow="NEXT-BEST-ACTION & HUMAN OVERRIDE" 
       title="Layar Eksekusi NBA & Interface Human Override" 
       subtitle="Proposal Next-Best-Action yang tersimpan dan fasilitas Human Override manual dengan pencatatan alasannya."
-      action={canCreate && <button className="button button-primary" onClick={() => setCreateOpen((open) => !open)} disabled={!customerRows.length}><Plus size={15} /> Buat proposal NBA</button>}
+      action={canCreate && <button className="button button-secondary" onClick={() => setCreateOpen((open) => !open)} disabled={!customerRows.length}><Plus size={15} /> Proposal manual</button>}
     />
-    {createOpen && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customer = customerRows.find((item) => item.apiId === Number(newCustomerId)); if (!customer || !newAction.trim() || newReason.trim().length < 5) return; onCreate(customer.apiId, newAction.trim(), { source: 'manual', reason: newReason.trim() }); setCreateOpen(false); setNewAction(''); setNewReason('') }}><label className="field-label">Pelanggan<select required value={newCustomerId} onChange={(event) => setNewCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><label className="field-label">Tindakan yang diusulkan<input required value={newAction} onChange={(event) => setNewAction(event.target.value)} placeholder="Jelaskan tindakan yang disarankan" /></label><label className="field-label">Alasan dengan bahasa sederhana<textarea required minLength={5} rows={3} value={newReason} onChange={(event) => setNewReason(event.target.value)} placeholder="Contoh: pelanggan sudah lama tidak bertransaksi; hubungi untuk menanyakan kebutuhan mereka." /></label><button className="button button-primary" type="submit">Simpan proposal</button></form>}
+    {canCreate && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customerId = Number(evaluationCustomerId); if (!customerId) return; onEvaluate(customerId) }}><div><div className="panel-kicker">EVALUASI PERSISTEN · CHRIS NBA ENGINE</div><p className="empty-state">Menjalankan engine pada customer terpilih. Input yang belum tersedia akan diblokir dan dicatat, bukan diisi dengan angka contoh.</p></div><label className="field-label">Pelanggan<select required value={evaluationCustomerId} onChange={(event) => setEvaluationCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><button className="button button-primary" type="submit" disabled={!customerRows.length}>Jalankan evaluasi NBA</button></form>}
+    {createOpen && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customer = customerRows.find((item) => item.apiId === Number(newCustomerId)); if (!customer || !newAction.trim() || newReason.trim().length < 5) return; onCreate(customer.apiId, newAction.trim(), { source: 'manual', reason: newReason.trim() }); setCreateOpen(false); setNewAction(''); setNewReason('') }}><div className="field-full"><b>Proposal manual</b><small>Ditulis pengguna, bukan hasil model atau evaluasi Chris NBA Engine.</small></div><label className="field-label">Pelanggan<select required value={newCustomerId} onChange={(event) => setNewCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><label className="field-label">Tindakan yang diusulkan<input required value={newAction} onChange={(event) => setNewAction(event.target.value)} placeholder="Tulis proposal untuk ditinjau" /></label><label className="field-label">Alasan<textarea required minLength={5} rows={3} value={newReason} onChange={(event) => setNewReason(event.target.value)} placeholder="Jelaskan alasan proposal manual." /></label><button className="button button-primary" type="submit">Simpan proposal manual</button></form>}
     <div className="decision-grid">
       {decisions.map(d => (
         <article className="panel decision-card" key={d.id}>
@@ -925,14 +972,15 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
               <span className="nba-id">{d.id}</span>
               <h3>{d.customer}</h3>
             </div>
-            <span className={`status-badge ${d.status === 'Overridden' ? 'status-scheduled' : 'status-live'}`}>{d.status}</span>
+            <span className={`status-badge ${d.status === 'Overridden' ? 'status-scheduled' : d.status === 'Evaluated' ? 'status-rejected' : 'status-live'}`}>{d.status === 'Evaluated' ? 'Dievaluasi · NO_ACTION' : d.status}</span>
           </div>
 
           <div className="decision-body">
             <div className="nba-box">
-              <div className="nba-label">PROPOSAL NEXT-BEST-ACTION:</div>
+              <div className="nba-label">{d.status === 'Evaluated' ? 'HASIL ENGINE:' : 'PROPOSAL NEXT-BEST-ACTION:'}</div>
               <div className="nba-text"><Sparkles size={16} /> {d.recommendation}</div>
               <small>{d.rationale}</small>
+              {d.engineVersion && <small>Engine {d.engineVersion} · serving belum diaktifkan · NO_ACTION tidak dapat dipakai untuk kampanye.</small>}
             </div>
 
             {d.status === 'Overridden' && (
@@ -1407,5 +1455,69 @@ function LoginScreen({ onLogin, error }: { onLogin: (email: string, password: st
 }
 
 function StatusBadge({ status }: { status: Campaign['status'] }) { return <span className={`status-badge status-${status.toLowerCase().replace(' ', '-')}`}><i />{status}</span> }
+
+function GovernancePage({ token, user }: { token: string; user: ApiUser }) {
+  const canReadAudit = user.roles.some((role) => ['admin', 'analyst'].includes(role))
+  const [events, setEvents] = useState<ApiAuditEvent[]>([])
+  const [trace, setTrace] = useState<{ correlation_id: string; audit_events: ApiAuditEvent[]; decision_steps?: Array<Record<string, unknown>> } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function loadEvents() {
+    if (!canReadAudit) return
+    setBusy(true)
+    try {
+      setEvents(await api.auditEvents(token, 100))
+      setError('')
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Gagal memuat audit trail.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  useEffect(() => { void loadEvents() }, [token, canReadAudit])
+
+  async function openTrace(correlationId: string) {
+    try {
+      setTrace(await api.auditTrace(token, correlationId))
+      setError('')
+    } catch (problem) {
+      setError(problem instanceof Error ? problem.message : 'Gagal memuat correlation trace.')
+    }
+  }
+
+  const scopes = [
+    { name: 'Baca data pelanggan, campaign, dan rekomendasi', roles: 'admin · analyst · campaign_manager · operator' },
+    { name: 'Tinjau model Moses dan baca audit detail', roles: 'admin · analyst' },
+    { name: 'Putuskan manual review identitas', roles: 'admin · operator' },
+    { name: 'Buat evaluasi NBA / proposal manual', roles: 'admin · analyst' },
+    { name: 'Persetujuan campaign dan human override', roles: 'admin · campaign_manager' },
+  ]
+
+  return <>
+    <PageHeading eyebrow="CONTROL PLANE" title="Governance, RBAC & Audit Trail" subtitle="Peran berasal dari API autentikasi; izin tetap ditegakkan server-side. Setiap mutasi dan evaluasi dapat ditelusuri lewat correlation ID." action={canReadAudit && <button className="button button-secondary" onClick={() => void loadEvents()} disabled={busy}><RotateCcw size={15} /> {busy ? 'Memuat…' : 'Muat ulang audit'}</button>} />
+    <div className="governance-summary-grid">
+      <article className="panel governance-summary"><span>AKUN AKTIF</span><b>{user.email}</b><small>User ID {user.id}</small></article>
+      <article className="panel governance-summary"><span>ROLE DARI SERVER</span><div className="governance-role-list">{user.roles.map((role) => <span className="role-chip" key={role}>{role}</span>)}</div><small>UI hanya menampilkan aksi; API tetap menjadi sumber otorisasi.</small></article>
+      <article className="panel governance-summary"><span>AUDIT ACCESS</span><b>{canReadAudit ? 'Tersedia' : 'Terbatas untuk role ini'}</b><small>{canReadAudit ? `${events.length} event terakhir dimuat dari API.` : 'Detail audit memerlukan admin atau analyst.'}</small></article>
+    </div>
+    <div className="governance-grid">
+      <section className="panel governance-panel">
+        <div className="panel-heading"><div><div className="panel-kicker">SERVER-SIDE AUTHORIZATION</div><h2>Cakupan RBAC</h2></div></div>
+        <div className="governance-scope-list">{scopes.map((scope) => <div className="governance-scope" key={scope.name}><ShieldCheck size={16} /><div><b>{scope.name}</b><small>{scope.roles}</small></div></div>)}</div>
+        <div className="schema-chip-list">{['core', 'identity', 'customer360', 'segmentation', 'feat', 'ml', 'dec', 'act', 'msr', 'gov'].map((schema) => <span key={schema}>{schema}</span>)}</div>
+      </section>
+      <section className="panel governance-panel audit-events-panel">
+        <div className="panel-heading"><div><div className="panel-kicker">APPEND-ONLY EVENT STORE</div><h2>Aktivitas audit terbaru</h2></div></div>
+        {!canReadAudit && <div className="empty-state">Akses baca audit dibatasi. Role aktif Anda tetap dapat menggunakan halaman operasional yang diizinkan API.</div>}
+        {error && <p className="field-error" role="alert">{error}</p>}
+        {canReadAudit && events.length === 0 && !busy && <div className="empty-state">Belum ada audit event tersimpan.</div>}
+        {canReadAudit && events.length > 0 && <div className="governance-event-list">{events.map((event) => <article className="governance-event" key={event.id}><div><b>{event.event_type}</b><small>{event.method} {event.path} · status {event.status_code} · {new Date(event.occurred_at).toLocaleString('id-ID')}</small><code>{event.correlation_id}</code></div><button className="button button-secondary" onClick={() => void openTrace(event.correlation_id)}>Trace</button></article>)}</div>}
+      </section>
+    </div>
+    {trace && <section className="panel governance-panel governance-trace" aria-live="polite"><div className="panel-heading"><div><div className="panel-kicker">CORRELATION TRACE</div><h2>{trace.correlation_id}</h2></div><button className="icon-button" aria-label="Tutup trace" onClick={() => setTrace(null)}><X size={17} /></button></div>{trace.audit_events.map((event) => <div className="governance-trace-row" key={event.id}><time>{new Date(event.occurred_at).toLocaleString('id-ID')}</time><b>{event.event_type}</b><span>{event.method} {event.path} · {event.status_code}</span><small>{event.entity_type ?? 'request'} {event.entity_id ?? ''}</small></div>)}{trace.decision_steps?.map((step, index) => <pre key={`step-${index}`}>{JSON.stringify(step, null, 2)}</pre>)}{trace.audit_events.length === 0 && <div className="empty-state">Tidak ada event untuk correlation ID ini.</div>}</section>}
+  </>
+}
 
 export default App

@@ -151,6 +151,10 @@ def create_campaign(
             raise HTTPException(status_code=404, detail="NBA recommendation not found")
         if decision.status not in {"proposed", "overridden"}:
             raise HTTPException(status_code=409, detail="NBA recommendation is not available for campaign use")
+        if decision.selected_action or decision.recommended_action == "NO_ACTION":
+            action = decision.selected_action or decision.recommended_action
+            if action == "NO_ACTION":
+                raise HTTPException(status_code=409, detail="NO_ACTION decisions cannot be used for campaigns")
         target_customer = (
             db.query(Customer)
             .filter(Customer.id == decision.customer_id, Customer.is_demo.is_(False))

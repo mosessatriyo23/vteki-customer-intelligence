@@ -167,6 +167,75 @@ def test_rbac_rejects_analyst_and_allows_admin(client: TestClient):
     )
 
 
+def test_nba_evaluation_is_persisted_fail_closed_and_not_campaign_eligible(
+    client: TestClient,
+):
+    admin_token = token_for(client, "admin@example.com")
+    analyst_token = token_for(client, "analyst@example.com")
+    campaign_token = token_for(client, "campaign@example.com")
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
+    campaign_headers = {"Authorization": f"Bearer {campaign_token}"}
+
+    registered = client.post(
+        "/customers",
+        headers=admin_headers,
+        json={
+            "customer_code": "NBA-REAL-001",
+            "full_name": "Pelanggan Terdaftar",
+            "email": "nba-customer@example.com",
+            "segment": "Terdaftar",
+        },
+    )
+    assert registered.status_code == 201, registered.text
+    customer_id = registered.json()["id"]
+
+    denied = client.post(
+        "/decisions/next-best-actions/evaluate",
+        headers=campaign_headers,
+        json={"customer_id": customer_id},
+    )
+    assert denied.status_code == 403
+
+    evaluated = client.post(
+        "/decisions/next-best-actions/evaluate",
+        headers=analyst_headers,
+        json={"customer_id": customer_id},
+    )
+    assert evaluated.status_code == 201, evaluated.text
+    result = evaluated.json()
+    assert result["selected_action"] == "NO_ACTION"
+    assert result["status"] == "accepted"
+    assert result["engine_version"]
+    assert result["degraded_input"] is True
+    assert result["serving_ready"] is False
+
+    decisions = client.get(
+        "/governance/nba-decisions", headers=analyst_headers
+    ).json()
+    persisted = next(item for item in decisions if item["id"] == result["id"])
+    assert persisted["customer_code"] == "NBA-REAL-001"
+    assert persisted["rationale"]["serving_ready"] is False
+
+    blocked_campaign = client.post(
+        "/campaigns",
+        headers=campaign_headers,
+        json={
+            "name": "Campaign tanpa tindakan",
+            "target_segment": "Terdaftar",
+            "channel": "email_sim",
+            "nba_decision_id": result["id"],
+        },
+    )
+    assert blocked_campaign.status_code == 409
+    trace = client.get(
+        f"/audit/decision-trace/{evaluated.headers['x-correlation-id']}",
+        headers=analyst_headers,
+    )
+    assert trace.status_code == 200
+    assert trace.json()["decision_steps"]
+
+
 def test_login_rejects_invalid_password(client: TestClient):
     response = client.post(
         "/auth/login",

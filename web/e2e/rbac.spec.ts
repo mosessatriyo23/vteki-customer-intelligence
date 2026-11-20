@@ -19,7 +19,7 @@ async function login(page: Page, email: string) {
 
   await page.goto('/')
   await page.getByLabel('Email').fill(email)
-  await page.getByLabel('Password').fill(password)
+  await page.getByLabel('Kata sandi').fill(password)
   await page.getByRole('button', { name: 'Masuk' }).click()
 
   await expect(
@@ -52,24 +52,25 @@ async function getToken(
   return result.access_token as string
 }
 
+async function createCustomer(request: APIRequestContext) {
+  const token = await getToken(request, accounts.admin)
+  const suffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`
+  const customerResponse = await request.post(`${baseUrl}/api/customers`, {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      customer_code: `E2E-${suffix}`,
+      full_name: 'Pelanggan Acceptance Test',
+      email: `e2e-${suffix}@example.com`,
+      segment: 'E2E',
+    },
+  })
+  expect(customerResponse.status()).toBe(201)
+  return customerResponse.json() as Promise<{ id: number }>
+}
+
 async function createDecision(request: APIRequestContext) {
   const token = await getToken(request, accounts.admin)
-
-  const customerResponse = await request.get(
-    `${baseUrl}/api/customers`,
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    },
-  )
-
-  expect(customerResponse.ok()).toBeTruthy()
-
-  const customers = await customerResponse.json()
-  const customer = customers[0]
-
-  if (!customer?.id) {
-    throw new Error('Database E2E belum memiliki pelanggan.')
-  }
+  const customer = await createCustomer(request)
 
   const action = `E2E Override Test ${Date.now()}`
 
@@ -102,7 +103,7 @@ test.describe('Frontend RBAC - empat role', () => {
   test('Admin dapat mengakses fitur pengelolaan utama', async ({ page }) => {
     await login(page, accounts.admin)
 
-    await openPage(page, 'Campaigns & Approval')
+    await openPage(page, 'Kampanye & Persetujuan')
     await expect(
       page.getByRole('button', { name: 'Kampanye Baru' }),
     ).toBeVisible()
@@ -112,12 +113,12 @@ test.describe('Frontend RBAC - empat role', () => {
       page.getByRole('button', { name: 'Tambah kasus' }),
     ).toBeVisible()
 
-    await openPage(page, 'Next-Best-Action & Override')
+    await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Buat proposal NBA' }),
+      page.getByRole('button', { name: 'Proposal manual' }),
     ).toBeVisible()
 
-    await openPage(page, 'Monitoring & Audit Trace')
+    await openPage(page, 'Pemantauan & Audit')
     await expect(
       page.getByText('Jalankan Penelusuran Trace'),
     ).toBeVisible()
@@ -126,7 +127,7 @@ test.describe('Frontend RBAC - empat role', () => {
   test('Analyst dapat membuat NBA dan melihat audit trace', async ({ page }) => {
     await login(page, accounts.analyst)
 
-    await openPage(page, 'Campaigns & Approval')
+    await openPage(page, 'Kampanye & Persetujuan')
     await expect(
       page.getByRole('button', { name: 'Kampanye Baru' }),
     ).toHaveCount(0)
@@ -136,16 +137,16 @@ test.describe('Frontend RBAC - empat role', () => {
       page.getByRole('button', { name: 'Tambah kasus' }),
     ).toHaveCount(0)
 
-    await openPage(page, 'Next-Best-Action & Override')
+    await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Buat proposal NBA' }),
+      page.getByRole('button', { name: 'Proposal manual' }),
     ).toBeVisible()
 
     await expect(
       page.getByRole('button', { name: 'Human Override Manual' }),
     ).toHaveCount(0)
 
-    await openPage(page, 'Monitoring & Audit Trace')
+    await openPage(page, 'Pemantauan & Audit')
     await expect(
       page.getByText('Jalankan Penelusuran Trace'),
     ).toBeVisible()
@@ -154,7 +155,7 @@ test.describe('Frontend RBAC - empat role', () => {
   test('Operator hanya mendapat akses review identitas', async ({ page }) => {
     await login(page, accounts.operator)
 
-    await openPage(page, 'Campaigns & Approval')
+    await openPage(page, 'Kampanye & Persetujuan')
     await expect(
       page.getByRole('button', { name: 'Kampanye Baru' }),
     ).toHaveCount(0)
@@ -164,16 +165,16 @@ test.describe('Frontend RBAC - empat role', () => {
       page.getByRole('button', { name: 'Tambah kasus' }),
     ).toBeVisible()
 
-    await openPage(page, 'Next-Best-Action & Override')
+    await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Buat proposal NBA' }),
+      page.getByRole('button', { name: 'Proposal manual' }),
     ).toHaveCount(0)
 
     await expect(
       page.getByRole('button', { name: 'Human Override Manual' }),
     ).toHaveCount(0)
 
-    await openPage(page, 'Monitoring & Audit Trace')
+    await openPage(page, 'Pemantauan & Audit')
     await expect(
       page.getByText('Jalankan Penelusuran Trace'),
     ).toHaveCount(0)
@@ -186,7 +187,7 @@ test.describe('Frontend RBAC - empat role', () => {
     const decision = await createDecision(request)
 
     await login(page, accounts.campaign)
-    await openPage(page, 'Next-Best-Action & Override')
+    await openPage(page, 'Proposal Tindakan')
 
     const card = page.locator('.decision-card').filter({
       has: page.locator('.nba-text', {
@@ -257,10 +258,12 @@ test.describe('Frontend RBAC - empat role', () => {
 
   test('Campaign Manager menyelesaikan approval dan audit trace dapat direkonstruksi', async ({
     page,
+    request,
   }) => {
     const campaignName = `E2E Approval ${Date.now()}`
+    await createCustomer(request)
     await login(page, accounts.campaign)
-    await openPage(page, 'Campaigns & Approval')
+    await openPage(page, 'Kampanye & Persetujuan')
     await page.getByRole('button', { name: 'Kampanye Baru' }).click()
     await page.getByLabel('Nama Kampanye').fill(campaignName)
     await page
@@ -295,7 +298,7 @@ test.describe('Frontend RBAC - empat role', () => {
 
     await page.getByRole('button', { name: 'Keluar' }).click()
     await login(page, accounts.admin)
-    await openPage(page, 'Monitoring & Audit Trace')
+    await openPage(page, 'Pemantauan & Audit')
     await page
       .getByPlaceholder('Masukkan correlation_id workflow...')
       .fill(correlationId)

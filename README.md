@@ -36,6 +36,7 @@ Endpoint utama:
 - `GET /customers`, `GET /customers/{id}/provenance`, `GET/POST /identity-reviews`.
 - Campaign dibuat sebagai draft, dikirim untuk approval, `admin` atau `campaign_manager` dapat approve/reject, dan hanya campaign approved yang dapat diluncurkan.
 - `GET/POST /decisions/next-best-actions` dan endpoint `/override` untuk human override beralasan.
+- `POST /decisions/next-best-actions/evaluate` menjalankan Chris NBA Engine untuk customer terdaftar dan menyimpan hasil beserta versi engine, alasan, correlation ID, dan audit trace. Jika skor Moses yang serving-approved atau input consent/kelayakan belum tersedia, engine berjalan fail-closed dan menyimpan `NO_ACTION`; keputusan itu tidak dapat dipakai untuk campaign.
 - `GET /monitoring/dashboard`, `POST /monitoring/drift`, `POST /monitoring/measurements`.
 - `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`.
 
