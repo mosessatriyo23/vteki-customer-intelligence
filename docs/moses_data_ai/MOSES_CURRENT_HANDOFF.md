@@ -1,5 +1,13 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Pembaruan 2026-11-22 (baca dahulu)
+
+- PR #62 mengunci loader NBA ke record `CHURN` terbaru berdasarkan cutoff sebagai waktu; cutoff invalid, `SCHEMA_PARTIAL`, dan `INVALID_SCORE` tidak lolos. `usage_approved` tetap `None`; tidak ada skor development yang boleh dipakai NBA.
+- PR #63 menghubungkan formatter kalimat penjelasan kontribusi fitur ke producer kontrak churn (`prediction-contract-dev-v3`). Penjelasan ini **bukan alasan bisnis/keputusan** dan tidak mengubah status development-only/unapproved.
+- Slice terbaru menguji jalur producer → import review API → DB → baca ulang, termasuk checksum, versi model, review independen, dan penolakan serving. Golden Customer terdaftar tanpa application customer/mapping kini bisa dibaca tanpa `KeyError` (`mapping_candidate=None`). Tidak ada migrasi atau perubahan persetujuan.
+- Bukti lokal slice terbaru: 1698 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. **Ini bukan bukti PostgreSQL acceptance**; pengujian DB di slice ini memakai SQLite.
+- Tetap terbuka: sumber `usage_approved`, identitas reviewer/model author, worker scoring ke DB, kebijakan cutoffs/CLV/lifecycle dan sumber input non-score NBA. Lihat [panduan lintas tim](TEAM_ALIGNMENT_MVP_2026-11-21.md). Jangan baca status historis di bawah sebagai klaim selesai.
+
 ## Status terbaru 2026-11-21 — menggantikan seluruh status di bawah
 
 > Untuk pembagian kerja dan keputusan bersama dengan Christ/Marvin menuju MVP, baca [TEAM_ALIGNMENT_MVP_2026-11-21.md](TEAM_ALIGNMENT_MVP_2026-11-21.md). PR #58 menambah formatter kalimat alasan Indonesia; belum tersambung ke API/worker/UI.
