@@ -63,10 +63,12 @@ export type ApiCampaign = {
   } | null
   latest_measurement: {
     metric_name: string
-    observed_value: number
-    incremental_value: number
+    observed_value: number | null
+    incremental_value: number | null
     source_mode: 'simulated' | 'unclassified'
     measured_at: string
+    status?: string | null
+    measurement_status?: string | null
   } | null
 }
 export type ApiReview = {
@@ -89,6 +91,11 @@ export type ApiDecision = {
   customer_name: string
   recommended_action: string
   rationale: Record<string, unknown>
+  reason?: string | null
+  expected_value?: number | null
+  model_version?: string | null
+  serving_ready?: boolean | null
+  unavailable_sources?: string[]
   status: string
   selected_action: string | null
   overridden_by: number | null
@@ -196,7 +203,7 @@ export const api = {
   reviewModelPredictionRun: (token: string, runId: number, decision: 'reviewed' | 'rejected', reviewNote: string) => request<ApiModelPredictionRun>(`/model-predictions/runs/${runId}/review`, token, { method: 'POST', body: JSON.stringify({ decision, review_note: reviewNote }) }),
   createReview: (token: string, payload: { subject_reference: string; candidate_references: string[]; confidence: number; reason: string }) => request<{ id: number; status: string }>('/identity-reviews', token, { method: 'POST', body: JSON.stringify(payload) }),
   createDecision: (token: string, payload: { customer_id: number; recommended_action: string; rationale: Record<string, unknown> }) => request<{ id: number; status: string }>('/decisions/next-best-actions', token, { method: 'POST', body: JSON.stringify(payload) }),
-  evaluateDecision: (token: string, customerId: number) => request<{ id: number; status: string; selected_action: string; reason: string; engine_version: string; no_action_reason: string | null; degraded_input: boolean; serving_ready: false }>('/decisions/next-best-actions/evaluate', token, { method: 'POST', body: JSON.stringify({ customer_id: customerId }) }),
+  evaluateDecision: (token: string, customerId: number) => request<{ id: number; status: string; selected_action: string; reason: string; expected_value?: number | null; model_version?: string | null; engine_version?: string; no_action_reason: string | null; degraded_input: boolean; serving_ready: boolean; unavailable_sources?: string[] }>('/decisions/next-best-actions/evaluate', token, { method: 'POST', body: JSON.stringify({ customer_id: customerId }) }),
   overrideDecision: (token: string, id: number, selectedAction: string, reason: string) => request<Record<string, unknown>>(`/governance/nba-decisions/${id}/override`, token, { method: 'POST', body: JSON.stringify({ selected_action: selectedAction, override_reason: reason }) }),
   monitoring: (token: string) => request<{ drift: Array<Record<string, unknown>>; campaign_measurements: Array<Record<string, unknown>>; audit: Array<Record<string, unknown>>; pipeline_runs: Array<Record<string, unknown>> }>('/monitoring/dashboard', token),
   auditEvents: (token: string, limit = 100) => request<ApiAuditEvent[]>(`/audit/events?limit=${limit}`, token),
