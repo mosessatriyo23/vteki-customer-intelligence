@@ -105,6 +105,10 @@ type Decision = {
   reason?: string
   engineVersion?: string
   noActionReason?: string | null
+  expectedValue: number | null
+  modelVersion: string | null
+  servingReady: boolean | null
+  unavailableSources: string[]
 }
 
 function mapCustomer(row: ApiCustomer): Customer {
@@ -181,7 +185,14 @@ function mapReview(row: ApiReview): IdentityReview {
 }
 
 function mapDecision(row: ApiDecision): Decision {
-  const explanation = row.rationale.reason
+  const explanation = row.reason ?? row.rationale.reason
+  const unavailableValue = row.unavailable_sources ?? row.rationale.unavailable_sources
+  const unavailableSources = Array.isArray(unavailableValue)
+    ? unavailableValue.filter((source): source is string => typeof source === 'string')
+    : []
+  const expectedValue = row.expected_value ?? row.rationale.expected_value
+  const modelVersion = row.model_version ?? row.rationale.model_version
+  const servingReady = row.serving_ready ?? row.rationale.serving_ready
   return {
     apiId: row.id,
     id: `NBA-${row.id}`,
@@ -194,7 +205,16 @@ function mapDecision(row: ApiDecision): Decision {
     reason: row.override_reason ?? undefined,
     engineVersion: typeof row.rationale.engine_version === 'string' ? row.rationale.engine_version : undefined,
     noActionReason: typeof row.rationale.no_action_reason === 'string' ? row.rationale.no_action_reason : null,
+    expectedValue: typeof expectedValue === 'number' && Number.isFinite(expectedValue) && unavailableSources.length === 0 ? expectedValue : null,
+    modelVersion: typeof modelVersion === 'string' && modelVersion.trim() ? modelVersion : null,
+    servingReady: typeof servingReady === 'boolean' ? servingReady : null,
+    unavailableSources,
   }
+}
+
+function formatMeasurementValue(value: unknown, status?: unknown): string {
+  if (String(status ?? '').toUpperCase() === 'AWAITING_OUTCOMES' || value === null || value === undefined) return 'Kosong'
+  return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('id-ID') : String(value)
 }
 
 function App() {
@@ -659,7 +679,7 @@ function Dashboard({ campaigns, customers: customerRows, reviews, decisions, mon
         <div className="panel-heading"><div><div className="panel-kicker">HASIL KAMPANYE</div><h2>Hasil tercatat</h2></div></div>
         {measurements.length ? <>
           <div className="revenue-total"><strong>{measurements.length.toLocaleString('id-ID')} hasil</strong><span className="delta">per metrik</span><small>Nilai dari metrik berbeda tidak dijumlahkan.</small></div>
-          <div className="measurement-list">{measurements.slice(0, 6).map((item, index) => <div className="measurement-row" key={`${item.campaign_id}-${index}`}><span>Campaign #{String(item.campaign_id)} · {String(item.metric ?? 'Metrik')}</span><small>Teramati {String(item.observed ?? 'Kosong')} · Inkremental {String(item.incremental ?? 'Kosong')} · {item.source_mode === 'simulated' ? 'Simulasi' : 'Sumber belum terverifikasi'}</small></div>)}</div>
+          <div className="measurement-list">{measurements.slice(0, 6).map((item, index) => <div className="measurement-row" key={`${item.campaign_id}-${index}`}><span>Campaign #{String(item.campaign_id)} · {String(item.metric ?? 'Metrik')}</span><small>Teramati {formatMeasurementValue(item.observed, item.measurement_status ?? item.status)} · Inkremental {formatMeasurementValue(item.incremental, item.measurement_status ?? item.status)} · {item.source_mode === 'simulated' ? 'Simulasi' : 'Sumber belum terverifikasi'}</small></div>)}</div>
         </> : <div className="empty-state">Belum ada hasil observed-vs-incremental yang tercatat di API.</div>}
       </article>
 
@@ -862,7 +882,7 @@ function CampaignPage({ campaigns, canManage, onNew, onTransition }: { campaigns
               <td>{campaign.segment}{campaign.nbaDecisionId && <small className="campaign-execution-note">Dari NBA-{campaign.nbaDecisionId} · target satu pelanggan</small>}</td>
               <td><span className="channel-pill">{campaign.channel}</span></td>
               <td>{campaign.reach}</td>
-              <td><StatusBadge status={campaign.status} />{campaign.executionSummary && <small className="campaign-execution-note">{campaign.executionSummary}</small>}{campaign.latestMeasurement && <small className="campaign-execution-note">Ukur: {campaign.latestMeasurement.metric_name} · teramati {campaign.latestMeasurement.observed_value} · inkremental {campaign.latestMeasurement.incremental_value} · {campaign.latestMeasurement.source_mode === 'simulated' ? 'simulasi' : 'sumber belum terverifikasi'}</small>}</td>
+              <td><StatusBadge status={campaign.status} />{campaign.executionSummary && <small className="campaign-execution-note">{campaign.executionSummary}</small>}{campaign.latestMeasurement && <small className="campaign-execution-note">Ukur: {campaign.latestMeasurement.metric_name} · teramati {formatMeasurementValue(campaign.latestMeasurement.observed_value, campaign.latestMeasurement.measurement_status ?? campaign.latestMeasurement.status)} · inkremental {formatMeasurementValue(campaign.latestMeasurement.incremental_value, campaign.latestMeasurement.measurement_status ?? campaign.latestMeasurement.status)} · {campaign.latestMeasurement.source_mode === 'simulated' ? 'simulasi' : 'sumber belum terverifikasi'}</small>}</td>
               <td>
                 <div className="action-button-group">
                   {!canManage ? <span className="text-muted-sm">Read only</span> : campaign.status === 'Draft' ? (
@@ -1025,8 +1045,11 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
             <div className="nba-box">
               <div className="nba-label">{d.status === 'Evaluated' ? 'HASIL ENGINE:' : 'PROPOSAL NEXT-BEST-ACTION:'}</div>
               <div className="nba-text"><Sparkles size={16} /> {d.recommendation}</div>
-              <small>{d.rationale}</small>
-              {d.engineVersion && <small>Engine {d.engineVersion} · serving belum diaktifkan · NO_ACTION tidak dapat dipakai untuk kampanye.</small>}
+              <small><b>Alasan:</b> {d.rationale}</small>
+              <small>Nilai harapan: {d.expectedValue === null ? 'Kosong / belum tersedia' : d.expectedValue.toLocaleString('id-ID')}</small>
+              <small>Model: {d.modelVersion ?? 'Belum tersedia'} · serving {d.servingReady === true ? 'disetujui' : d.servingReady === false ? 'belum disetujui' : 'belum diketahui'}</small>
+              {d.unavailableSources.length > 0 && <small>Sumber belum tersedia: {d.unavailableSources.join(', ')}</small>}
+              {d.engineVersion && <small>Engine {d.engineVersion}{d.status === 'Evaluated' ? ' · NO_ACTION tidak dapat dipakai untuk kampanye.' : ''}</small>}
             </div>
 
             {d.status === 'Overridden' && (
@@ -1200,7 +1223,7 @@ function MonitoringPage({ token, data, canTrace }: { token: string; data: { drif
 
       <article className="panel table-panel">
         <div className="panel-heading"><div><div className="panel-kicker">OBSERVED VS INCREMENTAL</div><h2>Campaign measurement</h2></div></div>
-        <table className="campaign-table"><thead><tr><th>Campaign ID</th><th>Metric</th><th>Observed</th><th>Incremental</th></tr></thead><tbody>{data.campaign_measurements.map((item, index) => <tr key={`${item.campaign_id}-${index}`}><td>{String(item.campaign_id)}</td><td>{String(item.metric)}</td><td>{String(item.observed)}</td><td>{String(item.incremental)}</td></tr>)}</tbody></table>
+        <table className="campaign-table"><thead><tr><th>Campaign ID</th><th>Metric</th><th>Observed</th><th>Incremental</th></tr></thead><tbody>{data.campaign_measurements.map((item, index) => <tr key={`${item.campaign_id}-${index}`}><td>{String(item.campaign_id)}</td><td>{String(item.metric)}</td><td>{formatMeasurementValue(item.observed, item.measurement_status ?? item.status)}</td><td>{formatMeasurementValue(item.incremental, item.measurement_status ?? item.status)}</td></tr>)}</tbody></table>
         {!data.campaign_measurements.length && <div className="empty-state">Belum ada hasil pengukuran campaign dari API.</div>}
       </article>
 
