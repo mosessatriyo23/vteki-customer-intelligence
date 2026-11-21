@@ -173,7 +173,7 @@ def override_nba_decision(
     payload: NBAOverrideRequest,
     request: Request,
     db: Session = Depends(get_db),
-    actor: User = Depends(require_roles("admin", "operator", "campaign_manager")),
+    actor: User = Depends(require_roles("admin", "campaign_manager")),
 ) -> dict[str, Any]:
     decision = db.get(NBADecision, decision_id)
     if not decision:

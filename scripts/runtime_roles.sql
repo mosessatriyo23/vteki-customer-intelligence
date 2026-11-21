@@ -60,6 +60,9 @@ GRANT SELECT, INSERT, UPDATE ON
     act.batch_jobs
 TO vteki_api_runtime;
 
+-- NBA reads recent contacts to enforce contact-frequency policies.
+GRANT SELECT ON act.campaign_contact_history TO vteki_api_runtime;
+
 -- Decisions and human overrides.
 GRANT SELECT, INSERT, UPDATE ON
     dec.nba_decisions,

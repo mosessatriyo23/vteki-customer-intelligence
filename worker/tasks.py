@@ -135,14 +135,14 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
         job_result["measurement"] = result.measurement
 
         for contact in result.contact_rows:
-            customer = customer_by_ref.get(str(contact["customer_id"]))
-            if customer is None:
+            contacted_customer = customer_by_ref.get(str(contact["customer_id"]))
+            if contacted_customer is None:
                 continue
             existing = (
                 session.query(CampaignContactHistory)
                 .filter(
                     CampaignContactHistory.execution_job_id == job_id,
-                    CampaignContactHistory.customer_id == customer.id,
+                    CampaignContactHistory.customer_id == contacted_customer.id,
                 )
                 .first()
             )
@@ -151,7 +151,7 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                     CampaignContactHistory(
                         execution_job_id=job_id,
                         campaign_id=campaign.id,
-                        customer_id=customer.id,
+                        customer_id=contacted_customer.id,
                         customer_ref=str(contact["customer_id"]),
                         action_id=str(contact["action_id"]),
                         channel=str(contact["channel"]),
@@ -170,7 +170,7 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                 }
             ]
         for row in measurement_rows:
-            existing = (
+            existing_measurement = (
                 session.query(CampaignMeasurement)
                 .filter(
                     CampaignMeasurement.execution_job_id == job_id,
@@ -178,7 +178,7 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                 )
                 .first()
             )
-            if existing is None:
+            if existing_measurement is None:
                 session.add(
                     CampaignMeasurement(
                         campaign_id=campaign.id,
@@ -191,10 +191,10 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                     )
                 )
             else:
-                existing.observed_value = row["observed_value"]
-                existing.incremental_value = row["incremental_value"]
-                existing.measurement_status = result.measurement_status
-                existing.source_mode = "simulated"
+                existing_measurement.observed_value = row["observed_value"]
+                existing_measurement.incremental_value = row["incremental_value"]
+                existing_measurement.measurement_status = result.measurement_status
+                existing_measurement.source_mode = "simulated"
 
         for event in result.audit_events():
             details = {**event["details"], "execution_job_id": job_id}
