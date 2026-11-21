@@ -1,5 +1,6 @@
 """Database adapters for the pure NBA decision services."""
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -11,6 +12,21 @@ from api.models import (
 )
 from services.decision.policy.fatigue import ContactRecord
 
+CHURN_PREDICTION_TYPE = "CHURN"
+# The producer (services.data.models.prediction_contract.STATUSES) emits only
+# these two statuses; both are explicitly non-serving.
+NON_SERVING_CONTRACT_STATUSES = frozenset({"SCHEMA_PARTIAL", "INVALID_SCORE"})
+
+
+def _aware_instant(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.utcoffset() is not None else None
+
 
 def load_serving_score_row(db: Session, customer_ref: str) -> dict[str, Any] | None:
     """Return the latest stored prediction row for the exact customer identity.
@@ -18,21 +34,35 @@ def load_serving_score_row(db: Session, customer_ref: str) -> dict[str, Any] | N
     The service applies the independent-review and completeness gates. Missing
     score fields remain ``None`` so an incomplete Moses contract fails closed.
     """
-    selected = (
+    # cutoff_at is stored as text, so SQL cannot order it chronologically. Load
+    # only this customer's CHURN history (small, indexed by customer_id) and
+    # order by the parsed instant here.
+    candidates = (
         db.query(ModelPredictionRecord, ModelPredictionRun)
         .join(ModelPredictionRun, ModelPredictionRun.id == ModelPredictionRecord.run_id)
-        .filter(ModelPredictionRecord.customer_id == customer_ref)
-        .order_by(
-            ModelPredictionRecord.cutoff_at.desc(),
-            ModelPredictionRun.imported_at.desc(),
-            ModelPredictionRecord.id.desc(),
+        .filter(
+            ModelPredictionRecord.customer_id == customer_ref,
+            ModelPredictionRun.prediction_type == CHURN_PREDICTION_TYPE,
         )
-        .first()
+        .all()
     )
-    if selected is None:
+    keyed: list[tuple[tuple[datetime, datetime, int], Any, Any]] = []
+    for record, run in candidates:
+        cutoff = _aware_instant(record.cutoff_at)
+        if cutoff is None:
+            # An unorderable row could be the newest one; never score around it.
+            return None
+        imported = run.imported_at
+        if imported.tzinfo is None:
+            imported = imported.replace(tzinfo=timezone.utc)
+        keyed.append(((cutoff, imported, record.id), record, run))
+    if not keyed:
         return None
 
-    record, run = selected
+    _, record, run = max(keyed, key=lambda item: item[0])
+    # The newest record decides; an older clean run must not hide it.
+    if record.contract_status in NON_SERVING_CONTRACT_STATUSES:
+        return None
     source = record.source_record if isinstance(record.source_record, dict) else {}
     raw_reasons = record.reason_codes if isinstance(record.reason_codes, list) else []
     reason_codes = [
