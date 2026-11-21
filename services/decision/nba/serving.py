@@ -47,7 +47,12 @@ from services.decision.policy.suppression import ComplaintTicket, CustomerConsen
 # ---------------------------------------------------------------------------
 
 REVIEW_STATUS_APPROVED = "reviewed"
-"""Nilai `ml.prediction_review_runs.review_status` untuk run yang sudah dicek manusia."""
+"""Nilai `ml.prediction_review_runs.review_status` untuk run yang sudah dicek manusia.
+
+PENTING: `reviewed` BUKAN izin pakai. Menurut TEAM_ALIGNMENT_MVP_2026-11-21 §1 ada tiga
+status berbeda (tersedia / terintegrasi / disetujui untuk digunakan). Izin pakai harus
+datang dari kunci terpisah `usage_approved` (lihat `lookup_scores`) yang aturannya
+ditentukan lewat keputusan D1/D2. Sampai kunci itu ada, skor TIDAK dipakai NBA."""
 
 REQUIRED_SCORE_FIELDS = (
     "churn_score",
@@ -64,6 +69,7 @@ REQUIRED_SCORE_FIELDS = (
 SCORE_NO_ROW = "SCORE_ROW_MISSING"
 SCORE_NOT_REVIEWED = "MODEL_RUN_NOT_REVIEWED"
 SCORE_SELF_REVIEWED = "MODEL_RUN_REVIEWED_BY_SUBMITTER"
+SCORE_USAGE_NOT_APPROVED = "MODEL_USAGE_NOT_APPROVED"
 SCORE_INCOMPLETE = "SCORE_FIELDS_INCOMPLETE"
 SCORE_INVALID = "SCORE_VALUES_INVALID"
 
@@ -82,6 +88,10 @@ _SCORE_NOTES = {
     SCORE_SELF_REVIEWED: (
         "Skor prediksi diperiksa oleh orang yang sama dengan pengunggahnya, jadi "
         "belum boleh dipakai untuk keputusan."
+    ),
+    SCORE_USAGE_NOT_APPROVED: (
+        "Skor prediksi sudah diperiksa, tetapi belum disetujui untuk dipakai dalam "
+        "keputusan, jadi belum dipakai."
     ),
     SCORE_INCOMPLETE: "Skor prediksi pelanggan ini belum lengkap, jadi tidak dipakai.",
     SCORE_INVALID: "Skor prediksi pelanggan ini tidak valid, jadi tidak dipakai.",
@@ -151,11 +161,13 @@ def lookup_scores(row: Optional[Mapping[str, Any]], *, customer_id: str) -> Scor
         customer_id, churn_score, churn_risk_band, propensity_purchase,
         propensity_renew, clv_amount, clv_tier, lifecycle_stage,
         score_generated_at, reason_codes, model_version,
-        review_status, reviewed_by, submitted_by
+        review_status, reviewed_by, submitted_by, usage_approved
+    Opsional: model_author (pembuat/pelatih model; bila ada, reviewer tidak boleh sama).
 
     Ditolak bila: baris kosong, run belum `reviewed`, `reviewed_by` kosong atau sama
-    dengan `submitted_by` (harus orang lain), ada field wajib yang kosong, atau ada
-    nilai di luar rentang. Penolakan TIDAK diganti angka pengganti.
+    dengan `submitted_by`/`model_author` (harus orang lain), `usage_approved` bukan
+    `True` (review saja bukan izin pakai), ada field wajib yang kosong, atau ada nilai
+    di luar rentang. Penolakan TIDAK diganti angka pengganti.
     """
     if not row:
         return ScoreLookup(None, None, None, None, SCORE_NO_ROW)
@@ -171,8 +183,14 @@ def lookup_scores(row: Optional[Mapping[str, Any]], *, customer_id: str) -> Scor
 
     if review_status != REVIEW_STATUS_APPROVED:
         return ScoreLookup(None, unavailable_reason=SCORE_NOT_REVIEWED, **base)
-    if reviewed_by is None or reviewed_by == row.get("submitted_by"):
+    if (
+        reviewed_by is None
+        or reviewed_by == row.get("submitted_by")
+        or (row.get("model_author") is not None and reviewed_by == row["model_author"])
+    ):
         return ScoreLookup(None, unavailable_reason=SCORE_SELF_REVIEWED, **base)
+    if row.get("usage_approved") is not True:
+        return ScoreLookup(None, unavailable_reason=SCORE_USAGE_NOT_APPROVED, **base)
 
     missing = tuple(k for k in REQUIRED_SCORE_FIELDS if row.get(k) in (None, ""))
     if missing:
@@ -237,6 +255,7 @@ class DecisionOutput:
     score_lookup: ScoreLookup
     unavailable_sources: tuple[str, ...] = ()
     evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    score_explanation: Optional[Mapping[str, Any]] = None
 
     @property
     def selected_action_id(self) -> str:
@@ -273,6 +292,11 @@ class DecisionOutput:
             "model_version": self.score_lookup.model_version,
             "model_review_status": self.score_lookup.review_status,
             "model_reviewed_by": self.score_lookup.reviewed_by,
+            "score_explanation_version": (
+                self.score_explanation.get("version")
+                if self.score_explanation and self.score_lookup.usable
+                else None
+            ),
             "score_unavailable_reason": self.score_lookup.unavailable_reason,
             "score_missing_fields": list(self.score_lookup.missing_fields),
             # Angka EV hanya ditulis bila skor nyata dipakai; selain itu null (kosong).
@@ -389,6 +413,7 @@ def evaluate_customer(
     product_suitability: Optional[ProductSuitability],
     evaluation_date: Optional[datetime] = None,
     engine: Optional[NBAEngine] = None,
+    score_explanation: Optional[Mapping[str, Any]] = None,
 ) -> DecisionOutput:
     """
     Mengevaluasi satu pelanggan dan mengembalikan `DecisionOutput`.
@@ -396,6 +421,9 @@ def evaluate_customer(
     `None` pada sebuah sumber berarti "sumber ini BELUM TERSAMBUNG" (bukan "kosong").
     Sumber yang tersambung tetapi memang kosong dikirim sebagai daftar kosong `[]`.
     Bila ada sumber None, tidak ada keputusan promosi yang dibuat.
+
+    `score_explanation` = keluaran formatter Moses (`explain_contributions`), disisipkan
+    apa adanya ke alasan HANYA bila skor dipakai; tidak pernah ditulis ulang di sini.
     """
     when = evaluation_date or datetime.now(timezone.utc)
     lookup = lookup_scores(score_row, customer_id=customer_ref)
@@ -445,8 +473,11 @@ def evaluate_customer(
         correlation_id=correlation_id,
         record=record,
         plain_rationale=explain_decision(
-            record, score_note=_SCORE_NOTES.get(lookup.unavailable_reason or "")
+            record,
+            score_note=_SCORE_NOTES.get(lookup.unavailable_reason or ""),
+            score_explanation=score_explanation,
         ),
         score_lookup=lookup,
         evaluated_at=when,
+        score_explanation=score_explanation,
     )

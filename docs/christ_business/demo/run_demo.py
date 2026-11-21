@@ -104,6 +104,7 @@ def _score_row(ref: str, *, reviewed: bool = True) -> Dict[str, Any]:
         "review_status": "reviewed" if reviewed else "pending_review",
         "reviewed_by": 7,
         "submitted_by": 3,
+        "usage_approved": True,
     }
 
 
