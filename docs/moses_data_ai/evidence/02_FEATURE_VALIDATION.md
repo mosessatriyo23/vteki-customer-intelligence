@@ -1,5 +1,7 @@
 # 02 — Feature validation, leakage checks (development only)
 
+> **Catatan historis (2026-11-21):** status di bawah mencerminkan 2026-11-17. Bukti terbaru: [tes leakage lintas batas](../LEAKAGE_BOUNDARY_EVIDENCE_2026-11-20.md) (event-time sintetis saja, bukan `known_at`/identity-as-of safe).
+
 **Date:** 2026-11-17. **Scope:** event-time feature pipeline, `services/data/features/snapshot.py`, `VERSION="event-time-dev-1.0"`. **Owner:** Moses. **Reviewer:** pending. **Approval date:** not granted.
 
 ```text

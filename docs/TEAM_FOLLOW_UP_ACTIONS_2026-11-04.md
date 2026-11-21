@@ -427,7 +427,7 @@ final_model = false
 
 ## 7. Referensi
 
-- `docs/moses_data_ai/TEAM_HANDOFF_2026-10-16.md`
+- Current replacement for the retired October Moses handoff: `docs/moses_data_ai/MOSES_CURRENT_HANDOFF.md` (not the document used when this historical action list was written).
 - `docs/moses_data_ai/model_card_development_v1.md`
 - `docs/christ_business/approved/target_definitions.md`
 - `docs/james_platform/STATUS_TUGAS_JAMES.md`

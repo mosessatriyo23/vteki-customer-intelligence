@@ -180,8 +180,8 @@ Untuk tiap work package:
 
 - `docs/TEAM_FOLLOW_UP_ACTIONS_2026-11-04.md` — owners, detailed acceptance gate, prohibitions.
 - `docs/moses_data_ai/sprint_gate_status_2026-11-14.md` — current sprint status and synthetic diagnostics.
-- `docs/moses_data_ai/TEAM_HANDOFF_2026-10-16.md` — delivered scope and existing handoff.
-- `docs/moses_data_ai/independent_scope_completion.md` — independent scope closure and reopening conditions.
+- `docs/moses_data_ai/MOSES_CURRENT_HANDOFF.md` — current status and handoff.
+- `docs/moses_data_ai/MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md` — independent implementation and remaining dependencies.
 - `docs/moses_data_ai/model_card_development_v1.md` — limitations and prohibited uses of development baseline.
 - `docs/christ_business/approved/target_definitions.md` — current business target draft/revision; review status before relying on it.
 - `docs/james_platform/STATUS_TUGAS_JAMES.md` — platform implementation and operational blockers.

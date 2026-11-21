@@ -1,12 +1,12 @@
 # Moses — titik masuk handoff data/AI terbaru
 
-## Status terbaru 2026-11-20 — menggantikan status implementasi historis di bawah
+## Status terbaru 2026-11-21 — menggantikan seluruh status di bawah
 
-- PR #48–#51 sudah merged: wrapper CLV `actual_revenue`, inventaris model development, kontribusi log-odds propensity retail/renewal, serta monitoring PSI/volume/alert advisory tersedia. Ini tidak menutup kontrak serving, approval atau seluruh FR-MON-002.
-- Monitoring: [bukti dan batasan](PREDICTION_MONITORING_DEV_2026-11-20.md). Retail PSI 0,08423 (STABLE), renewal 0,14147 (WARNING); bukan bukti degradasi performa. Semua output development-only.
-- PR #52 dan #53 sudah merged: skeleton registry fitur K-03, disclaimer sintetis pada tujuh generator evaluasi, metadata inventaris, importance renewal-membership dan metadata estimator aktual untuk output baru. Belum mengklaim registry persisten atau integrasi platform.
-- Verifikasi lokal pada commit `14d5f53`: **1401 passed, 19 skipped, 3 xfailed**; Ruff/Black/Mypy bersih. Skipped PostgreSQL bukan bukti acceptance.
-- Metadata inventaris tambahan, importance renewal-membership, dan metadata estimator aktual berada di PR #53; importance churn terkalibrasi sudah implemented/run lokal dan review independen bersih; belum merged pada saat catatan ini ditulis. [Ledger penutupan mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md) membedakan implementasi, PR dan blocker. Gate gabungan terbaru 1429 passed, 19 skipped, 3 xfailed; belum acceptance produksi.
+- Paket Moses PR #48–#54 dan #56 sudah merged (`bdf74c6` adalah merge #56): wrapper CLV `actual_revenue`, inventaris model development, kontribusi log-odds propensity retail/renewal, monitoring PSI/volume/alert advisory, skeleton registry fitur K-03, disclaimer sintetis TRD 9.7, metadata inventaris/estimator terverifikasi, importance renewal-membership dan churn 3-fold terkalibrasi, laporan kualitas data offline (FR-CDI-004), tes leakage feature→label→fit→inference, serta bukti benchmark dan ingestion. Tidak satupun menutup kontrak serving, approval, atau acceptance lintas tim.
+- Monitoring: [bukti dan batasan](PREDICTION_MONITORING_DEV_2026-11-20.md). Retail PSI 0,08423 (STABLE), renewal 0,14147 (WARNING); bukan bukti degradasi performa. `band_mix`/`segment_performance` tetap `None` menunggu kebijakan band/segmen dari Christ. Semua output development-only.
+- Gate gabungan lokal terverifikasi terakhir (PR #56): **1458 passed, 19 skipped, 3 xfailed**; Ruff/Black/Mypy bersih. [Ledger penutupan mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md) membedakan implementasi, PR dan blocker lintas tim.
+- Benchmark: identity v1.1 pair recall **0,938893**, di bawah aspirasi 95%; tidak ada model pemenang pada churn/retail/renewal. Lihat [bukti benchmark](BENCHMARK_EVIDENCE_2026-11-20.md).
+- Empat dokumen handoff/status Moses yang sudah tergantikan (handoff Oktober, closure scope lama, weekly gap 17 Nov) telah dihapus; rujukan sekarang mengarah ke dokumen ini dan ledger di atas.
 - Christ v1.4 tetap PENDING mentor approval. Requirement_Capstone membedakan definisi churn **180 hari ke depan** dari horizon prediksi **90 hari ke depan**; persoalannya perlu konfirmasi mentor, bukan sekadar kontradiksi angka atau late-data reprocessing. Pertanyaan P1–P8 tetap di [pesan rekonsiliasi](CHRIST_V14_RECONCILIATION_MESSAGE_2026-11-20.md), belum ada bukti jawaban/komunikasi eksternal di pekerjaan ini.
 - Paragraf dan angka tes di bawah adalah riwayat sebelum PR #48; pernyataan seperti "belum ada projection consumer" dan "belum di-push" tidak berlaku sebagai status terbaru.
 

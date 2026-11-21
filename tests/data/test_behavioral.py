@@ -2,6 +2,7 @@
 
 import csv
 import json
+from collections import Counter
 
 import pytest
 
@@ -181,6 +182,70 @@ def test_overlap_and_ground_truth_rejected(tmp_path):
 def test_ground_truth_parent_rejected(tmp_path):
     with pytest.raises(ValueError, match="ground_truth"):
         b.run(tmp_path / "ground_truth" / "features", tmp_path / "out", JUNE)
+
+
+def test_selected_k_is_best_silhouette_with_smaller_k_tiebreak():
+    report, _ = b.compute(rows(), JUNE)
+    best_score = max(c["silhouette"] for c in report["candidates"])
+    tied = [c["k"] for c in report["candidates"] if c["silhouette"] == best_score]
+    assert report["selected_k"] == min(tied)
+    assert report["silhouette"] == best_score
+
+
+def test_equal_silhouettes_choose_smallest_valid_k(monkeypatch):
+    monkeypatch.setattr(b, "silhouette_score", lambda *args: 0.25)
+    report, _ = b.compute(rows(), JUNE)
+    assert len(report["candidates"]) > 1
+    assert report["selected_k"] == min(c["k"] for c in report["candidates"])
+    assert report["silhouette"] == 0.25
+
+
+def test_membership_customer_ids_unique_and_sizes_consistent():
+    report, members = b.compute(rows(), JUNE)
+    ids = [m["golden_customer_id"] for m in members]
+    assert len(ids) == len(set(ids)) == len(members)
+    assert sum(p["size"] for p in report["profiles"]) == len(members)
+    counts = Counter(m["cluster_id"] for m in members)
+    for profile in report["profiles"]:
+        assert profile["size"] == counts[profile["cluster_id"]]
+        assert profile["size"] >= report["minimum_cluster_size"]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("feature_version", "other-version"),
+        ("identity_time_policy", "SOMETHING_ELSE"),
+        ("training_ready", True),
+    ],
+)
+def test_wrong_version_identity_policy_or_readiness_rejected(field, value):
+    data = rows()
+    data[0][field] = value
+    with pytest.raises(ValueError, match="feature version or readiness/identity"):
+        b.compute(data, JUNE)
+
+
+def test_non_plus_seven_timezone_cutoff_rejected():
+    with pytest.raises(ValueError, match="\\+07:00"):
+        b.compute(rows(), "2026-06-01T00:00:00+00:00")
+
+
+def test_run_rejects_cutoff_not_in_manifest_cutoffs(tmp_path):
+    src = source(tmp_path, rows())
+    with pytest.raises(ValueError, match="version/cutoff/checksum"):
+        b.run(src, tmp_path / "output", MARCH)
+    assert not (tmp_path / "output").exists()
+
+
+def test_run_rejects_manifest_row_count_mismatch(tmp_path):
+    src = source(tmp_path, rows())
+    manifest_path = src / "feature_manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["rows"] = manifest["rows"] + 1
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="row count"):
+        b.run(src, tmp_path / "output", JUNE)
 
 
 def test_missing_recency_retains_every_customer():

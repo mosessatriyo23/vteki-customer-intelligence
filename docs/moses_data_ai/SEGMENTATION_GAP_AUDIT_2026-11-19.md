@@ -14,7 +14,7 @@ Audit read-only terhadap implementasi dan definisi tests; bukan sertifikasi test
 - RFM memakai fixed thresholds, bukan population quintiles seperti TRD §9.2.
 - Tidak ada mapping RFM code ke nama segment, audience exclusion eksplisit, konfigurasi band/mapping tersimpan.
 - RFM recency memakai stream aktivitas termasuk visits/renewal, padahal FRD RFM menyebut positive-net purchase; perlu pisahkan dari lifecycle activity recency tanpa merusak fitur/model lama.
-- Behavioral K-means, silhouette k=3..8, profiling lima fitur pembeda, serta gating nama/deskripsi manusia belum tersedia.
+- Behavioral K-means, silhouette k=3..8, dan profiling lima fitur pembeda sudah ada sebagai development proposal; lihat [hasil](BEHAVIORAL_CLUSTERING_FINDING_DEV_2026-11-20.md). Nama/deskripsi manusia dan targeting tetap gated/kosong, bukan ditentukan otomatis.
 - API Customer360 belum mengekspos segmentation rule version terpisah dari profile version; integrasi James diperlukan.
 
 ## Jangan memutuskan policy diam-diam

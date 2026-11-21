@@ -1,5 +1,7 @@
 # 06 — AI readiness checklist and cross-team handoff
 
+> **Catatan historis (2026-11-21):** checklist dan status Gate A–D di bawah mencerminkan 2026-11-17 dan tidak diperbarui; tidak ada sign-off baru. Status terkini: [handoff Moses](../MOSES_CURRENT_HANDOFF.md).
+
 **Date:** 2026-11-17. **Scope:** synthetic development only. **Owner:** Moses. **Reviewer sign-off:** PENDING. **Approval date:** NOT GRANTED. **Author of checklist is not an approver.**
 
 ```text
