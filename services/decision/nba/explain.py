@@ -12,15 +12,15 @@ Aturan (sesuai arahan mentor "jangan pernah menampilkan angka contoh seolah hasi
   - Fungsi MURNI: hanya membaca `DecisionRecord`; tanpa database, jaringan, atau LLM.
   - Tidak ada angka karangan. Bila skor belum ada / kedaluwarsa (`degraded_input`),
     kalimat mengatakan "data skor belum tersedia" dan TIDAK menampilkan angka EV/skor.
-  - Daftar alasan model (reason code) hanya diterjemahkan untuk kode yang memang
-    dikeluarkan Moses; kode lain ditampilkan apa adanya (tidak ditebak artinya).
+  - Reason code TIDAK diterjemahkan di sini (tidak dipakai logika keputusan; lihat
+    D5). Alasan skor berasal dari formatter Moses dan disisipkan apa adanya.
 
 Dipanggil oleh `services/decision/nba/serving.py`; James/Marvin cukup memakai hasilnya.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from services.decision.nba.engine import (
     NO_ACTION_REASON_ALL_BLOCKED,
@@ -30,7 +30,7 @@ from services.decision.nba.engine import (
     DecisionRecord,
 )
 
-PLAIN_RATIONALE_VERSION = "plain-id-1.0"
+PLAIN_RATIONALE_VERSION = "plain-id-1.1"
 """Versi templat kalimat; dicatat agar perubahan redaksi dapat ditelusuri."""
 
 ACTION_LABELS: Dict[str, str] = {
@@ -63,16 +63,6 @@ BAND_LABELS: Dict[str, str] = {
     "VERY_HIGH": "sangat tinggi",
 }
 
-# Hanya kode yang benar-benar dikeluarkan modul churn_reasons Moses (usulan, belum
-# disetujui). Kode lain tidak diterjemahkan agar tidak ada makna yang dikarang.
-REASON_CODE_LABELS: Dict[str, str] = {
-    "PURCHASE_FREQUENCY_60D": "seberapa sering belanja dalam 60 hari terakhir",
-    "PURCHASE_FREQUENCY_90D": "seberapa sering belanja dalam 90 hari terakhir",
-    "PURCHASE_FREQUENCY_365D": "seberapa sering belanja dalam 1 tahun terakhir",
-    "RETAINED_REVENUE_90D": "nilai belanja bersih dalam 90 hari terakhir",
-    "RETAINED_REVENUE_365D": "nilai belanja bersih dalam 1 tahun terakhir",
-}
-
 _NO_SCORE_SENTENCE = (
     "Data skor prediksi pelanggan ini belum tersedia atau sudah kedaluwarsa, "
     "sehingga sistem tidak memakai angka skor dan memilih langkah yang paling aman."
@@ -93,21 +83,37 @@ def _failed_checks(checks: List[Dict[str, Any]]) -> List[str]:
     return [str(c.get("check_name")) for c in checks if c.get("passed") is False]
 
 
-def _reason_codes_sentence(codes: List[str]) -> str:
-    if not codes:
-        return ""
-    parts: List[str] = []
-    for code in codes[:3]:
-        parts.append(REASON_CODE_LABELS.get(code, str(code)))
-    return "Faktor yang paling berpengaruh pada skor: " + "; ".join(parts) + "."
-
-
 def _rupiah(amount: float) -> str:
     """Format Rupiah Indonesia: titik sebagai pemisah ribuan (Rp 2.158.000)."""
     return "Rp " + f"{amount:,.0f}".replace(",", ".")
 
 
-def _score_sentence(record: DecisionRecord, score_note: Optional[str]) -> str:
+def _moses_explanation_sentences(
+    explanation: Optional[Mapping[str, Any]],
+) -> List[str]:
+    """
+    Kalimat penjelasan skor dari formatter Moses (`score_explanations`), disisipkan
+    APA ADANYA (tidak ditulis ulang). Bentuk tidak valid diabaikan, bukan diperbaiki.
+    """
+    if not isinstance(explanation, Mapping):
+        return []
+    sentences = explanation.get("sentences")
+    if not isinstance(sentences, (list, tuple)) or not sentences:
+        return []
+    if not all(isinstance(item, str) and item.strip() for item in sentences):
+        return []
+    out = ["Penjelasan skor: " + " ".join(item.strip() for item in sentences)]
+    notice = explanation.get("notice")
+    if isinstance(notice, str) and notice.strip():
+        out.append(notice.strip())
+    return out
+
+
+def _score_sentence(
+    record: DecisionRecord,
+    score_note: Optional[str],
+    score_explanation: Optional[Mapping[str, Any]],
+) -> str:
     """Kalimat tentang skor; kosong bila skor tidak tersedia (tidak ada angka palsu)."""
     if record.degraded_input:
         return score_note or _NO_SCORE_SENTENCE
@@ -116,14 +122,15 @@ def _score_sentence(record: DecisionRecord, score_note: Optional[str]) -> str:
     sentences: List[str] = []
     if band is not None:
         sentences.append(f"Risiko pelanggan berhenti berbelanja tergolong {band}.")
-    reasons = _reason_codes_sentence(list(snapshot.get("reason_codes") or []))
-    if reasons:
-        sentences.append(reasons)
+    sentences.extend(_moses_explanation_sentences(score_explanation))
     return " ".join(sentences)
 
 
 def explain_decision(
-    record: DecisionRecord, *, score_note: Optional[str] = None
+    record: DecisionRecord,
+    *,
+    score_note: Optional[str] = None,
+    score_explanation: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """
     Mengubah `DecisionRecord` menjadi paragraf pendek berbahasa Indonesia sehari-hari.
@@ -135,6 +142,11 @@ def explain_decision(
         score_note: kalimat alasan spesifik mengapa skor tidak dipakai (mis. belum
             direview orang lain). Hanya dipakai saat `degraded_input`; diisi oleh
             `serving.py` yang tahu penyebabnya.
+        score_explanation: keluaran `explain_contributions` Moses (`sentences`,
+            `notice`, `version`). Disisipkan apa adanya HANYA bila skor benar-benar
+            dipakai. Modul ini tidak menerjemahkan reason code sendiri, supaya
+            "kenapa skor ini" punya satu sumber redaksi (Moses) dan "kenapa keputusan
+            ini" punya satu sumber (modul ini).
     """
     selected = record.selected_action_id
     failed = _failed_checks(record.checks)
@@ -199,7 +211,7 @@ def explain_decision(
                 "(hasil hitung sistem, bukan jaminan)."
             )
 
-    score_sentence = _score_sentence(record, score_note)
+    score_sentence = _score_sentence(record, score_note, score_explanation)
     if score_sentence:
         sentences.append(score_sentence)
 

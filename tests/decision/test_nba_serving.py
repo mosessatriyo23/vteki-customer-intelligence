@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 import jsonschema
 import pytest
 
+from services.data.models.score_explanations import explain_contributions
 from services.decision.nba.engine import EligibilityProfile, ProductSuitability
 from services.decision.nba.serving import (
     SCORE_INCOMPLETE,
@@ -29,6 +30,7 @@ from services.decision.nba.serving import (
     SCORE_NO_ROW,
     SCORE_NOT_REVIEWED,
     SCORE_SELF_REVIEWED,
+    SCORE_USAGE_NOT_APPROVED,
     SOURCE_UNAVAILABLE,
     DecisionOutput,
     evaluate_customer,
@@ -87,6 +89,7 @@ def score_row(**overrides: Any) -> Dict[str, Any]:
         "review_status": "reviewed",
         "reviewed_by": 7,
         "submitted_by": 3,
+        "usage_approved": True,
     }
     row.update(overrides)
     return row
@@ -100,6 +103,30 @@ def eligibility() -> EligibilityProfile:
         has_active_membership=True,
         purchased_categories=["GROCERY"],
         days_until_replenishment=3,
+    )
+
+
+def _contribution(feature: str, value: float, log_odds: float) -> Dict[str, Any]:
+    return {
+        "feature": feature,
+        "feature_value": value,
+        "missing": False,
+        "imputed_value": value,
+        "log_odds_contribution": log_odds,
+    }
+
+
+def _kwargs(row: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    return dict(
+        customer_ref=REF,
+        correlation_id=CORR,
+        score_row=score_row() if row is None else row,
+        consent_doc=consent_doc(),
+        complaint_tickets=[],
+        contact_history=[],
+        eligibility=eligibility(),
+        product_suitability=ProductSuitability(),
+        evaluation_date=NOW,
     )
 
 
@@ -179,6 +206,45 @@ class TestScoreLookup:
     def test_invalid_values_are_rejected(self, bad):
         lookup = lookup_scores(score_row(**bad), customer_id=REF)
         assert lookup.unavailable_reason == SCORE_INVALID
+
+
+class TestReviewedIsNotApprovedForUse:
+    """TEAM_ALIGNMENT §1: `reviewed` bukan izin pakai; izin harus eksplisit."""
+
+    @pytest.mark.parametrize("flag", [None, False, 0, 1, "yes", "true"])
+    def test_only_boolean_true_unlocks_a_reviewed_run(self, flag):
+        row = score_row()
+        row["usage_approved"] = flag
+        lookup = lookup_scores(row, customer_id=REF)
+        assert lookup.unavailable_reason == SCORE_USAGE_NOT_APPROVED
+        assert lookup.ai_scores is None
+
+    def test_missing_usage_flag_is_rejected_not_defaulted_to_allowed(self):
+        row = score_row()
+        del row["usage_approved"]
+        assert (
+            lookup_scores(row, customer_id=REF).unavailable_reason
+            == SCORE_USAGE_NOT_APPROVED
+        )
+
+    def test_reviewed_but_unapproved_run_never_drives_a_recommendation(self):
+        row = score_row()
+        row["usage_approved"] = False
+        output = run(row=row)
+        payload = output.rationale_payload()
+        assert output.is_no_action
+        assert payload["serving_ready"] is False
+        assert payload["expected_value"] is None
+        assert payload["score_unavailable_reason"] == SCORE_USAGE_NOT_APPROVED
+        assert "belum disetujui untuk dipakai" in output.plain_rationale
+        assert not re.search(r"\d", output.plain_rationale)
+
+    def test_reviewer_must_not_be_the_model_author_when_author_is_known(self):
+        lookup = lookup_scores(score_row(model_author=7), customer_id=REF)
+        assert lookup.unavailable_reason == SCORE_SELF_REVIEWED
+
+    def test_different_author_and_reviewer_is_accepted(self):
+        assert lookup_scores(score_row(model_author=1), customer_id=REF).usable
 
 
 # ---------------------------------------------------------------------------
@@ -273,10 +339,50 @@ class TestPlainLanguage:
         ):
             assert technical not in text
 
-    def test_known_reason_codes_are_translated_unknown_are_not_guessed(self):
+    def test_reason_codes_are_not_translated_into_the_decision_text(self):
+        # Reason code tidak dipakai logika keputusan (D5) dan alasan skor punya satu
+        # sumber redaksi (formatter Moses). Teks keputusan tidak menebak artinya.
         text = run().plain_rationale
-        assert "seberapa sering belanja dalam 90 hari terakhir" in text
-        assert "X_UNKNOWN" in text  # kode asing ditampilkan apa adanya, tidak ditebak
+        assert "PURCHASE_FREQUENCY" not in text and "X_UNKNOWN" not in text
+        assert "seberapa sering belanja" not in text
+        assert "Penjelasan skor" not in text  # tidak ada penjelasan -> tidak dikarang
+
+    def test_moses_explanation_is_inserted_verbatim_and_versioned(self):
+        explanation = explain_contributions(
+            [_contribution("recency_days", 120.0, 0.8)], target="churn90"
+        )
+        output = evaluate_customer(**_kwargs(), score_explanation=explanation)
+        for sentence in explanation["sentences"]:
+            assert sentence in output.plain_rationale  # persis, tidak ditulis ulang
+        assert explanation["notice"] in output.plain_rationale
+        assert output.rationale_payload()["score_explanation_version"] == (
+            explanation["version"]
+        )
+
+    def test_explanation_is_dropped_when_the_score_is_not_used(self):
+        explanation = explain_contributions(
+            [_contribution("recency_days", 120.0, 0.8)], target="churn90"
+        )
+        row = score_row()
+        row["usage_approved"] = False
+        output = evaluate_customer(**_kwargs(row=row), score_explanation=explanation)
+        assert "Penjelasan skor" not in output.plain_rationale
+        assert output.rationale_payload()["score_explanation_version"] is None
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            {"sentences": []},
+            {"sentences": "bukan list"},
+            {"sentences": ["ok", ""]},
+            {"sentences": [1, 2]},
+            "bukan dict",
+            None,
+        ],
+    )
+    def test_malformed_explanation_is_ignored_not_repaired(self, bad):
+        output = evaluate_customer(**_kwargs(), score_explanation=bad)
+        assert "Penjelasan skor" not in output.plain_rationale
 
     def test_opt_out_explains_that_high_score_is_not_permission(self):
         output = run(consent=consent_doc(global_opt_out=True))

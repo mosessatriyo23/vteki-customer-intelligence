@@ -30,6 +30,7 @@ output = evaluate_customer(
     contact_history=None,
     eligibility=None,
     product_suitability=None,
+    score_explanation=load_score_explanation(db, identity_ref),  # keluaran formatter Moses atau None
 )
 
 decision = NBADecision(**output.to_nba_decision_row(customer_db_id=customer.id))
@@ -99,10 +100,17 @@ Catatan:
 
 ## 4. Ketergantungan (perlu keputusan tim)
 
-1. **Sumber skor (`load_serving_score_row`) — Moses.** Fungsi ini harus mengembalikan dict dengan kunci: `churn_score`, `churn_risk_band`, `propensity_purchase`, `propensity_renew`, `clv_amount`, `clv_tier`, `lifecycle_stage`, `score_generated_at`, `reason_codes`, `model_version`, `review_status`, `reviewed_by`, `submitted_by`. Importer saat ini hanya menghasilkan skor churn, band, dan reason code, jadi sampai field lain tersedia hasilnya `SCORE_FIELDS_INCOMPLETE` (NBA tidak merekomendasikan apa pun, dan itu perilaku yang benar).
+1. **Sumber skor (`load_serving_score_row`) — Moses.** Fungsi ini harus mengembalikan dict dengan kunci: `churn_score`, `churn_risk_band`, `propensity_purchase`, `propensity_renew`, `clv_amount`, `clv_tier`, `lifecycle_stage`, `score_generated_at`, `reason_codes`, `model_version`, `review_status`, `reviewed_by`, `submitted_by`, **`usage_approved`** (wajib boolean `True`; `reviewed` saja bukan izin pakai), dan opsional `model_author`. Importer saat ini hanya menghasilkan skor churn, band, dan reason code, jadi sampai field lain tersedia hasilnya `SCORE_FIELDS_INCOMPLETE` (NBA tidak merekomendasikan apa pun, dan itu perilaku yang benar).
 2. **Riwayat kontak — James.** `contact_rows` perlu tempat penyimpanan agar fatigue cap (maks. 2 pesan / 14 hari) bekerja antar-run. Belum ada tabel khusus; bila dibuat, itu migrasi milik James.
 3. **Consent dan komplain — James/Moses.** Fixture `consent_events.csv` dan `service_cases.csv` ada; pastikan sudah dimuat ke tabel yang bisa dibaca `api/`.
 4. **Endpoint ganda.** `POST /next-best-actions` (manual, teks bebas) tumpang tindih dengan `/evaluate`. Sesuai arahan mentor, sisakan satu.
+
+### Pembaruan 21 Nov 2026 (setelah dokumen TEAM_ALIGNMENT Moses)
+
+- `lookup_scores` kini menolak skor bila `usage_approved` bukan `True` (`MODEL_USAGE_NOT_APPROVED`) dan bila reviewer = pembuat model (`model_author`, bila diketahui). Sumber `usage_approved` belum ada; sampai ada, NBA menjawab "belum disetujui untuk dipakai".
+- `explain.py` tidak lagi menerjemahkan reason code. Kalimat alasan skor dari `score_explanations.explain_contributions` disisipkan **apa adanya** lewat parameter `score_explanation`, hanya bila skor dipakai.
+- Jangan membuat `EligibilityProfile` dengan `tenure_days=0` / `has_active_membership=False` bila sumbernya belum ada; kirim `None`.
+- Kontrak input lengkap dan jawaban D5: `D5_NBA_INPUT_CONTRACT.md`.
 
 ## 5. Untuk Marvin (UI)
 
