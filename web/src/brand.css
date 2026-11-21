@@ -40,13 +40,13 @@ button { transition: background-color .16s ease, color .16s ease, border-color .
 .button-secondary { border-color: #dfe4da; background: #fffefa; }
 .icon-button, .more-button { border-radius: 8px; }
 
-.dashboard-heading { position: relative; min-height: 218px; overflow: hidden; margin-bottom: 20px; padding: 30px 34px; border: 1px solid #254b38; border-radius: 16px; background: #1f4735; box-shadow: 0 14px 30px rgba(30, 68, 49, .12); }
+.dashboard-heading { position: relative; min-height: 218px; overflow: hidden; margin-bottom: 20px; padding: 30px 34px; border: 1px solid #203954; border-radius: 16px; background: #14243a; box-shadow: 0 14px 30px rgba(20, 36, 58, .12); }
 .dashboard-heading::after { position: absolute; top: -90px; right: 11%; width: 310px; height: 310px; border: 1px solid rgba(231, 237, 216, .13); border-radius: 48% 52% 60% 40%; transform: rotate(32deg); content: ''; pointer-events: none; }
 .dashboard-heading::before { position: absolute; top: -43px; right: 13%; width: 218px; height: 218px; border: 1px solid rgba(231, 237, 216, .11); border-radius: 50%; content: ''; pointer-events: none; }
 .dashboard-heading > div, .dashboard-heading .heading-action { z-index: 1; }
 .dashboard-heading .eyebrow { color: #c1d0bd; }
-.dashboard-heading h1 { max-width: 640px; margin: 10px 0 9px; color: #fffdf5; font-size: clamp(30px, 3vw, 43px); line-height: 1.07; letter-spacing: -1.35px; }
-.dashboard-heading p { color: #d0dbd0; }
+.page-content .dashboard-heading h1 { max-width: 640px; margin: 10px 0 9px; color: #fffdf5; font-size: clamp(30px, 3vw, 43px); line-height: 1.07; letter-spacing: -1.35px; }
+.page-content .dashboard-heading p { color: #d0dbd0; }
 .dashboard-heading .button-secondary { color: #f6f5ed; border-color: rgba(255,255,255,.23); background: rgba(255,255,255,.07); }
 .dashboard-heading .button-secondary:hover { background: rgba(255,255,255,.13); }
 .dashboard-heading .button-primary { color: #253e31; border-color: #e3d6ae; background: #e8ddb8; box-shadow: none; }
@@ -187,7 +187,7 @@ button { transition: background-color .16s ease, color .16s ease, border-color .
   .global-search span { display: none; }
   .page-content { padding: 22px 15px 30px; }
   .dashboard-heading { min-height: unset; padding: 24px 22px; }
-  .dashboard-heading h1 { font-size: clamp(29px, 7vw, 38px); }
+  .page-content .dashboard-heading h1 { font-size: clamp(29px, 7vw, 38px); }
   .dashboard-heading::before, .dashboard-heading::after { right: -27%; }
   .page-heading { align-items: flex-start; flex-direction: column; gap: 15px; }
   .heading-action { width: 100%; flex-wrap: wrap; }

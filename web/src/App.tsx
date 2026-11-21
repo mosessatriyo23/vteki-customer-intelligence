@@ -1228,9 +1228,22 @@ function ModelPredictionReviewPage({ token, userId, canLinkIdentity }: { token: 
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState(false)
+  const [runsLoading, setRunsLoading] = useState(true)
+  const [recordsLoading, setRecordsLoading] = useState(false)
+  const [runsLoadFailed, setRunsLoadFailed] = useState(false)
+  const [recordsLoadFailed, setRecordsLoadFailed] = useState(false)
 
   async function refreshRuns() {
-    setRuns(await api.modelPredictionRuns(token))
+    setRunsLoading(true)
+    setRunsLoadFailed(false)
+    try {
+      setRuns(await api.modelPredictionRuns(token))
+    } catch (failure) {
+      setRunsLoadFailed(true)
+      throw failure
+    } finally {
+      setRunsLoading(false)
+    }
   }
 
   useEffect(() => { void refreshRuns().catch((failure) => setError(failure instanceof Error ? failure.message : 'Gagal memuat antrean model.')) }, [token])
@@ -1239,12 +1252,17 @@ function ModelPredictionReviewPage({ token, userId, canLinkIdentity }: { token: 
     setSelectedRun(run)
     setRecords([])
     setTotalRecords(run.record_count)
+    setRecordsLoadFailed(false)
+    setRecordsLoading(true)
     try {
       const page = await api.modelPredictionRecords(token, run.id)
       setRecords(page.records)
       setTotalRecords(page.total)
     } catch (failure) {
+      setRecordsLoadFailed(true)
       setError(failure instanceof Error ? failure.message : 'Gagal memuat hasil model.')
+    } finally {
+      setRecordsLoading(false)
     }
   }
 
@@ -1330,7 +1348,9 @@ function ModelPredictionReviewPage({ token, userId, canLinkIdentity }: { token: 
         </form>
         <section className="panel model-run-panel">
           <div className="panel-heading"><div><div className="panel-kicker">VERSI & REVIEW</div><h2>Artefak tersimpan</h2></div><span className="model-count">{runs.length}</span></div>
-          {!runs.length && <div className="empty-state">Belum ada artefak Moses yang diimpor.</div>}
+          {runsLoading && <div className="empty-state" role="status">Memuat daftar artefak Moses…</div>}
+          {!runsLoading && runsLoadFailed && <div className="empty-state" role="alert">Daftar artefak gagal dimuat. Coba muat ulang halaman.</div>}
+          {!runsLoading && !runsLoadFailed && !runs.length && <div className="empty-state">Belum ada artefak Moses yang diimpor.</div>}
           {runs.map((run) => <button className={`model-run-row ${selectedRun?.id === run.id ? 'selected' : ''}`} key={run.id} onClick={() => void openRun(run)}>
             <span className="model-run-icon"><ChartNoAxesCombined size={17} /></span>
             <span className="model-run-copy"><b>{run.model_version}</b><small>{run.prediction_type} · {run.record_count.toLocaleString('id-ID')} baris · {new Date(run.imported_at).toLocaleDateString('id-ID')}</small></span>
@@ -1342,7 +1362,7 @@ function ModelPredictionReviewPage({ token, userId, canLinkIdentity }: { token: 
         {selectedRun ? <section className="panel model-record-panel">
           <div className="panel-heading"><div><div className="panel-kicker">VERSI {selectedRun.model_version}</div><h2>Baris prediksi</h2></div><span className="model-review-status">DEVELOPMENT · NON-SERVING</span></div>
           <div className="model-lineage-grid"><div><small>Fitur</small><b>{selectedRun.feature_set_version}</b></div><div><small>Label</small><b>{selectedRun.label_version}</b></div><div><small>Produser</small><b>{selectedRun.producer_version}</b></div><div><small>Checksum manifest</small><code>{selectedRun.manifest_hash.slice(0, 16)}…</code></div></div>
-          <div className="model-table-wrap"><table className="model-score-table"><thead><tr><th>Golden ID & pelanggan aplikasi</th><th>Cutoff</th><th>Skor mentah</th><th>Status kontrak/review</th><th>Alasan prediksi</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><code>{record.customer_id}</code><small>{record.application_customer ? `${record.application_customer.customer_code} · ${record.application_customer.full_name} · identity ${record.identity_status ?? 'tidak diketahui'}` : `Tidak dipetakan ke pelanggan NBA · identity ${record.identity_status ?? 'tidak ditemukan'}`}</small>{canLinkIdentity && record.mapping_candidate && <button className="button-sm button-approve model-link-button" disabled={busy} onClick={() => void linkPredictionIdentity(record)}>Tautkan ke {record.mapping_candidate.customer_code}</button>}</td><td>{record.cutoff_at}</td><td>{record.score === null ? 'Kosong' : record.score.toFixed(4)}{record.band && <small>Band usulan: {record.band}</small>}</td><td>{record.contract_status}<small>Run: {selectedRun.review_status === 'reviewed' ? 'Sudah ditinjau' : selectedRun.review_status === 'rejected' ? 'Ditolak' : 'Menunggu review'} · non-serving</small></td><td>{record.reason_codes.length ? <ul className="model-reason-list">{record.reason_codes.map((reason, index) => <li key={`${String(reason.code ?? 'reason')}-${index}`}>{explainPredictionReason(reason)}</li>)}</ul> : 'Belum tersedia'}</td></tr>)}</tbody></table></div>
+          {recordsLoading ? <div className="empty-state" role="status">Memuat baris prediksi…</div> : recordsLoadFailed ? <div className="empty-state" role="alert">Baris prediksi gagal dimuat. Pilih ulang artefak atau muat ulang halaman.</div> : records.length ? <div className="model-table-wrap"><table className="model-score-table"><thead><tr><th>Golden ID & pelanggan aplikasi</th><th>Cutoff</th><th>Skor mentah</th><th>Status kontrak/review</th><th>Alasan prediksi</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><code>{record.customer_id}</code><small>{record.application_customer ? `${record.application_customer.customer_code} · ${record.application_customer.full_name} · identity ${record.identity_status ?? 'tidak diketahui'}` : `Tidak dipetakan ke pelanggan NBA · identity ${record.identity_status ?? 'tidak ditemukan'}`}</small>{canLinkIdentity && record.mapping_candidate && <button className="button-sm button-approve model-link-button" disabled={busy} onClick={() => void linkPredictionIdentity(record)}>Tautkan ke {record.mapping_candidate.customer_code}</button>}</td><td>{record.cutoff_at}</td><td>{record.score === null ? 'Kosong' : record.score.toFixed(4)}{record.band && <small>Band usulan: {record.band}</small>}</td><td>{record.contract_status}<small>Run: {selectedRun.review_status === 'reviewed' ? 'Sudah ditinjau' : selectedRun.review_status === 'rejected' ? 'Ditolak' : 'Menunggu review'} · non-serving</small></td><td>{record.reason_codes.length ? <ul className="model-reason-list">{record.reason_codes.map((reason, index) => <li key={`${String(reason.code ?? 'reason')}-${index}`}>{explainPredictionReason(reason)}</li>)}</ul> : 'Belum tersedia'}</td></tr>)}</tbody></table></div> : <div className="empty-state">Tidak ada baris prediksi pada artefak ini.</div>}
           <div className="model-record-footer">Menampilkan {records.length.toLocaleString('id-ID')} dari {totalRecords.toLocaleString('id-ID')} baris. Skor mentah ditampilkan untuk review; output belum boleh digunakan untuk memilih pelanggan atau membuat NBA.</div>
           {records.length < totalRecords && <button className="button button-secondary model-load-more" onClick={() => void loadMoreRecords()}>Muat 100 baris berikutnya</button>}
           <div className="model-review-form">
