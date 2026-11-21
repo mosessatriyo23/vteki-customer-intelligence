@@ -1,5 +1,26 @@
 # Panduan bersama Moses, Christ, dan Marvin: progres dan penyelesaian MVP
 
+> ## Pembaruan 2026-11-22 (baca dahulu; bagian di bawah ini adalah baseline `6b40f16`)
+>
+> `main` kini `dff1002`. Beberapa pernyataan "belum ada" di bawah **sudah tidak berlaku**:
+>
+> | Pernyataan lama | Kondisi terbaru |
+> | --- | --- |
+> | NBA dipanggil dengan `ai_scores=None` (§4.2) | `api/decisions.py` dan `worker/tasks.py` membaca prediksi lewat `api/decision_inputs.py` dan memanggil adapter `services/decision/nba/serving.py` |
+> | Campaign hanya simulator tanpa riwayat kontak | Pipeline campaign Christ dipanggil worker; riwayat kontak (`act.campaign_contact_history`, migrasi 0026) disimpan dan dibaca NBA; outcome kosong berstatus `AWAITING_OUTCOMES`, bukan angka contoh |
+> | Endpoint keputusan manual dan override ganda | `POST /decisions/next-best-actions` dan override di `api/decisions.py` dihapus; override tersisa di `api/governance.py` |
+>
+> **Masih berlaku, dan inilah penyebab skor belum bisa dipakai:**
+>
+> 1. `usage_approved` selalu `None` (`api/decision_inputs.py`). Belum ada sumber izin penggunaan, jadi NBA menjawab `MODEL_USAGE_NOT_APPROVED`. Perlu keputusan D1/D2 oleh manusia; jangan diganti `True`.
+> 2. Producer churn Moses hanya mengeluarkan `SCHEMA_PARTIAL`/`INVALID_SCORE`. Loader kini menolak keduanya dan hanya membaca tipe `CHURN`, dengan cutoff diurutkan sebagai waktu (bukan teks). Akibatnya **tidak ada data nyata yang lolos sampai status yang lengkap dan disetujui ada**. Ini disengaja (fail-closed), bukan bug. Catatan: alasan yang tampil di UI untuk kasus ini masih "skor belum tersedia" (`SCORE_ROW_MISSING`), bukan "kontrak belum lengkap"; pembedaan alasan perlu disepakati dengan Christ.
+> 3. Propensity, CLV, tier dan lifecycle dibaca dari `source_record`, belum dari sumber yang disetujui. Producer churn tidak menghasilkannya. Jangan mengisi nilai buatan.
+> 4. Consent, komplain, kelayakan dan ketersediaan produk masih `None` di API/worker, sehingga evaluasi belum menghasilkan keputusan promosi walau skor sudah sah.
+> 5. Worker scoring belum ada (`PIPELINE_STEPS = ("audit_summary",)`); kalimat alasan PR #58 belum dipanggil producer mana pun.
+> 6. Jawaban Christ ([D1–D7](../christ_business/integration/JAWABAN_TIM_D1_D7_CHRIST.md), [D5](../christ_business/integration/D5_NBA_INPUT_CONTRACT.md)) adalah **usulan Christ, bukan keputusan tim/mentor**. P1–P8 belum dijawab. Nama pembuat model, reviewer dan PIC masih kosong.
+>
+> Pertanyaan yang belum diputuskan dan menjadi syarat sebelum implementasi berikutnya: sumber `usage_approved` (D1/D2), cut-off band 0,30/0,60/0,80, pemetaan tier CLV, "mode terbatas per aksi" (Christ mengusulkan ditunda), dan perubahan skema bila diperlukan (James dilibatkan karena migrasi 0026 sudah dibuat Marvin).
+
 **Tanggal:** 21 November 2026. **Baseline kode:** `main` pada merge PR #58, `6b40f16`.
 **Pembaca:** Moses (data/model), Christ/Chris (NBA dan kebijakan bisnis), Marvin (integrasi aplikasi/UI).
 
