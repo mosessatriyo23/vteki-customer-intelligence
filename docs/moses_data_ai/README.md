@@ -2,6 +2,8 @@
 
 Scope that Moses can complete independently: generator/audit, validation/ingestion dev, Identity Resolution, Customer360, RFM/lifecycle (PROPOSED), source/Golden EDA, historical features, labels/baseline/diagnostics, model card and team handoff.
 
+**Baca dahulu untuk koordinasi Moses–Christ–Marvin:** [TEAM_ALIGNMENT_MVP_2026-11-21.md](TEAM_ALIGNMENT_MVP_2026-11-21.md) — progres, sambungan yang belum ada, keputusan bersama dan pembagian kerja menuju MVP.
+
 Start from [MOSES_CURRENT_HANDOFF.md](MOSES_CURRENT_HANDOFF.md), then [MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md) for implementation boundaries. `model_card_development_v1.md` retains historical baseline evidence.
 
 For cross-team implementation tasks, owners, acceptance evidence and handoff steps, read [`CROSS_TEAM_IMPLEMENTATION_GUIDE.md`](CROSS_TEAM_IMPLEMENTATION_GUIDE.md). Use [`READINESS_REVIEW_PACKET_2026-11-16.md`](READINESS_REVIEW_PACKET_2026-11-16.md) for the compatibility matrix, historical acceptance scenarios, coverage inventory and Gate D template. Latest sprint/gate status: [`sprint_gate_status_2026-11-14.md`](sprint_gate_status_2026-11-14.md).
