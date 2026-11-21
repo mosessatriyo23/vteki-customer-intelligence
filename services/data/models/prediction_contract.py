@@ -22,6 +22,8 @@ import math
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from services.data.models.score_explanations import explain_contributions
+
 PREDICTION_TYPE = "CHURN"
 BAND_CUTOFFS_VERSION = "frd-requirement-capstone-2.1-dev"
 #: (exclusive upper bound, band); the last band is open-ended [0.80, 1].
@@ -32,7 +34,7 @@ VALID_DAYS = 30
 MIN_REASON_CODES = 3
 MIN_DISTINCT_CONCEPTS = 3
 IDENTITY_TIME_POLICY = "CURRENT_SNAPSHOT_RETROSPECTIVE"
-PRODUCER_VERSION = "prediction-contract-dev-v2"
+PRODUCER_VERSION = "prediction-contract-dev-v3"
 SCHEMA_PARTIAL = "SCHEMA_PARTIAL"
 INVALID_SCORE = "INVALID_SCORE"
 STATUSES = (SCHEMA_PARTIAL, INVALID_SCORE)
@@ -144,6 +146,13 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
     raw = prediction["churn_probability"]
     score_ok = _valid_score(raw)
     reason_count_ok = len(codes) >= MIN_REASON_CODES
+    score_explanation = None
+    if "contributions" in prediction:
+        if horizon != 90:
+            raise ValueError("score explanation is only defined for the 90-day churn")
+        score_explanation = explain_contributions(
+            prediction["contributions"], target="churn90"
+        )
     status_reasons = [
         "MISSING_PREDICTION_ID",
         "UNAPPROVED_TAXONOMY",
@@ -176,6 +185,7 @@ def build_record(prediction: dict, reasons: dict, *, generated_at: str) -> dict:
         "reason_status": reasons["status"],
         "approved_taxonomy": False,
         "display_text": None,
+        "score_explanation": score_explanation,
         "model_version": prediction["model_version"],
         "feature_set_version": prediction["feature_version"],
         "label_version": prediction["label_version"],
