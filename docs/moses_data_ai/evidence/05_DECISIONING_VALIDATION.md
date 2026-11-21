@@ -1,5 +1,7 @@
 # 05 — Decisioning validation handoff (development only)
 
+> **Catatan historis (2026-11-21):** status di bawah mencerminkan 2026-11-17. Status terkini dan batas integrasi: [handoff Moses](../MOSES_CURRENT_HANDOFF.md) dan [ledger](../MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md).
+
 **As of:** 2026-11-17 · **Requested by:** James. **Joint ownership:** Christ owns business policy/decisioning approval; Moses integrates model/score contracts and reports evidence; James owns historical platform contract. **Reviewer:** pending (Christ / James / Moses); **approval date:** not granted. Checkout includes `main` `7e09616` (Christ PR #39) and Moses PR #38 `aa2a23d`.
 
 ```text

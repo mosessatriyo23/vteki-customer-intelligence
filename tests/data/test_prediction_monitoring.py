@@ -53,6 +53,14 @@ def test_identical_scores_stable_and_counts_are_exact():
         assert report[flag] is False
 
 
+def test_unavailable_reasons_exactly_explain_null_sections():
+    report = build_report(rows([0.5], BASE) + rows([0.5], CURRENT), BASE, CURRENT)
+    reasons = report["unavailable_reasons"]
+    assert set(reasons) == {"band_mix", "segment_performance"}
+    assert all(isinstance(r, str) and r.strip() for r in reasons.values())
+    assert report["band_mix"] is None and report["segment_performance"] is None
+
+
 def test_shift_generates_advisory_not_automatic_retraining():
     report = build_report(
         rows([0.05] * 10, BASE) + rows([0.95] * 20, CURRENT), BASE, CURRENT
@@ -96,6 +104,19 @@ def test_empty_or_reversed_period_is_refused():
             build_report(rows([0.5], BASE) + rows([0.5], CURRENT), baseline, current)
     with pytest.raises(ValueError):
         build_report(rows([0.5], BASE), BASE, CURRENT)
+
+
+def test_naive_cutoff_is_refused():
+    naive = "2026-06-01T00:00:00"
+    with pytest.raises(ValueError, match="aware timestamp"):
+        build_report(rows([0.5], BASE) + rows([0.5], naive), BASE, naive)
+
+
+def test_mixed_model_identity_is_refused():
+    data = rows([0.5], BASE) + rows([0.5], CURRENT)
+    data[-1]["model_version"] = "other"
+    with pytest.raises(ValueError, match="one model/target identity"):
+        build_report(data, BASE, CURRENT)
 
 
 def test_missing_identity_is_refused():

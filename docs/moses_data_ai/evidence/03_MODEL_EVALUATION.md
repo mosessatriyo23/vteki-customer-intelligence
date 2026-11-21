@@ -1,5 +1,7 @@
 # 03 — Model evaluation evidence (development only)
 
+> **Catatan historis (2026-11-21):** status di bawah mencerminkan 2026-11-17. Model fitted dan perbandingan tersimpan: [bukti benchmark](../BENCHMARK_EVIDENCE_2026-11-20.md); tidak ada model pemenang atau persetujuan.
+
 **As of:** 2026-11-17 · **Scope:** synthetic capstone data; checkout includes `main` `7e09616` and Moses PR #38 `aa2a23d`. **Reviewer:** pending (Christ / James / Moses). **Approval date:** not granted. `training_ready=false`, `experiment_ready=false`, `final_model=false`.
 
 ## Requirement and evaluation target

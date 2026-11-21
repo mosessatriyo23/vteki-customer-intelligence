@@ -20,7 +20,7 @@
 
 ## Kontrak kolaborasi dan keputusan belum final
 
-Dokumen `docs/moses_data_ai/TEAM_HANDOFF_2026-10-16.md` pada `main` menyatakan eksperimen Moses memakai **data sintetis**; status feature historis `training_ready=false` dan label/baseline `PROPOSED` hingga kontrak teknis dan definisi bisnis disetujui.
+Dokumen handoff Moses Oktober pada `main` saat catatan ini ditulis menyatakan eksperimen Moses memakai **data sintetis**; status feature historis `training_ready=false` dan label/baseline `PROPOSED` hingga kontrak teknis dan definisi bisnis disetujui. Dokumen Oktober tersebut sudah dihapus karena usang; status terkini tersedia di [handoff Moses](../moses_data_ai/MOSES_CURRENT_HANDOFF.md), bukan sebagai pengganti bukti historis keputusan di atas.
 
 Pertanyaan untuk **James** (status `PROPOSED`, butuh keputusan lintas tim):
 

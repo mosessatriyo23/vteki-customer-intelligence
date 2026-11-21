@@ -1,5 +1,7 @@
 # 01 — Data readiness, quality and lineage (synthetic development)
 
+> **Catatan historis (2026-11-21):** status di bawah mencerminkan 2026-11-17. Bukti terbaru: [laporan kualitas data offline](../DATA_QUALITY_REPORT_DEV_2026-11-20.md) dan [validasi ingestion](../INGESTION_VALIDATION_EVIDENCE_2026-11-20.md). PIT/`known_at` dan acceptance James tetap terbuka.
+
 **Date:** 2026-11-17. **Business source:** `docs/christ_business/reference/Requirement_Capstone.md` (local equivalent: `requirements/extracted_text/Requirement_Capstone.txt`). **Owner:** Moses (quality and input inventory); James (platform provenance/history). **Reviewer:** pending. **Approval date:** not granted.
 
 ```text

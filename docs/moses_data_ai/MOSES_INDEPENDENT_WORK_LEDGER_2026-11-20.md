@@ -13,12 +13,15 @@ Dokumen ini membedakan implementasi development dari acceptance requirement. Tid
 | Definisi fitur K-03 | #52 | Skeleton in-memory; DRAFT/ACTIVE/DEPRECATED, immutability, penolakan restricted fields dari daftar eksplisit caller; belum integrasi gov.restricted_attribute/persistence |
 | Disclaimer sintetis TRD 9.7 | #52 | Tujuh generator evaluasi utama; tidak memperbarui artefak historis, tidak mengklaim seluruh jenis laporan sudah tercakup |
 
-## Implementasi mandiri terbaru — cek status PR sebelum menganggap masuk main
+## Implementasi mandiri terbaru — status diperbarui 2026-11-21
+
+PR #53, #54 dan #56 sudah merged; status diverifikasi melalui GitHub CLI pada 2026-11-21.
 
 - PR #53: metadata inventaris terverifikasi (28 focused tests, review independen bersih), importance renewal-membership (8.465 holdout rows, review bersih), metadata algoritma/hyperparameter aktual pada empat generator eksperimen (56 tests bersama suite existing, review bersih). Artefak lama tetap tidak lengkap, bukan ditambal di tempat.
 - Churn calibrated tiga-fold importance: implementasi/run lokal 33.779 holdout rows, baseline AUC 0,8944692343 dan Brier 0,0990527914 cocok dengan evaluation serta saved test predictions; review independen bersih (5 focused tests passed). Output `artifacts/models/calibrated_churn_importance_20261120_subagent` tidak menimpa artefak lama.
 - Handoff terbaru sudah ditambah status terkini; C1/C3/C5 di permintaan lintas tim ditandai historis dengan pointer ke rekonsiliasi v1.4.
-- Gate gabungan lokal terbaru: 1429 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. Ini bukan acceptance PostgreSQL atau bukti approval model.
+- PR #56: per-batch quality-report offline (bukan blocking platform), tes leakage event-time, benchmark identity/model serta validasi ingestion. Run validation ulang batch sintetis 2.205.052 baris `valid=true` dalam 345 detik; run pertama timeout >600 detik, penyebab belum ditemukan. Identity pair recall 0,938893 di bawah aspirasi 95%.
+- Gate gabungan lokal terverifikasi terakhir pada PR #56: 1458 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. Ini bukan acceptance PostgreSQL atau bukti approval model.
 
 ## Batas finish mandiri
 

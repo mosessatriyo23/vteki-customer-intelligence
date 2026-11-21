@@ -30,6 +30,11 @@ specificity 0.97075. This reveals substantial missed churn positives despite hig
 accuracy. Median revenue baseline MAE 3817698.51 IDR; mean baseline MAE 3899626.65 IDR.
 These values must not be presented as final predictive performance.
 
+Preserved from the retired scope-completion summary (same run, synthetic and retrospective):
+holdout 2026-06-01 has 32850 complete eligible rows with 20.59% churn prevalence. Recency rule
+confusion counts: TP 3471, FN 3292, FP 763, TN 25324. Always-non-churn accuracy is 79.41%
+(balanced accuracy 50%), which shows raw accuracy is insufficient. Engineering diagnostics only.
+
 ## Readiness decision: BLOCKED
 
 Every run remains `training_ready=false`, `experiment_ready=false`, `final_model=false`.
