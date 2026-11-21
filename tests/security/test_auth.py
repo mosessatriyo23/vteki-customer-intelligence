@@ -1035,6 +1035,49 @@ def test_measurement_integral_float_campaign_id(client):
     assert campaign_schema["type"] == "integer"
 
 
+def test_measurement_with_missing_values_is_recorded_as_awaiting_outcomes(client):
+    token = token_for(client, "admin@example.com")
+    headers = {"Authorization": f"Bearer {token}"}
+    created = client.post(
+        "/campaigns",
+        headers=headers,
+        json={
+            "name": "Awaiting outcomes measurement test",
+            "target_segment": "Enterprise VIP",
+            "channel": "email_sim",
+            "message_draft": "Measurement values are not available yet.",
+        },
+    )
+    assert created.status_code == 201
+    campaign_id = created.json()["id"]
+
+    recorded = client.post(
+        "/monitoring/measurements",
+        headers=headers,
+        json={
+            "campaign_id": campaign_id,
+            "metric_name": "campaign_outcomes",
+            "observed_value": None,
+            "incremental_value": None,
+            "source_mode": "unclassified",
+            "measurement_status": "COMPUTED",
+        },
+    )
+    assert recorded.status_code == 201
+
+    dashboard = client.get("/monitoring/dashboard", headers=headers)
+    assert dashboard.status_code == 200
+    measurement = next(
+        item
+        for item in dashboard.json()["campaign_measurements"]
+        if item["campaign_id"] == campaign_id
+        and item["metric"] == "campaign_outcomes"
+    )
+    assert measurement["measurement_status"] == "AWAITING_OUTCOMES"
+    assert measurement["observed"] is None
+    assert measurement["incremental"] is None
+
+
 def test_email_schema_pattern_handles_many_subdomains():
     from api.validation import EMAIL_SCHEMA_PATTERN
 

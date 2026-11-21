@@ -64,6 +64,10 @@ class MeasurementCreate(BaseModel):
         if value in {"AWAITING_OUTCOMES", "CONTROL_GROUP_EMPTY"}:
             if observed is not None or incremental is not None:
                 raise ValueError("awaiting outcomes cannot include measurement values")
+        elif observed is None and incremental is None:
+            # The OpenAPI schema permits null measurements. Preserve that valid
+            # request, but record it honestly as pending instead of COMPUTED.
+            return "AWAITING_OUTCOMES"
         elif observed is None or incremental is None:
             raise ValueError("computed measurement values are required")
         return value
