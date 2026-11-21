@@ -1070,8 +1070,7 @@ def test_measurement_with_missing_values_is_recorded_as_awaiting_outcomes(client
     measurement = next(
         item
         for item in dashboard.json()["campaign_measurements"]
-        if item["campaign_id"] == campaign_id
-        and item["metric"] == "campaign_outcomes"
+        if item["campaign_id"] == campaign_id and item["metric"] == "campaign_outcomes"
     )
     assert measurement["measurement_status"] == "AWAITING_OUTCOMES"
     assert measurement["observed"] is None
