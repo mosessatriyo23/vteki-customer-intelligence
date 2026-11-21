@@ -272,7 +272,7 @@ def list_prediction_records(
                     else None
                 ),
                 "mapping_candidate": (
-                    mapping_candidates[record.customer_id]
+                    mapping_candidates.get(record.customer_id)
                     if record.customer_id not in application_customers
                     else None
                 ),
