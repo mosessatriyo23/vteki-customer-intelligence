@@ -2,6 +2,8 @@
 
 ## Status terbaru 2026-11-21 — menggantikan seluruh status di bawah
 
+> Untuk pembagian kerja dan keputusan bersama dengan Christ/Marvin menuju MVP, baca [TEAM_ALIGNMENT_MVP_2026-11-21.md](TEAM_ALIGNMENT_MVP_2026-11-21.md). PR #58 menambah formatter kalimat alasan Indonesia; belum tersambung ke API/worker/UI.
+
 - Paket Moses PR #48–#54 dan #56 sudah merged (`bdf74c6` adalah merge #56): wrapper CLV `actual_revenue`, inventaris model development, kontribusi log-odds propensity retail/renewal, monitoring PSI/volume/alert advisory, skeleton registry fitur K-03, disclaimer sintetis TRD 9.7, metadata inventaris/estimator terverifikasi, importance renewal-membership dan churn 3-fold terkalibrasi, laporan kualitas data offline (FR-CDI-004), tes leakage feature→label→fit→inference, serta bukti benchmark dan ingestion. Tidak satupun menutup kontrak serving, approval, atau acceptance lintas tim.
 - Monitoring: [bukti dan batasan](PREDICTION_MONITORING_DEV_2026-11-20.md). Retail PSI 0,08423 (STABLE), renewal 0,14147 (WARNING); bukan bukti degradasi performa. `band_mix`/`segment_performance` tetap `None` menunggu kebijakan band/segmen dari Christ. Semua output development-only.
 - Gate gabungan lokal terverifikasi terakhir (PR #56): **1458 passed, 19 skipped, 3 xfailed**; Ruff/Black/Mypy bersih. [Ledger penutupan mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md) membedakan implementasi, PR dan blocker lintas tim.
