@@ -221,6 +221,57 @@ def test_explicit_development_preview_preserves_structure_and_non_serving_flags(
     assert "churn_score" not in out
 
 
+def test_contract_carries_score_sentences_without_changing_approval_or_score():
+    prediction = _prediction("c1", 0.42)
+    prediction["contributions"] = [
+        dict(
+            feature="recency_days",
+            feature_value=10,
+            missing=False,
+            imputed_value=10,
+            log_odds_contribution=0.2,
+        ),
+        dict(
+            feature="tenure_days",
+            feature_value=None,
+            missing=True,
+            imputed_value=20,
+            log_odds_contribution=-0.1,
+        ),
+    ]
+    record = pc.build_record(
+        prediction, _reasons("c1", MIXED), generated_at=GENERATED_AT
+    )
+    explanation = record["score_explanation"]
+    assert explanation["version"] == "score-explanation-id-1.0"
+    assert "skor churn dalam 90 hari naik" in explanation["sentences"][0]
+    assert "nilai pengganti" in explanation["sentences"][1]
+    assert record["score"] == 0.42
+    assert record["contract_status"] == "SCHEMA_PARTIAL"
+    assert record["approved"] is False
+    assert record["serving_ready"] is False
+    assert record["display_text"] is None
+    assert record["producer_version"] == "prediction-contract-dev-v3"
+    assert "MISSING_BUSINESS_TEXT" in record["contract_status_reasons"]
+
+
+def test_explanation_rejects_non_90_day_horizon_instead_of_mislabeling():
+    prediction = {**_prediction("c1", 0.42), "horizon_days": 60, "contributions": []}
+    with pytest.raises(ValueError, match="90"):
+        pc.build_record(prediction, _reasons("c1", MIXED), generated_at=GENERATED_AT)
+
+
+def test_legacy_prediction_without_contributions_does_not_invent_sentences():
+    assert _build()["score_explanation"] is None
+
+
+@pytest.mark.parametrize("contributions", [None, {}, [{"feature": "recency_days"}]])
+def test_present_but_malformed_contributions_are_rejected(contributions):
+    prediction = {**_prediction("c1", 0.42), "contributions": contributions}
+    with pytest.raises(ValueError):
+        pc.build_record(prediction, _reasons("c1", MIXED), generated_at=GENERATED_AT)
+
+
 # ---- end-to-end layout fixtures -------------------------------------------
 
 
@@ -234,12 +285,16 @@ def _make_inputs(
     pred_flags=None,
     reason_flags=None,
     customers=("c1", "c2", "c3"),
+    contributions=None,
 ):
     pdir, rdir = root / "preds", root / "reasons"
     pdir.mkdir()
     rdir.mkdir()
     scores = {"c1": 0.1, "c2": 0.65, "c3": 0.9}
     preds = [_prediction(c, scores[c]) for c in customers]
+    if contributions is not None:
+        for p in preds:
+            p["contributions"] = contributions
     _write(pdir / "predictions.json", preds)
     pmanifest = {
         "development_only": True,
@@ -311,6 +366,30 @@ def test_run_counts_layout_and_determinism(tmp_path):
             line,
             parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)),
         )
+
+
+def test_run_writes_score_sentences_without_changing_readiness(tmp_path):
+    contributions = [
+        dict(
+            feature="recency_days",
+            feature_value=10,
+            missing=False,
+            imputed_value=10,
+            log_odds_contribution=0.2,
+        )
+    ]
+    pdir, rdir = _make_inputs(tmp_path, contributions=contributions)
+    pc.run(pdir, rdir, tmp_path / "out")
+    lines = (
+        (tmp_path / "out" / "records.jsonl").read_text(encoding="utf-8").splitlines()
+    )
+    records = [json.loads(line) for line in lines]
+    assert len(records) == 3
+    for record in records:
+        assert record["score_explanation"]["sentences"]
+        assert record["contract_status"] == "SCHEMA_PARTIAL"
+        assert record["approved"] is False
+        assert record["serving_ready"] is False
 
 
 def test_run_does_not_use_clock(tmp_path, monkeypatch):
