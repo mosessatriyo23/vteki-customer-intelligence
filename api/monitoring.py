@@ -1,3 +1,4 @@
+import math
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -30,9 +31,14 @@ class DriftMetricCreate(BaseModel):
 class MeasurementCreate(BaseModel):
     campaign_id: int = Field(ge=1, le=2_147_483_647, strict=True)
     metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
-    observed_value: float = Field(strict=True, allow_inf_nan=False)
-    incremental_value: float = Field(strict=True, allow_inf_nan=False)
+    observed_value: float | None = Field(default=None, strict=True, allow_inf_nan=False)
+    incremental_value: float | None = Field(
+        default=None, strict=True, allow_inf_nan=False
+    )
     source_mode: Literal["simulated", "unclassified"] = "unclassified"
+    measurement_status: Literal[
+        "COMPUTED", "AWAITING_OUTCOMES", "CONTROL_GROUP_EMPTY"
+    ] = "COMPUTED"
 
     @field_validator("campaign_id", mode="before")
     @classmethod
@@ -41,6 +47,25 @@ class MeasurementCreate(BaseModel):
         # Keep strict validation for booleans, strings and fractions.
         if isinstance(value, float) and value.is_integer():
             return int(value)
+        return value
+
+    @field_validator("observed_value", "incremental_value", mode="after")
+    @classmethod
+    def require_finite_optional_measurements(cls, value: float | None) -> float | None:
+        if value is not None and not math.isfinite(value):
+            raise ValueError("measurement values must be finite")
+        return value
+
+    @field_validator("measurement_status", mode="after")
+    @classmethod
+    def check_measurement_status(cls, value: str, info):
+        observed = info.data.get("observed_value")
+        incremental = info.data.get("incremental_value")
+        if value in {"AWAITING_OUTCOMES", "CONTROL_GROUP_EMPTY"}:
+            if observed is not None or incremental is not None:
+                raise ValueError("awaiting outcomes cannot include measurement values")
+        elif observed is None or incremental is None:
+            raise ValueError("computed measurement values are required")
         return value
 
 
@@ -93,6 +118,7 @@ def dashboard(
                 "observed": item.observed_value,
                 "incremental": item.incremental_value,
                 "source_mode": item.source_mode,
+                "measurement_status": item.measurement_status,
                 "measured_at": item.measured_at,
             }
             for item in measurements
@@ -182,6 +208,7 @@ def record_measurement(
             "observed": measurement.observed_value,
             "incremental": measurement.incremental_value,
             "source_mode": measurement.source_mode,
+            "measurement_status": measurement.measurement_status,
         },
     )
     db.commit()

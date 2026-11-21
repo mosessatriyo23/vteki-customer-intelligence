@@ -152,6 +152,9 @@ def list_nba_decisions(
                 "customer_id": d.customer_id,
                 "customer_code": customer.customer_code if customer else "N/A",
                 "customer_name": customer.full_name if customer else "Unknown",
+                "golden_customer_id": (
+                    customer.golden_customer_id if customer else None
+                ),
                 "recommended_action": d.recommended_action,
                 "rationale": d.rationale,
                 "status": d.status,
@@ -308,6 +311,7 @@ def get_observed_vs_incremental(
             "metric_name": m.metric_name,
             "observed_value": m.observed_value,
             "incremental_value": m.incremental_value,
+            "measurement_status": m.measurement_status,
             "measured_at": m.measured_at,
         }
         for m in measurements

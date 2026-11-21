@@ -98,6 +98,7 @@ type Decision = {
   apiId: number
   customerApiId: number
   customer: string
+  goldenCustomerId: string | null
   recommendation: string
   rationale: string
   status: 'Proposed' | 'Overridden' | 'Evaluated'
@@ -107,6 +108,8 @@ type Decision = {
   noActionReason?: string | null
   expectedValue: number | null
   modelVersion: string | null
+  modelReviewStatus: string | null
+  scoreUnavailableReason: string | null
   servingReady: boolean | null
   unavailableSources: string[]
 }
@@ -139,9 +142,12 @@ function mapCampaign(row: ApiCampaign): Campaign {
   }
   const executionResult = row.latest_execution?.result
   const audience = executionResult?.audience_size
-  const variantA = executionResult?.variant_a_count
   const variantB = executionResult?.variant_b_count
   const executionStatus = row.latest_execution?.status
+  const sentCount = executionResult?.sent_count
+  const skippedCount = executionResult?.skipped_count
+  const targetableCount = executionResult?.targetable_count
+  const controlExposureCount = executionResult?.control_exposure_count
   const status: Campaign['status'] = row.status === 'Active'
     ? (executionStatus === 'completed' ? 'Completed'
       : executionStatus === 'failed' || executionStatus === 'cancelled' ? 'Failed'
@@ -149,7 +155,7 @@ function mapCampaign(row: ApiCampaign): Campaign {
           : executionStatus === 'queued' ? 'Scheduled' : 'Unknown')
     : statusMap[row.status] ?? 'Unknown'
   const executionSummary = typeof audience === 'number'
-    ? `${audience.toLocaleString('id-ID')} pelanggan · A ${typeof variantA === 'number' ? variantA.toLocaleString('id-ID') : '—'} / B ${typeof variantB === 'number' ? variantB.toLocaleString('id-ID') : '—'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
+    ? `${audience.toLocaleString('id-ID')} pelanggan · target ${formatPersistedCount(targetableCount)} · terkirim simulasi ${formatPersistedCount(sentCount)} · dilewati ${formatPersistedCount(skippedCount)} · holdout ${formatPersistedCount(variantB)} · paparan holdout ${formatPersistedCount(controlExposureCount)} · ${executionResult?.external_delivery === false ? 'tanpa pengiriman eksternal' : 'mode pengiriman belum diketahui'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
     : executionStatus === 'failed'
       ? 'Simulasi gagal'
       : executionStatus
@@ -192,12 +198,15 @@ function mapDecision(row: ApiDecision): Decision {
     : []
   const expectedValue = row.expected_value ?? row.rationale.expected_value
   const modelVersion = row.model_version ?? row.rationale.model_version
+  const modelReviewStatus = row.rationale.model_review_status
+  const scoreUnavailableReason = row.rationale.score_unavailable_reason
   const servingReady = row.serving_ready ?? row.rationale.serving_ready
   return {
     apiId: row.id,
     id: `NBA-${row.id}`,
     customerApiId: row.customer_id,
     customer: `${row.customer_name} · ${row.customer_code}`,
+    goldenCustomerId: row.golden_customer_id ?? null,
     recommendation: row.recommended_action,
     rationale: typeof explanation === 'string' && explanation.trim() ? explanation : 'Alasan belum tersedia',
     status: row.status === 'overridden' ? 'Overridden' : row.status === 'accepted' ? 'Evaluated' : 'Proposed',
@@ -207,14 +216,35 @@ function mapDecision(row: ApiDecision): Decision {
     noActionReason: typeof row.rationale.no_action_reason === 'string' ? row.rationale.no_action_reason : null,
     expectedValue: typeof expectedValue === 'number' && Number.isFinite(expectedValue) && unavailableSources.length === 0 ? expectedValue : null,
     modelVersion: typeof modelVersion === 'string' && modelVersion.trim() ? modelVersion : null,
+    modelReviewStatus: typeof modelReviewStatus === 'string' ? modelReviewStatus : null,
+    scoreUnavailableReason: typeof scoreUnavailableReason === 'string' ? scoreUnavailableReason : null,
     servingReady: typeof servingReady === 'boolean' ? servingReady : null,
     unavailableSources,
   }
 }
 
+function scoreAvailabilityLabel(code: string | null): string | null {
+  if (!code) return null
+  const labels: Record<string, string> = {
+    SCORE_ROW_MISSING: 'Skor prediksi belum tersedia.',
+    MODEL_RUN_NOT_REVIEWED: 'Skor menunggu pemeriksaan reviewer.',
+    MODEL_RUN_REVIEWED_BY_SUBMITTER: 'Reviewer harus berbeda dari pengirim model.',
+    MODEL_USAGE_NOT_APPROVED: 'Skor belum disetujui untuk digunakan.',
+    SCORE_FIELDS_INCOMPLETE: 'Data skor belum lengkap; skor tidak digunakan.',
+    SCORE_VALUES_INVALID: 'Nilai skor tidak valid; skor tidak digunakan.',
+  }
+  return labels[code] ?? 'Skor belum dapat digunakan.'
+}
+
 function formatMeasurementValue(value: unknown, status?: unknown): string {
   if (String(status ?? '').toUpperCase() === 'AWAITING_OUTCOMES' || value === null || value === undefined) return 'Kosong'
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('id-ID') : String(value)
+}
+
+function formatPersistedCount(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value.toLocaleString('id-ID')
+    : 'Kosong'
 }
 
 function App() {
@@ -446,17 +476,6 @@ function App() {
     }
   }
 
-  async function createNBARecommendation(customerId: number, action: string, rationale: Record<string, unknown>) {
-    if (!token) return
-    try {
-      await api.createDecision(token, { customer_id: customerId, recommended_action: action, rationale })
-      await refreshWorkspace(token, user?.roles ?? [])
-      setNotice('Rekomendasi NBA tersimpan dan dapat ditinjau.')
-    } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Gagal membuat rekomendasi NBA.')
-    }
-  }
-
   async function evaluateNBA(customerId: number) {
     if (!token) return
     try {
@@ -587,7 +606,6 @@ function App() {
               decisions={decisions} 
               onOverride={applyHumanOverride}
               customers={customerRows}
-              onCreate={createNBARecommendation}
               onEvaluate={evaluateNBA}
               canCreate={canCreateNBA}
               canOverride={canOverrideNBA}
@@ -1002,14 +1020,10 @@ function IdentityReviewPage({ reviews, onResolve, onCreate, canResolve }: { revi
   </>
 }
 
-function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate, onEvaluate, canCreate, canOverride }: { decisions: Decision[]; onOverride: (id: string, selected: string, reason: string) => void; customers: Customer[]; onCreate: (customerId: number, action: string, rationale: Record<string, unknown>) => void; onEvaluate: (customerId: number) => void; canCreate: boolean; canOverride: boolean }) {
+function DecisionPage({ decisions, onOverride, customers: customerRows, onEvaluate, canCreate, canOverride }: { decisions: Decision[]; onOverride: (id: string, selected: string, reason: string) => void; customers: Customer[]; onEvaluate: (customerId: number) => void; canCreate: boolean; canOverride: boolean }) {
   const [selectedDecision, setSelectedDecision] = useState<Decision | null>(null)
   const [customAction, setCustomAction] = useState('')
   const [reason, setReason] = useState('')
-  const [createOpen, setCreateOpen] = useState(false)
-  const [newCustomerId, setNewCustomerId] = useState('')
-  const [newAction, setNewAction] = useState('')
-  const [newReason, setNewReason] = useState('')
   const [evaluationCustomerId, setEvaluationCustomerId] = useState('')
 
   function handleOverrideSubmit(e: React.FormEvent) {
@@ -1025,11 +1039,9 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
     <PageHeading 
       eyebrow="NEXT-BEST-ACTION & HUMAN OVERRIDE" 
       title="Layar Eksekusi NBA & Interface Human Override" 
-      subtitle="Proposal Next-Best-Action yang tersimpan dan fasilitas Human Override manual dengan pencatatan alasannya."
-      action={canCreate && <button className="button button-secondary" onClick={() => setCreateOpen((open) => !open)} disabled={!customerRows.length}><Plus size={15} /> Proposal manual</button>}
+      subtitle="Hasil evaluasi NBA yang tersimpan, alasan keputusan, dan fasilitas Human Override dengan pencatatan audit."
     />
     {canCreate && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customerId = Number(evaluationCustomerId); if (!customerId) return; onEvaluate(customerId) }}><div><div className="panel-kicker">EVALUASI PERSISTEN · CHRIS NBA ENGINE</div><p className="empty-state">Menjalankan engine pada customer terpilih. Input yang belum tersedia akan diblokir dan dicatat, bukan diisi dengan angka contoh.</p></div><label className="field-label">Pelanggan<select required value={evaluationCustomerId} onChange={(event) => setEvaluationCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><button className="button button-primary" type="submit" disabled={!customerRows.length}>Jalankan evaluasi NBA</button></form>}
-    {createOpen && <form className="panel decision-create-form" onSubmit={(event) => { event.preventDefault(); const customer = customerRows.find((item) => item.apiId === Number(newCustomerId)); if (!customer || !newAction.trim() || newReason.trim().length < 5) return; onCreate(customer.apiId, newAction.trim(), { source: 'manual', reason: newReason.trim() }); setCreateOpen(false); setNewAction(''); setNewReason('') }}><div className="field-full"><b>Proposal manual</b><small>Ditulis pengguna, bukan hasil model atau evaluasi Chris NBA Engine.</small></div><label className="field-label">Pelanggan<select required value={newCustomerId} onChange={(event) => setNewCustomerId(event.target.value)}><option value="">Pilih customer</option>{customerRows.map((customer) => <option key={customer.apiId} value={customer.apiId}>{customer.name} · {customer.id}</option>)}</select></label><label className="field-label">Tindakan yang diusulkan<input required value={newAction} onChange={(event) => setNewAction(event.target.value)} placeholder="Tulis proposal untuk ditinjau" /></label><label className="field-label">Alasan<textarea required minLength={5} rows={3} value={newReason} onChange={(event) => setNewReason(event.target.value)} placeholder="Jelaskan alasan proposal manual." /></label><button className="button button-primary" type="submit">Simpan proposal manual</button></form>}
     <div className="decision-grid">
       {decisions.map(d => (
         <article className="panel decision-card" key={d.id}>
@@ -1045,9 +1057,11 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
             <div className="nba-box">
               <div className="nba-label">{d.status === 'Evaluated' ? 'HASIL ENGINE:' : 'PROPOSAL NEXT-BEST-ACTION:'}</div>
               <div className="nba-text"><Sparkles size={16} /> {d.recommendation}</div>
+              <small>Golden Customer ID: {d.goldenCustomerId ?? 'Belum dipetakan'}</small>
               <small><b>Alasan:</b> {d.rationale}</small>
               <small>Nilai harapan: {d.expectedValue === null ? 'Kosong / belum tersedia' : d.expectedValue.toLocaleString('id-ID')}</small>
               <small>Model: {d.modelVersion ?? 'Belum tersedia'} · serving {d.servingReady === true ? 'disetujui' : d.servingReady === false ? 'belum disetujui' : 'belum diketahui'}</small>
+              <small>Review model: {d.modelReviewStatus === 'reviewed' ? 'Sudah diperiksa' : d.modelReviewStatus === 'rejected' ? 'Ditolak' : d.modelReviewStatus === 'pending_review' ? 'Menunggu pemeriksaan' : 'Belum tersedia'}{scoreAvailabilityLabel(d.scoreUnavailableReason) ? ` · ${scoreAvailabilityLabel(d.scoreUnavailableReason)}` : ''}</small>
               {d.unavailableSources.length > 0 && <small>Sumber belum tersedia: {d.unavailableSources.join(', ')}</small>}
               {d.engineVersion && <small>Engine {d.engineVersion}{d.status === 'Evaluated' ? ' · NO_ACTION tidak dapat dipakai untuk kampanye.' : ''}</small>}
             </div>
@@ -1068,7 +1082,7 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onCreate
           </div>
         </article>
       ))}
-      {!decisions.length && <div className="panel empty-state">Belum ada rekomendasi NBA tersimpan. Buat proposal dari customer yang tersedia.</div>}
+      {!decisions.length && <div className="panel empty-state">Belum ada hasil evaluasi NBA. Jalankan evaluasi untuk pelanggan yang tersedia.</div>}
     </div>
 
     {selectedDecision && (

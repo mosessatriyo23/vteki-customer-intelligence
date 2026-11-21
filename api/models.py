@@ -400,13 +400,50 @@ class CampaignMeasurement(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     campaign_id: Mapped[int] = mapped_column(Integer, index=True)
+    execution_job_id: Mapped[int | None] = mapped_column(
+        ForeignKey("act.batch_jobs.id", ondelete="RESTRICT"), nullable=True
+    )
     metric_name: Mapped[str] = mapped_column(String(100))
-    observed_value: Mapped[float] = mapped_column()
-    incremental_value: Mapped[float] = mapped_column()
+    observed_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    incremental_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    measurement_status: Mapped[str] = mapped_column(
+        String(32), default="LEGACY_RECORDED", nullable=False
+    )
     source_mode: Mapped[str] = mapped_column(
         String(24), default="unclassified", nullable=False
     )
     measured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+
+class CampaignContactHistory(Base):
+    __tablename__ = "campaign_contact_history"
+    __table_args__ = (
+        UniqueConstraint(
+            "execution_job_id", "customer_id", name="uq_campaign_contact_job_customer"
+        ),
+        {"schema": "act"},
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    execution_job_id: Mapped[int] = mapped_column(
+        ForeignKey("act.batch_jobs.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("act.campaigns.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("core.customers.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    customer_ref: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    action_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    is_commercial: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         nullable=False,

@@ -72,30 +72,22 @@ async function createDecision(request: APIRequestContext) {
   const token = await getToken(request, accounts.admin)
   const customer = await createCustomer(request)
 
-  const action = `E2E Override Test ${Date.now()}`
-
   const response = await request.post(
-    `${baseUrl}/api/decisions/next-best-actions`,
+    `${baseUrl}/api/decisions/next-best-actions/evaluate`,
     {
       headers: { Authorization: `Bearer ${token}` },
-      data: {
-        customer_id: customer.id,
-        recommended_action: action,
-        rationale: {
-          reason: 'Pengujian Playwright RBAC',
-          source: 'E2E',
-        },
-      },
+      data: { customer_id: customer.id },
     },
   )
 
   expect(response.status()).toBe(201)
 
   const result = await response.json()
+  expect(result.selected_action).toBe('NO_ACTION')
 
   return {
     id: result.id as number,
-    action,
+    action: result.selected_action as string,
   }
 }
 
@@ -115,7 +107,7 @@ test.describe('Frontend RBAC - empat role', () => {
 
     await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Proposal manual' }),
+      page.getByRole('button', { name: 'Jalankan evaluasi NBA' }),
     ).toBeVisible()
 
     await openPage(page, 'Pemantauan & Audit')
@@ -139,7 +131,7 @@ test.describe('Frontend RBAC - empat role', () => {
 
     await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Proposal manual' }),
+      page.getByRole('button', { name: 'Jalankan evaluasi NBA' }),
     ).toBeVisible()
 
     await expect(
@@ -167,7 +159,7 @@ test.describe('Frontend RBAC - empat role', () => {
 
     await openPage(page, 'Proposal Tindakan')
     await expect(
-      page.getByRole('button', { name: 'Proposal manual' }),
+      page.getByRole('button', { name: 'Jalankan evaluasi NBA' }),
     ).toHaveCount(0)
 
     await expect(
@@ -180,7 +172,7 @@ test.describe('Frontend RBAC - empat role', () => {
     ).toHaveCount(0)
   })
 
-  test('Campaign Manager berhasil melakukan Human Override', async ({
+  test('Campaign Manager tidak dapat override hasil NO_ACTION', async ({
     page,
     request,
   }) => {
@@ -196,55 +188,39 @@ test.describe('Frontend RBAC - empat role', () => {
     })
 
     await expect(card).toBeVisible({ timeout: 15000 })
-
-    await card
-      .getByRole('button', { name: 'Human Override Manual' })
-      .click()
-
-    await page
-      .getByLabel('Tindakan Override Baru (Manual Action)')
-      .fill('E2E - Berikan penawaran loyalitas khusus')
-
-    await page
-      .getByLabel(
-        'Alasan & Justifikasi Pengambilalihan (Mandatory Audit Reason)',
-      )
-      .fill(
-        'Penyesuaian strategi berdasarkan hasil evaluasi pengujian.',
-      )
-
-    await page
-      .getByRole('button', { name: 'Simpan Override' })
-      .click()
-
     await expect(
-      page.getByText('E2E - Berikan penawaran loyalitas khusus').first(),
-    ).toBeVisible({ timeout: 15000 })
+      card.getByRole('button', { name: 'Human Override Manual' }),
+    ).toHaveCount(0)
 
-    await expect(
-      page.locator('.override-label').filter({
-        hasText: 'DITERAPKAN HUMAN OVERRIDE:',
-      }).first(),
-    ).toBeVisible()
+    const token = await getToken(request, accounts.campaign)
+    const response = await request.post(
+      `${baseUrl}/api/governance/nba-decisions/${decision.id}/override`,
+      {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          selected_action: 'E2E - Berikan penawaran loyalitas khusus',
+          override_reason: 'Hasil NO_ACTION tidak dapat diubah menjadi tindakan promosi.',
+        },
+      },
+    )
+    expect(response.status()).toBe(409)
   })
 
   test('API menolak Analyst dan Operator melakukan override', async ({
     request,
   }) => {
-    const decision = await createDecision(request)
-
     for (const email of [accounts.analyst, accounts.operator]) {
       const token = await getToken(request, email)
 
       const response = await request.post(
-        `${baseUrl}/api/decisions/next-best-actions/${decision.id}/override`,
+        `${baseUrl}/api/governance/nba-decisions/2147483647/override`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
           },
           data: {
             selected_action: 'Aksi yang tidak diizinkan',
-            reason: 'Pengujian pembatasan akses role.',
+            override_reason: 'Pengujian pembatasan akses role.',
           },
         },
       )

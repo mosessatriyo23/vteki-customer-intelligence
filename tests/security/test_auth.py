@@ -16,9 +16,11 @@ from api.models import (
     AuditEvent,
     BatchJob,
     Campaign,
+    CampaignMeasurement,
     Customer,
     DecisionTrace,
     HumanOverride,
+    NBADecision,
     Role,
     User,
 )
@@ -89,6 +91,37 @@ def token_for(client: TestClient, email: str) -> str:
     )
     assert response.status_code == 200
     return response.json()["access_token"]
+
+
+def seed_proposed_decision(
+    customer_id: int,
+    *,
+    correlation_id: str,
+    recommended_action: str,
+    rationale: dict,
+) -> int:
+    """Create a legacy proposed row for override/linking regression coverage."""
+    with app.state.audit_session_factory() as db:
+        decision = NBADecision(
+            customer_id=customer_id,
+            correlation_id=correlation_id,
+            recommended_action=recommended_action,
+            rationale=rationale,
+            status="proposed",
+        )
+        db.add(decision)
+        db.flush()
+        db.add(
+            DecisionTrace(
+                correlation_id=correlation_id,
+                customer_code=f"TEST-{customer_id}",
+                trigger_event="nba.recommended",
+                decision_output=recommended_action,
+                step_logs=[{"decision_id": decision.id, "rationale": rationale}],
+            )
+        )
+        db.commit()
+        return decision.id
 
 
 def test_auth_openapi_declares_runtime_email_domain_restriction():
@@ -180,6 +213,13 @@ def test_nba_evaluation_is_persisted_fail_closed_and_not_campaign_eligible(
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     analyst_headers = {"Authorization": f"Bearer {analyst_token}"}
     campaign_headers = {"Authorization": f"Bearer {campaign_token}"}
+
+    legacy_manual = client.post(
+        "/decisions/next-best-actions",
+        headers=admin_headers,
+        json={"customer_id": 1, "recommended_action": "Aksi contoh"},
+    )
+    assert legacy_manual.status_code == 405
 
     registered = client.post(
         "/customers",
@@ -447,6 +487,7 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
     with app.state.audit_session_factory() as db:
         job = db.query(BatchJob).filter(BatchJob.kind == "campaign_execution").one()
         assert job.payload["channel_simulator"] is True
+        assert job.payload["batch_job_id"] == job.id
         assert job.status == "queued"
         assert db.query(Campaign).count() == 1
         assert db.query(Customer).count() == 0
@@ -459,6 +500,11 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
         assert job.status == "completed"
         assert job.result["delivery_mode"] == "simulated"
         assert job.result["external_delivery"] is False
+        measurement = db.query(CampaignMeasurement).one()
+        assert measurement.execution_job_id == job.id
+        assert measurement.measurement_status == "AWAITING_OUTCOMES"
+        assert measurement.observed_value is None
+        assert measurement.incremental_value is None
         trace = (
             db.query(AuditEvent)
             .filter(AuditEvent.correlation_id == correlation_id)
@@ -544,16 +590,12 @@ def test_campaign_recommendation_cannot_be_linked_twice(client: TestClient):
         },
     )
     assert customer.status_code == 201
-    recommendation = client.post(
-        "/decisions/next-best-actions",
-        headers=admin_headers,
-        json={
-            "customer_id": customer.json()["id"],
-            "recommended_action": "Send a retention offer",
-            "rationale": {"reason": "Customer requested follow-up"},
-        },
+    recommendation_id = seed_proposed_decision(
+        customer.json()["id"],
+        correlation_id="campaign-link-test",
+        recommended_action="Send a retention offer",
+        rationale={"reason": "Customer requested follow-up"},
     )
-    assert recommendation.status_code == 201
     campaign_headers = {
         "Authorization": f"Bearer {token_for(client, 'campaign@example.com')}"
     }
@@ -561,7 +603,7 @@ def test_campaign_recommendation_cannot_be_linked_twice(client: TestClient):
         "name": "Linked recommendation campaign",
         "target_segment": "Premium",
         "channel": "email_sim",
-        "nba_decision_id": recommendation.json()["id"],
+        "nba_decision_id": recommendation_id,
     }
     created = client.post("/campaigns", headers=campaign_headers, json=payload)
     duplicate = client.post("/campaigns", headers=campaign_headers, json=payload)
@@ -702,26 +744,21 @@ def test_nba_override_and_monitoring_dashboard(client: TestClient):
     )
     assert customer.status_code == 201
     correlation_id = "nba-human-override-4821"
-    request_headers = {**admin_headers, "X-Correlation-ID": correlation_id}
-    recommendation = client.post(
-        "/decisions/next-best-actions",
-        headers=request_headers,
-        json={
-            "customer_id": customer.json()["id"],
-            "recommended_action": "Send welcome offer",
-            "rationale": {"score": 0.82},
-        },
+    recommendation_id = seed_proposed_decision(
+        customer.json()["id"],
+        correlation_id=correlation_id,
+        recommended_action="Send welcome offer",
+        rationale={"score": 0.82},
     )
-    assert recommendation.status_code == 201
     campaign_headers = {
         "Authorization": f"Bearer {token_for(client, 'campaign@example.com')}"
     }
     override = client.post(
-        f"/decisions/next-best-actions/{recommendation.json()['id']}/override",
+        f"/governance/nba-decisions/{recommendation_id}/override",
         headers=campaign_headers,
         json={
             "selected_action": "Offer a service consultation",
-            "reason": "Customer requested advice instead",
+            "override_reason": "Customer requested advice instead",
         },
     )
     assert override.status_code == 200
@@ -781,15 +818,12 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
     )
     assert customer.status_code == 201
     created = client.post(
-        "/decisions/next-best-actions",
+        "/decisions/next-best-actions/evaluate",
         headers=headers,
-        json={
-            "customer_id": customer.json()["id"],
-            "recommended_action": "Book a service consultation",
-            "rationale": {"affinity": 0.82, "last_visit_days": 42},
-        },
+        json={"customer_id": customer.json()["id"]},
     )
     assert created.status_code == 201
+    assert created.json()["selected_action"] == "NO_ACTION"
     analyst_headers = {
         "Authorization": f"Bearer {token_for(client, 'analyst@example.com')}"
     }
@@ -798,8 +832,9 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
     )
     assert response.status_code == 200
     result = response.json()
-    assert result["decision_output"]["action"] == "Book a service consultation"
-    assert result["model_inputs"]["rationale"]["affinity"] == 0.82
+    assert result["decision_output"]["action"] == "NO_ACTION"
+    assert result["model_inputs"]["unavailable_sources"]
+    assert result["model_inputs"]["selected_action_id"] == "NO_ACTION"
     assert result["audit_events"]
     assert result["reconstructed_in_seconds"] < 300
 

@@ -142,6 +142,9 @@ def list_campaigns(
                         "incremental_value": measurement_by_campaign[
                             campaign.id
                         ].incremental_value,
+                        "measurement_status": measurement_by_campaign[
+                            campaign.id
+                        ].measurement_status,
                         "source_mode": measurement_by_campaign[campaign.id].source_mode,
                         "measured_at": measurement_by_campaign[campaign.id].measured_at,
                     }
@@ -343,6 +346,7 @@ def launch_campaign(
     )
     db.add(job)
     db.flush()
+    job.payload = {**(job.payload or {}), "batch_job_id": job.id}
     campaign.execution_job_id = job.id
     record_audit_event(
         db,

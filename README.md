@@ -37,8 +37,8 @@ Endpoint utama:
 - `GET /governance/reconstruct/{correlation_id}` untuk menyusun decision trace dan waktu rekonstruksi.
 - `GET /customers`, `GET /customers/{id}/provenance`, `GET/POST /identity-reviews`.
 - Campaign dibuat sebagai draft, dikirim untuk approval, `admin` atau `campaign_manager` dapat approve/reject, dan hanya campaign approved yang dapat diluncurkan.
-- `GET/POST /decisions/next-best-actions` dan endpoint `/override` untuk human override beralasan.
-- `POST /decisions/next-best-actions/evaluate` menjalankan Chris NBA Engine untuk customer terdaftar dan menyimpan hasil beserta versi engine, alasan, correlation ID, dan audit trace. Jika skor Moses yang serving-approved atau input consent/kelayakan belum tersedia, engine berjalan fail-closed dan menyimpan `NO_ACTION`; keputusan itu tidak dapat dipakai untuk campaign.
+- `GET /decisions/next-best-actions` membaca riwayat dan `POST /decisions/next-best-actions/evaluate` menjalankan Chris NBA Engine untuk customer terdaftar. Hasil menyimpan alasan, skor/model version bila tersedia, correlation ID, trace, dan audit event. Proposal tidak dibuat manual; bila input belum tersedia, engine menyimpan `NO_ACTION` fail-closed, bukan angka atau tindakan contoh. Human override hanya tersedia melalui endpoint governance.
+- Campaign yang disetujui menjalankan `run_campaign` di worker pada channel simulator. Hasil worker, pengukuran (termasuk status `AWAITING_OUTCOMES` tanpa angka), riwayat kontak terekspos, dan audit event disimpan di database.
 - `GET /monitoring/dashboard`, `POST /monitoring/drift`, `POST /monitoring/measurements`.
 - `POST /jobs`, `GET /jobs`, `GET /jobs/{id}`.
 
