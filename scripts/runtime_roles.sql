@@ -96,11 +96,25 @@ GRANT SELECT ON ALL TABLES IN SCHEMA
     identity, customer360, segmentation
 TO vteki_api_runtime;
 
--- Worker schema access.
-GRANT USAGE ON SCHEMA core, act, gov, stg TO vteki_worker_runtime;
+-- Worker schema access for campaign execution and Moses score reads.
+GRANT USAGE ON SCHEMA core, act, gov, ml, msr, stg TO vteki_worker_runtime;
 
 -- Worker reads customers for simulated campaign execution.
 GRANT SELECT ON core.customers TO vteki_worker_runtime;
+GRANT SELECT ON core.users TO vteki_worker_runtime;
+
+-- Worker loads an approved campaign and its reviewed prediction inputs.
+GRANT SELECT ON act.campaigns TO vteki_worker_runtime;
+GRANT SELECT ON
+    ml.prediction_review_runs,
+    ml.prediction_review_records
+TO vteki_worker_runtime;
+
+-- Worker checks contact frequency and persists contacts produced by simulation.
+GRANT SELECT, INSERT ON act.campaign_contact_history TO vteki_worker_runtime;
+
+-- Worker persists measured outcomes, including explicit pending/null results.
+GRANT SELECT, INSERT, UPDATE ON msr.campaign_measurements TO vteki_worker_runtime;
 
 -- Worker claims, retries, recovers and completes batch jobs.
 GRANT SELECT, INSERT, UPDATE ON act.batch_jobs TO vteki_worker_runtime;
@@ -117,7 +131,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA
 TO vteki_api_runtime;
 
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA
-    act, gov, stg
+    act, gov, msr, stg
 TO vteki_worker_runtime;
 
 -- Explicitly prohibit audit mutation.
@@ -130,5 +144,5 @@ REVOKE CREATE ON SCHEMA
     identity, customer360, segmentation
 FROM vteki_api_runtime;
 
-REVOKE CREATE ON SCHEMA core, act, gov, stg
+REVOKE CREATE ON SCHEMA core, act, gov, ml, msr, stg
 FROM vteki_worker_runtime;

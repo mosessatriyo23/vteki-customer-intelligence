@@ -194,6 +194,20 @@ jobs:
                           'MEMBER'
                       )
                   """,
+                  "Worker can use campaign and score schemas": """
+                      SELECT has_schema_privilege(
+                          'vteki_worker', 'core', 'USAGE'
+                      )
+                      AND has_schema_privilege(
+                          'vteki_worker', 'act', 'USAGE'
+                      )
+                      AND has_schema_privilege(
+                          'vteki_worker', 'ml', 'USAGE'
+                      )
+                      AND has_schema_privilege(
+                          'vteki_worker', 'msr', 'USAGE'
+                      )
+                  """,
                   "API can read audit": """
                       SELECT has_table_privilege(
                           'vteki_api', 'gov.audit_event', 'SELECT'
@@ -219,6 +233,11 @@ jobs:
                           'vteki_api', 'ml.prediction_review_runs', 'UPDATE'
                       )
                   """,
+                  "API can read campaign contact history": """
+                      SELECT has_table_privilege(
+                          'vteki_api', 'act.campaign_contact_history', 'SELECT'
+                      )
+                  """,
                   "Worker can read audit": """
                       SELECT has_table_privilege(
                           'vteki_worker', 'gov.audit_event', 'SELECT'
@@ -232,6 +251,59 @@ jobs:
                   "Worker can update batch jobs": """
                       SELECT has_table_privilege(
                           'vteki_worker', 'act.batch_jobs', 'UPDATE'
+                      )
+                  """,
+                  "Worker can read approved campaigns": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'act.campaigns', 'SELECT'
+                      )
+                  """,
+                  "Worker can read campaign approvers": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'core.users', 'SELECT'
+                      )
+                  """,
+                  "Worker can read reviewed Moses scores": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'ml.prediction_review_runs', 'SELECT'
+                      )
+                      AND has_table_privilege(
+                          'vteki_worker', 'ml.prediction_review_records', 'SELECT'
+                      )
+                  """,
+                  "Worker can read and write contact history": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'act.campaign_contact_history', 'SELECT'
+                      )
+                      AND has_table_privilege(
+                          'vteki_worker', 'act.campaign_contact_history', 'INSERT'
+                      )
+                  """,
+                  "Worker can persist campaign measurements": """
+                      SELECT has_table_privilege(
+                          'vteki_worker', 'msr.campaign_measurements', 'SELECT'
+                      )
+                      AND has_table_privilege(
+                          'vteki_worker', 'msr.campaign_measurements', 'INSERT'
+                      )
+                      AND has_table_privilege(
+                          'vteki_worker', 'msr.campaign_measurements', 'UPDATE'
+                      )
+                  """,
+                  "Worker can allocate campaign contact and measurement IDs": """
+                      SELECT has_sequence_privilege(
+                          'vteki_worker',
+                          pg_get_serial_sequence(
+                              'act.campaign_contact_history', 'id'
+                          ),
+                          'USAGE'
+                      )
+                      AND has_sequence_privilege(
+                          'vteki_worker',
+                          pg_get_serial_sequence(
+                              'msr.campaign_measurements', 'id'
+                          ),
+                          'USAGE'
                       )
                   """,
               }
