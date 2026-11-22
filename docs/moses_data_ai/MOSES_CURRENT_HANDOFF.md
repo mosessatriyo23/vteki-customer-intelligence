@@ -1,5 +1,9 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Monitoring calibrated propensity — slice lanjutan 2026-11-22
+
+PR #66 sudah merged (`b6ba429`): inference JSON offline untuk skor raw/calibrated POS tersedia. Runner monitoring kini mendukung bundle dedicated itu dengan validasi flag, horizon, checksum dan identitas dua ruang skor. [Bukti run nyata](CALIBRATED_PROPENSITY_MONITORING_DEV_2026-11-22.md): 75.002 baris per target, retail PSI 0,08072 (`STABLE`), renewal 1,45460 (`RETRAIN_RECOMMENDED`, advisory saja). Gate lokal slice monitoring: 1747 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. Belum menutup inference baru churn terkalibrasi atau dependensi kebijakan/platform di bawah.
+
 ## Pembaruan teknis 2026-11-22 — PR #65 merged `2569efc`
 
 - Propensity POS-only `retail_purchase30`/`renewal60` sekarang mengeluarkan kalimat atribusi matematis dari kontribusi sebenarnya (`score_explanation`), bukan alasan kausal atau taxonomy bisnis. Versi penjelasan `moses-propensity-log-odds-dev-1.1`, model tidak diganti.

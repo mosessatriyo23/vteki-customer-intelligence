@@ -3,10 +3,14 @@
 import hashlib
 import json
 import math
+from datetime import datetime, timezone
 
 import pytest
 
+from services.data.models import calibrated_propensity_inference, propensity_calibration
 from services.data.models.prediction_monitoring import build_report, run
+from tests.data.test_propensity_calibration import CUTOFFS, TARGETS
+from tests.data.test_propensity_experiment import write_inputs
 
 
 def rows(scores, cutoff):
@@ -272,6 +276,175 @@ def test_run_refuses_existing_output_and_ground_truth_paths(tmp_path):
     assert list(output.iterdir()) == []
     with pytest.raises(ValueError, match="ground_truth"):
         run(source, BASE, CURRENT, tmp_path / "ground_truth" / "output")
+
+
+@pytest.fixture
+def calibrated_source(tmp_path):
+    labels, features = write_inputs(tmp_path, cutoffs=CUTOFFS)
+    model = tmp_path / "model"
+    propensity_calibration.run(labels, features, TARGETS[0], model)
+    source = tmp_path / "calibrated-source"
+    calibrated_propensity_inference.run(
+        model,
+        features,
+        TARGETS[0],
+        source,
+        generated_at=datetime(2027, 1, 1, tzinfo=timezone.utc),
+    )
+    prediction_path = source / "calibrated_predictions.json"
+    manifest_path = source / "calibrated_prediction_manifest.json"
+    data = [
+        row
+        for row in json.loads(prediction_path.read_text())
+        if row["cutoff_at"] in CUTOFFS[1:]
+    ]
+    payload = json.dumps(data).encode()
+    prediction_path.write_bytes(payload)
+    manifest = json.loads(manifest_path.read_text())
+    manifest["rows"] = len(data)
+    manifest["output_sha256"]["calibrated_predictions.json"] = hashlib.sha256(
+        payload
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    return source
+
+
+def _rewrite_calibrated(source, *, row_change=None, manifest_change=None):
+    predictions_path = source / "calibrated_predictions.json"
+    manifest_path = source / "calibrated_prediction_manifest.json"
+    data = json.loads(predictions_path.read_text())
+    manifest = json.loads(manifest_path.read_text())
+    if row_change:
+        field, value = row_change
+        data[0][field] = value
+        payload = json.dumps(data).encode()
+        predictions_path.write_bytes(payload)
+        manifest["output_sha256"]["calibrated_predictions.json"] = hashlib.sha256(
+            payload
+        ).hexdigest()
+    if manifest_change:
+        field, value = manifest_change
+        manifest[field] = value
+    manifest_path.write_text(json.dumps(manifest))
+
+
+@pytest.mark.parametrize("score_field", ["raw_probability", "calibrated_probability"])
+def test_calibrated_runner_consumes_real_bundle(
+    calibrated_source, tmp_path, score_field
+):
+    report = run(
+        calibrated_source,
+        CUTOFFS[1],
+        CUTOFFS[2],
+        tmp_path / "monitoring",
+        score_field=score_field,
+    )
+    assert report["score_field"] == score_field
+    assert report["baseline_volume"] > 0 and report["current_volume"] > 0
+    assert (
+        report["input_sha256"]["calibrated_predictions.json"]
+        == hashlib.sha256(
+            (calibrated_source / "calibrated_predictions.json").read_bytes()
+        ).hexdigest()
+    )
+    assert json.loads(
+        (tmp_path / "monitoring" / "monitoring_report.json").read_text()
+    ) == json.loads(json.dumps(report))
+    assert report["serving_ready"] is False
+
+
+@pytest.mark.parametrize(
+    "row_change,manifest_change",
+    [
+        (("model_artifact_sha256", "b" * 64), None),
+        (("model_manifest_sha256", "b" * 64), None),
+        (("calibration_status", "forged"), None),
+        (("approved", True), None),
+        (("raw_probability", None), None),
+        (("calibrated_probability", None), None),
+        (None, ("format_version", "other")),
+        (None, ("score_fields", ["calibrated_probability"])),
+        (None, ("model_manifest_sha256", "b" * 64)),
+        (None, ("input_sha256_after", {})),
+        (None, ("approved", True)),
+        (None, ("targeting_allowed", True)),
+        (None, ("horizon_days", None)),
+        (("horizon_days", None), ("horizon_days", None)),
+    ],
+)
+def test_calibrated_runner_rejects_tampering_even_with_rehashed_manifest(
+    calibrated_source, tmp_path, row_change, manifest_change
+):
+    _rewrite_calibrated(
+        calibrated_source, row_change=row_change, manifest_change=manifest_change
+    )
+    with pytest.raises(ValueError):
+        run(
+            calibrated_source,
+            CUTOFFS[1],
+            CUTOFFS[2],
+            tmp_path / "monitoring",
+            score_field="calibrated_probability",
+        )
+    assert not (tmp_path / "monitoring").exists()
+
+
+def test_missing_horizon_in_entire_bundle_is_rejected(calibrated_source, tmp_path):
+    prediction_path = calibrated_source / "calibrated_predictions.json"
+    manifest_path = calibrated_source / "calibrated_prediction_manifest.json"
+    data = json.loads(prediction_path.read_text())
+    manifest = json.loads(manifest_path.read_text())
+    for row in data:
+        row.pop("horizon_days")
+    manifest.pop("horizon_days")
+    payload = json.dumps(data).encode()
+    prediction_path.write_bytes(payload)
+    manifest["output_sha256"]["calibrated_predictions.json"] = hashlib.sha256(
+        payload
+    ).hexdigest()
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="horizon"):
+        run(
+            calibrated_source,
+            CUTOFFS[1],
+            CUTOFFS[2],
+            tmp_path / "missing-horizon",
+            score_field="calibrated_probability",
+        )
+    assert not (tmp_path / "missing-horizon").exists()
+
+
+def test_cli_score_field_option(calibrated_source, tmp_path):
+    import subprocess
+    import sys
+
+    command = [
+        sys.executable,
+        "-m",
+        "services.data.models.prediction_monitoring",
+        "--predictions-dir",
+        str(calibrated_source),
+        "--baseline-cutoff",
+        CUTOFFS[1],
+        "--current-cutoff",
+        CUTOFFS[2],
+        "--output-dir",
+        str(tmp_path / "cli"),
+        "--score-field",
+        "calibrated_probability",
+    ]
+    done = subprocess.run(command, capture_output=True, text=True, check=True)
+    assert json.loads(done.stdout)["serving_ready"] is False
+    report = json.loads((tmp_path / "cli" / "monitoring_report.json").read_text())
+    assert report["score_field"] == "calibrated_probability"
+
+
+def test_calibrated_bundle_requires_explicit_score_field(calibrated_source, tmp_path):
+    with pytest.raises(FileNotFoundError):
+        run(calibrated_source, CUTOFFS[1], CUTOFFS[2], tmp_path / "default")
+    source = write_input(tmp_path)
+    with pytest.raises(FileNotFoundError):
+        run(source, BASE, CURRENT, tmp_path / "explicit", score_field="raw_probability")
 
 
 def test_third_cutoff_is_not_silently_ignored():

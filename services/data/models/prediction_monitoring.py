@@ -159,9 +159,70 @@ def build_report(
     }
 
 
+CALIBRATED_FORMAT = "moses-calibrated-pos-predictions-dev-1.0"
+CALIBRATED_FLAGS = {
+    **{flag: False for flag in FLAGS if flag not in ("approved", "targeting_allowed")},
+    "development_only": True,
+    "refitted": False,
+    "advisory_only": True,
+}
+
+
+def _check_calibrated(manifest: dict, rows: list[dict]) -> None:
+    """Dedicated calibrated bundle contract; never inferred from legacy files."""
+    if manifest.get("format_version") != CALIBRATED_FORMAT:
+        raise ValueError("Unsupported calibrated prediction format")
+    if manifest.get("score_fields") != ["raw_probability", "calibrated_probability"]:
+        raise ValueError("Unexpected calibrated manifest score fields")
+    if any(manifest.get(k) is not v for k, v in CALIBRATED_FLAGS.items()) or any(
+        manifest.get(k, False) is not False for k in ("approved", "targeting_allowed")
+    ):
+        raise ValueError("Unsafe calibrated manifest flags")
+    horizon = manifest.get("horizon_days")
+    if type(horizon) is not int or horizon <= 0:
+        raise ValueError("Missing or invalid calibrated horizon")
+    inputs = manifest.get("input_sha256")
+    if not isinstance(inputs, dict) or inputs != manifest.get("input_sha256_after"):
+        raise ValueError("Calibrated input provenance changed")
+    status = manifest.get("calibration_status")
+    if not isinstance(status, str) or not status:
+        raise ValueError("Missing calibration status")
+    pairs = (
+        ("model_artifact_sha256", "calibration_artifact.json"),
+        ("model_manifest_sha256", "calibration_manifest.json"),
+    )
+    for field, name in pairs:
+        if (
+            not isinstance(manifest.get(field), str)
+            or inputs.get(name) != manifest[field]
+        ):
+            raise ValueError(f"Calibrated {field} does not match input provenance")
+    for row in rows:
+        if any(row.get(k) is not v for k, v in CALIBRATED_FLAGS.items()) or any(
+            row.get(k, False) is not False for k in ("approved", "targeting_allowed")
+        ):
+            raise ValueError("Unsafe calibrated prediction flags")
+        for field in manifest["score_fields"]:
+            _score(row.get(field), field)
+        if row.get("calibration_status") != status:
+            raise ValueError("Calibrated prediction status does not match manifest")
+        if any(row.get(field) != manifest[field] for field, _ in pairs):
+            raise ValueError("Calibrated prediction hash does not match manifest")
+        if row.get("horizon_days") != manifest.get("horizon_days"):
+            raise ValueError("Calibrated prediction horizon does not match manifest")
+
+
 def run(
-    predictions_dir: Path, baseline_cutoff: str, current_cutoff: str, output_dir: Path
+    predictions_dir: Path,
+    baseline_cutoff: str,
+    current_cutoff: str,
+    output_dir: Path,
+    *,
+    score_field: str = "uncalibrated_probability",
 ) -> dict:
+    if score_field not in SCORE_FIELDS:
+        raise ValueError("Unsupported score_field")
+    calibrated = score_field != "uncalibrated_probability"
     predictions_dir, output_dir = (
         Path(predictions_dir).resolve(),
         Path(output_dir).resolve(),
@@ -176,8 +237,16 @@ def run(
         raise ValueError("Use a new output directory")
     if predictions_dir in output_dir.parents or output_dir in predictions_dir.parents:
         raise ValueError("Keep inputs and output separate")
-    manifest_path = predictions_dir / "prediction_manifest.json"
-    prediction_path = predictions_dir / "predictions.json"
+    prediction_name = (
+        "calibrated_predictions.json" if calibrated else "predictions.json"
+    )
+    manifest_name = (
+        "calibrated_prediction_manifest.json"
+        if calibrated
+        else "prediction_manifest.json"
+    )
+    manifest_path = predictions_dir / manifest_name
+    prediction_path = predictions_dir / prediction_name
     manifest_bytes = manifest_path.read_bytes()
     manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     manifest = _strict_loads(manifest_bytes)
@@ -192,22 +261,27 @@ def run(
         raise ValueError("Only development-only, non-serving manifests are allowed")
     data = prediction_path.read_bytes()
     before = hashlib.sha256(data).hexdigest()
-    if manifest["output_sha256"].get("predictions.json") != before:
+    if manifest["output_sha256"].get(prediction_name) != before:
         raise ValueError("Prediction checksum mismatch")
     rows = _strict_loads(data)
     if not isinstance(rows, list):
         raise ValueError("Predictions must be a list of objects")
-    report = build_report(rows, baseline_cutoff, current_cutoff)
+    report = build_report(
+        rows, baseline_cutoff, current_cutoff, score_field=score_field
+    )
     if type(manifest.get("rows")) is not int or manifest["rows"] != len(rows):
         raise ValueError("Prediction row count mismatch")
+    if calibrated:
+        _check_calibrated(manifest, rows)
     # This runner supports propensity manifests only; do not silently accept
     # other model families without their own artifact-hash contract.
     inputs = manifest.get("input_sha256")
-    if not isinstance(inputs, dict) or not isinstance(
-        inputs.get("model_parameters.json"), str
-    ):
+    artifact_name = (
+        "calibration_artifact.json" if calibrated else "model_parameters.json"
+    )
+    if not isinstance(inputs, dict) or not isinstance(inputs.get(artifact_name), str):
         raise ValueError("Missing model artifact hash in manifest")
-    model_hash = inputs["model_parameters.json"]
+    model_hash = inputs[artifact_name]
     if model_hash != report["model_artifact_sha256"]:
         raise ValueError("Prediction model artifact does not match manifest")
     if any(
@@ -223,8 +297,8 @@ def run(
         raise ValueError("Input changed during monitoring")
     output_dir.mkdir(parents=True)
     report["input_sha256"] = {
-        "predictions.json": before,
-        "prediction_manifest.json": manifest_hash,
+        prediction_name: before,
+        manifest_name: manifest_hash,
     }
     (output_dir / "monitoring_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
@@ -239,9 +313,16 @@ def main() -> None:
     parser.add_argument("--baseline-cutoff", required=True)
     parser.add_argument("--current-cutoff", required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--score-field", choices=SCORE_FIELDS, default="uncalibrated_probability"
+    )
     args = parser.parse_args()
     report = run(
-        args.predictions_dir, args.baseline_cutoff, args.current_cutoff, args.output_dir
+        args.predictions_dir,
+        args.baseline_cutoff,
+        args.current_cutoff,
+        args.output_dir,
+        score_field=args.score_field,
     )
     print(
         json.dumps(
