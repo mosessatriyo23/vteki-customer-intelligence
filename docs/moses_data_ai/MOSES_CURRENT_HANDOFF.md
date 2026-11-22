@@ -1,5 +1,13 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Pembaruan teknis 2026-11-22 — PR #65 masih menunggu CI
+
+- Propensity POS-only `retail_purchase30`/`renewal60` sekarang mengeluarkan kalimat atribusi matematis dari kontribusi sebenarnya (`score_explanation`), bukan alasan kausal atau taxonomy bisnis. Versi penjelasan `moses-propensity-log-odds-dev-1.1`, model tidak diganti.
+- Diagnostik membership-only kini mempunyai bucket fitur untuk expiry, tier ordinal, tenure, dan hitungan renewal. Ini eksplorasi **setelah inspeksi holdout**, bukan pre-registered, bukan lifecycle atau tier CLV.
+- Importance dan subgroup pada test tiga-fold propensity terkalibrasi dapat dihitung ulang sambil memverifikasi checksum/provenance/parity. Bukti lokal: retail 27.647 baris AUC 0,70652/Brier 0,24975; renewal 8.465 baris AUC 0,61474/Brier 0,23121; keduanya pada cohort sintetis yang pernah dipakai. Output lokal sementara tidak dipromosikan menjadi artefak serving.
+- Reload JSON membership-only dapat menghasilkan skor offline baru tanpa refit/label, memeriksa kontrak, versi dan hash, memblokir input dengan kolom outcome. Status tetap eksploratif/unapproved. Belum ada CLI batch persistensi DB, reload calibrated propensity/churn untuk inference baru, atau monitoring per periode pada skor terkalibrasi.
+- Gate lokal sementara: 1715 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. **PR #65 belum boleh dinyatakan merged/CI hijau:** kedua run CI gagal di Schemathesis `/monitoring/measurements` (kontrak API lintas tim, bukan perubahan Moses). Status di bawah adalah riwayat, bukan acceptance terbaru.
+
 ## Pembaruan 2026-11-22 (baca dahulu)
 
 - PR #62 mengunci loader NBA ke record `CHURN` terbaru berdasarkan cutoff sebagai waktu; cutoff invalid, `SCHEMA_PARTIAL`, dan `INVALID_SCORE` tidak lolos. `usage_approved` tetap `None`; tidak ada skor development yang boleh dipakai NBA.

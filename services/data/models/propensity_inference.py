@@ -22,6 +22,7 @@ from services.data.models.propensity_experiment import (
     _check_target,
     limitations,
 )
+from services.data.models.score_explanations import explain_contributions
 
 LOCAL_TIMEZONE = timezone(timedelta(hours=7))
 LIMITATIONS = [
@@ -30,7 +31,7 @@ LIMITATIONS = [
     "No calibration; probabilities are uncalibrated",
     "No reason codes, approval, serving handoff, or NBA adapter",
 ]
-EXPLANATION_VERSION = "moses-propensity-log-odds-dev-1.0"
+EXPLANATION_VERSION = "moses-propensity-log-odds-dev-1.1"
 EXPLANATION_METHOD = (
     "Exact signed log-odds contribution per feature: "
     "(imputed_value - scaler_mean) / scaler_scale * coefficient. "
@@ -260,6 +261,9 @@ def predict_rows(
                 feature_contributions=contributions,
                 explanation_method=EXPLANATION_METHOD,
                 explanation_version=EXPLANATION_VERSION,
+                score_explanation=explain_contributions(
+                    contributions, target=model.target
+                ),
                 development_only=True,
                 serving_ready=False,
                 valid_until=None,
@@ -344,6 +348,7 @@ def run(
         horizon_days=model.horizon_days,
         model_version=MODEL_VERSION,
         feature_version=FEATURE_VERSION,
+        explanation_version=EXPLANATION_VERSION,
         development_only=True,
         serving_ready=False,
         valid_until=None,

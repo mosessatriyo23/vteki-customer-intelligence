@@ -14,6 +14,10 @@ Tabel di bawah ditulis 19 Nov. Butir yang sudah berubah (development-only, bukan
 - Suite terakhir terverifikasi: 1429 passed, 19 skipped, 3 xfailed. Rujukan: [ledger mandiri](MOSES_INDEPENDENT_WORK_LEDGER_2026-11-20.md).
 - Observasi 500 intermiten pada `POST /monitoring/drift` (CI #50) milik backend James; dibaca statis, tidak tereproduksi dari validasi payload, belum ada root cause.
 
+## Pembaruan 2026-11-22 (PR #65, belum merged saat ditulis)
+
+Baris di tabel yang menyebut "importance/evaluasi model tiga-fold belum ada" sudah basi: churn tiga-fold ada sejak PR #53; propensity tiga-fold terkalibrasi kini punya importance dan subgroup fitur yang memverifikasi parity, dan membership-only punya bucket fitur eksploratif. Kalimat atribusi propensity tersedia. Reload membership-only offline tersedia. Tetap terbuka: reload/inference baru untuk artefak terkalibrasi, monitoring skor terkalibrasi antar-periode, reason code bisnis, dan semua dependensi kebijakan/platform. Semuanya development-only.
+
 ## Kriteria selesai
 
 Sebuah requirement ditutup dengan implementasi, bukti pengujian, hasil run yang dapat direproduksi, dan acceptance yang relevan. Dokumentasi keterbatasan tidak menutup requirement yang belum diimplementasikan. Hasil model buruk tidak otomatis menggagalkan pekerjaan eksperimen: FRD tidak menjanjikan target AUC sebelum baseline. Sebaliknya, test unit lulus tidak membuktikan integrasi atau penerimaan bisnis.
