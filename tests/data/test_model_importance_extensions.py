@@ -55,7 +55,7 @@ def test_membership_importance_reproduces_saved_predictions_without_refitting(
         labels_dir=labels,
         membership_dir=members,
         repeats=2,
-        min_n=2,
+        min_n=100,
     )
     predictions = json.loads((model / "holdout_predictions.json").read_text())
     scores = [p["logistic_probability"] for p in predictions]
@@ -65,8 +65,18 @@ def test_membership_importance_reproduces_saved_predictions_without_refitting(
     assert report["label_key"] == "target_value"
     assert report["holdout_rows"] == 8
     assert report["grouped_importance"] == []
-    assert report["segments"] == {}
-    assert report["segment_definition"] == {}
+    assert report["segment_definition"] == {
+        "days_to_expiry": ["<=0", "1-30", "31-60", ">60", "missing"],
+        "current_tier_ordinal": ["0", "1", "2", "3", "missing"],
+        "membership_tenure_days": ["<=90", "91-365", ">365", "missing"],
+        "renewal_count_365d": ["0", "1", ">=2", "missing"],
+    }
+    assert set(report["segments"]) == set(report["segment_definition"])
+    for buckets in report["segments"].values():
+        assert sum(item["n"] for item in buckets) == report["holdout_rows"]
+        assert all(item["small_segment"] for item in buckets)
+        assert all(item["roc_auc"] is None for item in buckets)
+    assert "no lifecycle" in " ".join(report["limitations"]).lower()
     assert report["exploratory"] is True
     assert report["post_holdout_inspection"] is True
     assert report["independent_confirmation"] is False

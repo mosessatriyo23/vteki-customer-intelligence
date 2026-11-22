@@ -33,7 +33,7 @@ from services.data.models.propensity_labels import (
 )
 
 EXPLAINER_METHOD = "permutation_importance_auc_drop"
-EXPLAINER_VERSION = "moses-permutation-importance-dev-1.0"
+EXPLAINER_VERSION = "moses-permutation-importance-dev-1.1"
 SEED = 42
 REPEATS = 10
 MIN_SEGMENT_N = 100
@@ -74,6 +74,22 @@ SEGMENT_BUCKETS = {
         (">=12", math.inf),
     ),
 }
+
+
+# Fixed, feature-derived buckets for exploratory post-holdout diagnostics; not
+# pre-registered, not independent confirmation, and not lifecycle,
+# renewal-vs-upgrade semantics, or CLV tiers. tier_upgraded_last_event is a flag
+# and is not bucketed.
+MEMBERSHIP_SEGMENT_BUCKETS = {
+    "days_to_expiry": (("<=0", 0), ("1-30", 30), ("31-60", 60), (">60", math.inf)),
+    "current_tier_ordinal": (("0", 0), ("1", 1), ("2", 2), ("3", math.inf)),
+    "membership_tenure_days": (("<=90", 90), ("91-365", 365), (">365", math.inf)),
+    "renewal_count_365d": (("0", 0), ("1", 1), (">=2", math.inf)),
+}
+
+
+def _buckets_for(field: str):
+    return SEGMENT_BUCKETS.get(field) or MEMBERSHIP_SEGMENT_BUCKETS[field]
 
 
 def _numbers(values: object, length: int) -> list[float]:
@@ -236,10 +252,11 @@ def _importance_entry(
 def _bucket(field: str, value: float) -> str:
     if math.isnan(value):
         return "missing"
-    for name, upper in SEGMENT_BUCKETS[field]:
+    buckets = _buckets_for(field)
+    for name, upper in buckets:
         if value <= upper:
             return name
-    return SEGMENT_BUCKETS[field][-1][0]
+    return buckets[-1][0]
 
 
 def _segment(labels: list[int], scores: list[float], min_n: int) -> dict:
@@ -335,14 +352,15 @@ def evaluate(
             }
         )
     segments = {}
-    for field in (() if is_membership else SEGMENT_BUCKETS):
+    bucket_fields = MEMBERSHIP_SEGMENT_BUCKETS if is_membership else SEGMENT_BUCKETS
+    for field in bucket_fields:
         if field not in features:
             continue
         index = features.index(field)
         groups: dict[str, list[int]] = {}
         for row, values in enumerate(matrix):
             groups.setdefault(_bucket(field, values[index]), []).append(row)
-        names = [name for name, _ in SEGMENT_BUCKETS[field]] + ["missing"]
+        names = [name for name, _ in _buckets_for(field)] + ["missing"]
         scores = _scores(model, matrix)
         segments[field] = [
             {
@@ -378,7 +396,7 @@ def evaluate(
         **(membership.STATUS if is_membership else {}),
         "segment_definition": {
             field: [name for name, _ in buckets] + ["missing"]
-            for field, buckets in SEGMENT_BUCKETS.items()
+            for field, buckets in bucket_fields.items()
             if field in features
         },
         "segments": segments,
@@ -386,7 +404,9 @@ def evaluate(
         + (
             membership.LIMITATIONS
             + [
-                "No membership segment buckets are predefined; no segment performance is reported"
+                "Membership segments are fixed feature-derived buckets for exploratory post-holdout "
+                "diagnostics; not pre-registered, and no lifecycle, renewal-vs-upgrade semantics "
+                "or CLV tier is implied"
             ]
             if is_membership
             else []

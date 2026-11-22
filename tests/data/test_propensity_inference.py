@@ -13,6 +13,7 @@ from services.data.models.churn_experiment import FEATURES
 from services.data.models.propensity_experiment import MODEL_VERSION
 from services.data.models.propensity_inference import load_model, predict_rows, run
 from services.data.models.propensity_labels import TARGETS
+from services.data.models.score_explanations import explain_contributions
 
 TARGET = "retail_purchase30"
 NOW = datetime(2026, 11, 19, tzinfo=timezone.utc)
@@ -155,8 +156,57 @@ def test_local_contributions_reconstruct_uncalibrated_score(artifacts, target):
         1 / (1 + math.exp(-total)), abs=1e-12
     )
     assert output["explanation_method"].startswith("Exact signed log-odds")
-    assert output["explanation_version"] == "moses-propensity-log-odds-dev-1.0"
+    assert output["explanation_version"] == "moses-propensity-log-odds-dev-1.1"
     assert "reason_codes" not in output
+    assert output["serving_ready"] is False
+
+
+@pytest.mark.parametrize("target", ["retail_purchase30", "renewal60"])
+def test_score_explanation_comes_from_shared_formatter(artifacts, target):
+    model_dir, _, row = artifacts
+    if target != TARGET:
+        update_params(
+            model_dir,
+            lambda p: p.update(
+                target=target, target_version=TARGETS[target][0], horizon_days=60
+            ),
+        )
+        manifest_path = model_dir / "experiment_manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(target=target, target_version=TARGETS[target][0])
+        write_json(manifest_path, manifest)
+    output = predict_rows(load_model(model_dir, target), [row], generated_at=NOW)[0]
+    explanation = output["score_explanation"]
+    assert explanation == explain_contributions(
+        output["feature_contributions"], target=target
+    )
+    assert explanation["version"] == "score-explanation-id-1.0"
+    assert len(explanation["sentences"]) == len(FEATURES)
+    label = {
+        "retail_purchase30": "pembelian retail dalam 30 hari",
+        "renewal60": "perpanjangan dalam 60 hari",
+    }[target]
+    assert all(label in sentence for sentence in explanation["sentences"])
+
+
+def test_score_explanation_discloses_missing_imputed_feature(artifacts):
+    model_dir, _, row = artifacts
+    output = predict_rows(load_model(model_dir, TARGET), [row], generated_at=NOW)[0]
+    imputed = [e for e in output["feature_contributions"] if e["missing"]]
+    assert [e["feature"] for e in imputed] == ["recency_days"]
+    flagged = [
+        s
+        for s in output["score_explanation"]["sentences"]
+        if "Data fitur ini kosong" in s
+    ]
+    assert len(flagged) == 1 and "lama sejak aktivitas terakhir" in flagged[0]
+
+
+def test_score_explanation_does_not_change_scoring(artifacts):
+    model_dir, _, row = artifacts
+    output = predict_rows(load_model(model_dir, TARGET), [row], generated_at=NOW)[0]
+    assert output["log_odds"] == pytest.approx(0.35, abs=1e-12)
+    assert output["development_only"] is True
     assert output["serving_ready"] is False
 
 
@@ -264,7 +314,15 @@ def test_run_needs_no_labels_and_preserves_inputs(artifacts, tmp_path):
     assert result["rows"] == 1
     assert result["input_sha256"] == result["input_sha256_after"]
     assert "propensity_labels.csv" not in result["input_sha256"]
-    assert (tmp_path / "out" / "predictions.json").exists()
+    predictions = json.loads((tmp_path / "out" / "predictions.json").read_text())
+    assert predictions[0]["score_explanation"] == explain_contributions(
+        predictions[0]["feature_contributions"], target=TARGET
+    )
+    assert result["explanation_version"] == "moses-propensity-log-odds-dev-1.1"
+    saved_manifest = json.loads(
+        (tmp_path / "out" / "prediction_manifest.json").read_text()
+    )
+    assert saved_manifest == result
 
 
 def test_checksum_tamper(artifacts, tmp_path):
