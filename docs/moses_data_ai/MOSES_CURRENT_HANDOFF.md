@@ -1,5 +1,7 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+> **Status slice mandiri 2026-11-22:** baca [penutupan dan batas ML mandiri](INDEPENDENT_ML_CLOSURE_2026-11-22.md). Churn terkalibrasi kini mempunyai reload/scoring offline yang membuktikan parity terhadap eksperimen tersimpan, **bukan** bahwa kalibrasi ini layak produksi (hasil sebelumnya tidak tergeneralisasi). Pekerjaan lintas tim di dokumen itu tetap terbuka.
+
 ## Monitoring calibrated propensity — slice lanjutan 2026-11-22
 
 PR #66 sudah merged (`b6ba429`): inference JSON offline untuk skor raw/calibrated POS tersedia. Runner monitoring kini mendukung bundle dedicated itu dengan validasi flag, horizon, checksum dan identitas dua ruang skor. [Bukti run nyata](CALIBRATED_PROPENSITY_MONITORING_DEV_2026-11-22.md): 75.002 baris per target, retail PSI 0,08072 (`STABLE`), renewal 1,45460 (`RETRAIN_RECOMMENDED`, advisory saja). Gate lokal slice monitoring: 1747 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. Belum menutup inference baru churn terkalibrasi atau dependensi kebijakan/platform di bawah.
