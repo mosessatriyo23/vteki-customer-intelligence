@@ -53,6 +53,48 @@ def test_identical_scores_stable_and_counts_are_exact():
         assert report[flag] is False
 
 
+def _with_calibrated(items, calibrated):
+    return [
+        {**item, "calibrated_probability": value}
+        for item, value in zip(items, calibrated)
+    ]
+
+
+def test_default_score_field_is_unchanged():
+    report = build_report(rows([0.5], BASE) + rows([0.5], CURRENT), BASE, CURRENT)
+    assert report["score_field"] == "uncalibrated_probability"
+
+
+def test_calibrated_field_is_monitored_only_when_explicitly_requested():
+    base = _with_calibrated(rows([0.1, 0.2], BASE), [0.9, 0.9])
+    current = _with_calibrated(rows([0.1, 0.2], CURRENT), [0.9, 0.9])
+    raw = build_report(base + current, BASE, CURRENT)
+    calibrated = build_report(
+        base + current, BASE, CURRENT, score_field="calibrated_probability"
+    )
+    assert calibrated["score_field"] == "calibrated_probability"
+    assert calibrated["psi"] != raw["psi"]
+    assert all(calibrated[flag] is False for flag in ("approved", "serving_ready"))
+
+
+@pytest.mark.parametrize("field", ["churn_score", "", None, "uncalibrated"])
+def test_unknown_score_field_is_refused(field):
+    with pytest.raises(ValueError, match="score_field"):
+        build_report(
+            rows([0.5], BASE) + rows([0.5], CURRENT), BASE, CURRENT, score_field=field
+        )
+
+
+def test_requested_field_missing_from_a_row_is_refused_not_substituted():
+    with pytest.raises(ValueError, match="calibrated_probability"):
+        build_report(
+            rows([0.5], BASE) + rows([0.5], CURRENT),
+            BASE,
+            CURRENT,
+            score_field="calibrated_probability",
+        )
+
+
 def test_unavailable_reasons_exactly_explain_null_sections():
     report = build_report(rows([0.5], BASE) + rows([0.5], CURRENT), BASE, CURRENT)
     reasons = report["unavailable_reasons"]
