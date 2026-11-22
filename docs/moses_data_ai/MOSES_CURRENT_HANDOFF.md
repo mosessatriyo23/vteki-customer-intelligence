@@ -1,12 +1,13 @@
 # Moses — titik masuk handoff data/AI terbaru
 
-## Pembaruan teknis 2026-11-22 — PR #65 masih menunggu CI
+## Pembaruan teknis 2026-11-22 — PR #65 merged `2569efc`
 
 - Propensity POS-only `retail_purchase30`/`renewal60` sekarang mengeluarkan kalimat atribusi matematis dari kontribusi sebenarnya (`score_explanation`), bukan alasan kausal atau taxonomy bisnis. Versi penjelasan `moses-propensity-log-odds-dev-1.1`, model tidak diganti.
 - Diagnostik membership-only kini mempunyai bucket fitur untuk expiry, tier ordinal, tenure, dan hitungan renewal. Ini eksplorasi **setelah inspeksi holdout**, bukan pre-registered, bukan lifecycle atau tier CLV.
 - Importance dan subgroup pada test tiga-fold propensity terkalibrasi dapat dihitung ulang sambil memverifikasi checksum/provenance/parity. Bukti lokal: retail 27.647 baris AUC 0,70652/Brier 0,24975; renewal 8.465 baris AUC 0,61474/Brier 0,23121; keduanya pada cohort sintetis yang pernah dipakai. Output lokal sementara tidak dipromosikan menjadi artefak serving.
 - Reload JSON membership-only dapat menghasilkan skor offline baru tanpa refit/label, memeriksa kontrak, versi dan hash, memblokir input dengan kolom outcome. Status tetap eksploratif/unapproved. Belum ada CLI batch persistensi DB, reload calibrated propensity/churn untuk inference baru, atau monitoring per periode pada skor terkalibrasi.
-- Gate lokal sementara: 1715 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. **PR #65 belum boleh dinyatakan merged/CI hijau:** kedua run CI gagal di Schemathesis `/monitoring/measurements` (kontrak API lintas tim, bukan perubahan Moses). Status di bawah adalah riwayat, bukan acceptance terbaru.
+- Slice berikutnya (PR terpisah): `calibrated_propensity_inference` menghitung skor mentah dan terkalibrasi baru dari JSON artefak kalibrasi POS (retail30/renewal60) tanpa sklearn/refit/label, dengan format keluaran khusus (`calibrated_predictions.json` + manifest hash). `prediction_monitoring` kini boleh memilih `score_field` secara eksplisit (`uncalibrated_probability` default, `raw_probability`, `calibrated_probability`) agar ruang skor tidak tertukar; band mix dan metrik outcome tetap `None`. Manifest mencatat `scored_features_match_calibration` supaya jelas apakah fitur yang diskor sama dengan fitur kalibrasi. Belum ada: runner monitoring yang membaca format terkalibrasi, inference baru untuk churn terkalibrasi.
+- Gate lokal PR #65: 1715 passed, 19 skipped, 3 xfailed; Ruff/Black/Mypy bersih. CI akhirnya hijau lewat rerun satu job; Schemathesis `/monitoring/measurements` tetap bermasalah karena kontrak API lintas tim, bukan perubahan Moses. Status di bawah adalah riwayat, bukan acceptance terbaru.
 
 ## Pembaruan 2026-11-22 (baca dahulu)
 

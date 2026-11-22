@@ -56,15 +56,26 @@ def _strict_loads(data: bytes) -> object:
         raise ValueError("Malformed JSON input") from exc
 
 
-def _score(value: object) -> float:
+SCORE_FIELDS = ("uncalibrated_probability", "raw_probability", "calibrated_probability")
+
+
+def _score(value: object, field: str = "uncalibrated_probability") -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError("uncalibrated_probability must be a number")
+        raise ValueError(f"{field} must be a number")
     if not math.isfinite(value) or not 0 <= value <= 1:
-        raise ValueError("uncalibrated_probability must be within [0, 1]")
+        raise ValueError(f"{field} must be within [0, 1]")
     return float(value)
 
 
-def build_report(rows: list[dict], baseline_cutoff: str, current_cutoff: str) -> dict:
+def build_report(
+    rows: list[dict],
+    baseline_cutoff: str,
+    current_cutoff: str,
+    *,
+    score_field: str = "uncalibrated_probability",
+) -> dict:
+    if score_field not in SCORE_FIELDS:
+        raise ValueError("Unsupported score_field")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         raise ValueError("Predictions must be a list of objects")
     baseline_at = _aware_timestamp(baseline_cutoff, "baseline_cutoff")
@@ -99,7 +110,7 @@ def build_report(rows: list[dict], baseline_cutoff: str, current_cutoff: str) ->
         if key in seen:
             raise ValueError("Duplicate customer/cutoff prediction")
         seen.add(key)
-        value = _score(row.get("uncalibrated_probability"))
+        value = _score(row.get(score_field), score_field)
         if cutoff not in scores:
             raise ValueError("Prediction cutoff is outside baseline/current periods")
         scores[cutoff].append(value)
@@ -129,7 +140,7 @@ def build_report(rows: list[dict], baseline_cutoff: str, current_cutoff: str) ->
         "current_cutoff": current_at.isoformat(),
         "baseline_volume": len(scores[baseline_at]),
         "current_volume": len(scores[current_at]),
-        "score_field": "uncalibrated_probability",
+        "score_field": score_field,
         "psi": psi,
         "alerts": alerts,
         "band_mix": None,
