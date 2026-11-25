@@ -18,6 +18,7 @@ from api.models import (
 )
 from services.decision.campaign.pipeline import AudienceMember, run_campaign
 from services.decision.nba.serving import evaluate_customer
+from worker.prediction_import import prediction_import
 
 
 def audit_summary(_: dict[str, Any]) -> dict[str, Any]:
@@ -228,4 +229,5 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
 TASK_HANDLERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "audit_summary": audit_summary,
     "campaign_execution": campaign_execution,
+    "prediction_import": prediction_import,
 }

@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any, Literal
 
@@ -11,6 +12,7 @@ from starlette.requests import Request
 from api.audit import record_audit_event
 from api.database import get_db
 from api.models import (
+    BatchJob,
     Customer,
     GoldenCustomer,
     ModelPredictionRecord,
@@ -20,7 +22,24 @@ from api.models import (
 )
 from api.security import require_roles
 from api.validation import DBId
-from services.data.models.prediction_review import validate_prediction_import
+from services.data.models.prediction_review import (
+    PredictionImport,
+    validate_prediction_import,
+)
+
+# One plain directory name: alphanumeric runs joined by single . _ or -, so
+# "..", separators and leading/trailing dots are impossible by schema alone.
+ARTIFACT_DIR_PATTERN = r"^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$"
+
+
+def artifact_dir_allowed(name: str) -> bool:
+    """Worker-side check: schema-valid name and never a ground-truth folder."""
+    return (
+        len(name) <= 128
+        and re.fullmatch(ARTIFACT_DIR_PATTERN, name) is not None
+        and "ground_truth" not in name.lower()
+    )
+
 
 router = APIRouter(prefix="/model-predictions", tags=["Moses prediction review"])
 
@@ -83,19 +102,47 @@ def import_prediction_run(
 ) -> dict[str, Any]:
     try:
         candidate = validate_prediction_import(payload.manifest, payload.records)
+        run, created = persist_prediction_import(
+            db,
+            candidate,
+            payload.manifest,
+            actor_id=actor.id,
+            correlation_id=request.state.correlation_id,
+        )
     except (ValueError, TypeError, OverflowError) as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    if not created:
+        raise HTTPException(
+            status_code=409,
+            detail=f"This Moses manifest is already imported as run {run.id}",
+        )
+    db.commit()
+    db.refresh(run)
+    return _run_response(run)
 
+
+def persist_prediction_import(
+    db: Session,
+    candidate: PredictionImport,
+    manifest: dict[str, Any],
+    *,
+    actor_id: int,
+    correlation_id: str,
+    audit_details: dict[str, Any] | None = None,
+) -> tuple[ModelPredictionRun, bool]:
+    """Store a validated artifact as a pending-review run; caller commits.
+
+    Shared by the HTTP import and the prediction_import worker job so both
+    write the same rows and audit event. Returns (run, created); an already
+    imported manifest returns the existing run with created=False.
+    """
     existing = (
         db.query(ModelPredictionRun)
         .filter(ModelPredictionRun.manifest_hash == candidate.manifest_hash)
         .first()
     )
     if existing is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"This Moses manifest is already imported as run {existing.id}",
-        )
+        return existing, False
 
     golden_ids = {row["customer_id"] for row in candidate.records}
     known_golden_ids = {
@@ -106,9 +153,9 @@ def import_prediction_run(
     }
     unknown_ids = sorted(golden_ids - known_golden_ids)
     if unknown_ids:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Golden Customer IDs are not in the identity registry: {', '.join(unknown_ids[:5])}",
+        raise ValueError(
+            "Golden Customer IDs are not in the identity registry: "
+            + ", ".join(unknown_ids[:5])
         )
 
     run = ModelPredictionRun(
@@ -120,8 +167,8 @@ def import_prediction_run(
         manifest_hash=candidate.manifest_hash,
         record_count=len(candidate.records),
         review_status="pending_review",
-        manifest=payload.manifest,
-        submitted_by=actor.id,
+        manifest=manifest,
+        submitted_by=actor_id,
     )
     db.add(run)
     db.flush()
@@ -147,9 +194,9 @@ def import_prediction_run(
 
     record_audit_event(
         db,
-        correlation_id=request.state.correlation_id,
+        correlation_id=correlation_id,
         event_type="model.prediction_run.imported_for_review",
-        actor_id=actor.id,
+        actor_id=actor_id,
         entity_type="model_prediction_run",
         entity_id=run.id,
         details={
@@ -157,11 +204,56 @@ def import_prediction_run(
             "record_count": run.record_count,
             "review_status": run.review_status,
             "serving_ready": False,
+            **(audit_details or {}),
         },
     )
+    return run, True
+
+
+class PredictionImportJobRequest(BaseModel):
+    # A single directory name under the operator-configured
+    # PREDICTION_IMPORT_ROOT; never an arbitrary path.
+    artifact_dir: str = Field(max_length=128, pattern=ARTIFACT_DIR_PATTERN)
+
+
+@router.post("/runs/import-jobs", status_code=status.HTTP_202_ACCEPTED)
+def enqueue_prediction_import(
+    payload: PredictionImportJobRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_roles("admin", "analyst")),
+) -> dict[str, Any]:
+    """Queue a worker import of a Moses artifact; still pending review, never serving.
+
+    Unsafe names (ground truth, missing folders) are refused by the worker and
+    recorded as a failed job, keeping this endpoint consistent with its schema.
+    """
+    job = BatchJob(
+        kind="prediction_import",
+        payload={"artifact_dir": payload.artifact_dir},
+        max_attempts=1,
+        created_by=actor.id,
+    )
+    db.add(job)
+    db.flush()
+    job.payload = {**job.payload, "batch_job_id": job.id}
+    record_audit_event(
+        db,
+        correlation_id=request.state.correlation_id,
+        event_type="model.prediction_import.queued",
+        actor_id=actor.id,
+        entity_type="batch_job",
+        entity_id=job.id,
+        details={"artifact_dir": payload.artifact_dir, "serving_ready": False},
+    )
     db.commit()
-    db.refresh(run)
-    return _run_response(run)
+    db.refresh(job)
+    return {
+        "id": job.id,
+        "kind": job.kind,
+        "status": job.status,
+        "payload": job.payload,
+    }
 
 
 @router.get("/runs/{run_id}/records")
