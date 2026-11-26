@@ -118,6 +118,12 @@ jobs:
           VTEKI_TEST_POSTGRES_ADMIN_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
         run: python scripts/verify_populated_migration_upgrade.py
 
+      - name: Verify Prediction Usage Migration Upgrade and Rollback
+        env:
+          VTEKI_ALLOW_TEST_DATABASE_RESET: "1"
+          VTEKI_TEST_POSTGRES_ADMIN_URL: postgresql+psycopg://postgres:postgres@localhost:5432/vteki_ci
+        run: python scripts/verify_prediction_usage_migration_rollback.py
+
       - name: Provision Least-Privilege and Runtime PostgreSQL Roles
         env:
           VTEKI_API_TEST_PASSWORD: ci-only-api-password

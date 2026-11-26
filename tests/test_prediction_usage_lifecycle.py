@@ -28,7 +28,9 @@ from api.models import (
     GoldenCustomer,
     ModelPredictionRecord,
     ModelPredictionRun,
+    RegistryVersion,
     Role,
+    SourceIdentityMapping,
     User,
 )
 from api.security import hash_password
@@ -68,6 +70,8 @@ def lifecycle_client():
                 status="APPROVED",
             )
         )
+        db.add(RegistryVersion(version_tag="synthetic-v1", algorithm="exact"))
+        db.flush()
         customer = Customer(
             customer_code="SYNTH-LIFECYCLE",
             full_name="Synthetic Evaluation Customer",
@@ -78,6 +82,15 @@ def lifecycle_client():
         )
         db.add(customer)
         db.flush()
+        db.add(
+            SourceIdentityMapping(
+                source_customer_id="SYNTH-LIFECYCLE",
+                golden_customer_id=golden_id,
+                registry_version="synthetic-v1",
+                source_batch_id="synthetic-batch",
+                assignment_type="EXACT",
+            )
+        )
         ids = {
             name: user.id
             for name, user in zip(("submitter", "reviewer", "decider"), users)

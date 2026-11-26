@@ -1,18 +1,58 @@
 """Database adapters for the pure NBA decision services."""
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Iterable
 
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from api.models import (
     CampaignContactHistory,
+    Customer,
+    GoldenCustomer,
     ModelPredictionRecord,
     ModelPredictionRun,
+    SourceIdentityMapping,
 )
 from services.decision.policy.fatigue import ContactRecord
 
 CHURN_PREDICTION_TYPE = "CHURN"
+
+
+def load_approved_customer_golden_refs(
+    db: Session, customers: Iterable[Customer]
+) -> dict[int, str]:
+    """Return only exact, currently approved app-customer to Golden ID mappings.
+
+    Customer.customer_code is used solely to verify the exact source identity
+    mapping; it is never returned as a score lookup key.
+    """
+    customer_rows = list(customers)
+    if not customer_rows:
+        return {}
+
+    customer_ids = [customer.id for customer in customer_rows]
+    rows = (
+        db.query(Customer.id, Customer.golden_customer_id)
+        .join(
+            GoldenCustomer,
+            GoldenCustomer.golden_customer_id == Customer.golden_customer_id,
+        )
+        .join(
+            SourceIdentityMapping,
+            and_(
+                SourceIdentityMapping.source_customer_id == Customer.customer_code,
+                SourceIdentityMapping.golden_customer_id == Customer.golden_customer_id,
+            ),
+        )
+        .filter(
+            Customer.id.in_(customer_ids),
+            Customer.is_demo.is_(False),
+            GoldenCustomer.status == "APPROVED",
+        )
+        .all()
+    )
+    return {int(customer_id): str(golden_id) for customer_id, golden_id in rows}
 
 
 def _aware_instant(value: object) -> datetime | None:

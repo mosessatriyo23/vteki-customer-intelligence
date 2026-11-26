@@ -148,6 +148,7 @@ function mapCampaign(row: ApiCampaign): Campaign {
   const skippedCount = executionResult?.skipped_count
   const targetableCount = executionResult?.targetable_count
   const controlExposureCount = executionResult?.control_exposure_count
+  const identityMappingSkippedCount = executionResult?.identity_mapping_skipped_count
   const status: Campaign['status'] = row.status === 'Active'
     ? (executionStatus === 'completed' ? 'Completed'
       : executionStatus === 'failed' || executionStatus === 'cancelled' ? 'Failed'
@@ -155,7 +156,7 @@ function mapCampaign(row: ApiCampaign): Campaign {
           : executionStatus === 'queued' ? 'Scheduled' : 'Unknown')
     : statusMap[row.status] ?? 'Unknown'
   const executionSummary = typeof audience === 'number'
-    ? `${audience.toLocaleString('id-ID')} pelanggan · target ${formatPersistedCount(targetableCount)} · terkirim simulasi ${formatPersistedCount(sentCount)} · dilewati ${formatPersistedCount(skippedCount)} · holdout ${formatPersistedCount(variantB)} · paparan holdout ${formatPersistedCount(controlExposureCount)} · ${executionResult?.external_delivery === false ? 'tanpa pengiriman eksternal' : 'mode pengiriman belum diketahui'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
+    ? `${audience.toLocaleString('id-ID')} pelanggan · target ${formatPersistedCount(targetableCount)} · terkirim simulasi ${formatPersistedCount(sentCount)} · dilewati ${formatPersistedCount(skippedCount)} · tidak diproses karena pemetaan Golden tidak tersedia ${formatPersistedCount(identityMappingSkippedCount)} · holdout ${formatPersistedCount(variantB)} · paparan holdout ${formatPersistedCount(controlExposureCount)} · ${executionResult?.external_delivery === false ? 'tanpa pengiriman eksternal' : 'mode pengiriman belum diketahui'} · ${executionStatus === 'completed' ? 'simulasi selesai' : `job ${executionStatus ?? 'antrean'}`}`
     : executionStatus === 'failed'
       ? 'Simulasi gagal'
       : executionStatus

@@ -6,7 +6,11 @@ from sqlalchemy import func
 
 from api.audit import record_audit_event
 from api.database import SessionLocal
-from api.decision_inputs import load_contact_history, load_serving_score_row
+from api.decision_inputs import (
+    load_approved_customer_golden_refs,
+    load_contact_history,
+    load_serving_score_row,
+)
 from api.models import (
     AuditEvent,
     BatchJob,
@@ -72,6 +76,8 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                 Customer.id == campaign.target_customer_id
             )
         customers = customer_query.order_by(Customer.id).all()
+        golden_refs = load_approved_customer_golden_refs(session, customers)
+        identity_mapping_skipped_count = len(customers) - len(golden_refs)
         correlation_id = str(
             payload.get("correlation_id")
             or campaign.correlation_id
@@ -80,7 +86,9 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
         audience: list[AudienceMember] = []
         customer_by_ref: dict[str, Customer] = {}
         for customer in customers:
-            customer_ref = customer.golden_customer_id or customer.customer_code
+            customer_ref = golden_refs.get(customer.id)
+            if customer_ref is None:
+                continue
             customer_by_ref[customer_ref] = customer
             score_row = load_serving_score_row(session, customer_ref)
             decision = evaluate_customer(
@@ -134,6 +142,7 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
         )
         job_result["target_customer_id"] = campaign.target_customer_id
         job_result["measurement"] = result.measurement
+        job_result["identity_mapping_skipped_count"] = identity_mapping_skipped_count
 
         for contact in result.contact_rows:
             contacted_customer = customer_by_ref.get(str(contact["customer_id"]))
@@ -207,6 +216,20 @@ def campaign_execution(payload: dict[str, Any]) -> dict[str, Any]:
                 entity_type=event["entity_type"],
                 entity_id=event["entity_id"],
                 details=details,
+            )
+        if identity_mapping_skipped_count:
+            record_audit_event(
+                session,
+                correlation_id=correlation_id,
+                event_type="campaign.identity_mapping_skipped",
+                actor_id=campaign.approved_by,
+                entity_type="campaign",
+                entity_id=f"CMP-{campaign.id}",
+                details={
+                    "execution_job_id": job_id,
+                    "skipped_customer_count": identity_mapping_skipped_count,
+                    "reason": "No exact approved Golden Customer mapping",
+                },
             )
         if result.measurement is None:
             record_audit_event(

@@ -19,9 +19,12 @@ from api.models import (
     CampaignMeasurement,
     Customer,
     DecisionTrace,
+    GoldenCustomer,
     HumanOverride,
     NBADecision,
+    RegistryVersion,
     Role,
+    SourceIdentityMapping,
     User,
 )
 from api.security import hash_password, verify_password
@@ -122,6 +125,33 @@ def seed_proposed_decision(
         )
         db.commit()
         return decision.id
+
+
+def link_approved_golden_identity(customer_id: int, customer_code: str) -> None:
+    golden_id = f"golden-{customer_code.lower()}"
+    with app.state.audit_session_factory.begin() as db:
+        db.add(RegistryVersion(version_tag="test-registry-v1", algorithm="exact"))
+        db.add(
+            GoldenCustomer(
+                golden_customer_id=golden_id,
+                first_source_batch_id="test-batch",
+                anchor_source_id=customer_code,
+                status="APPROVED",
+            )
+        )
+        db.flush()
+        customer = db.get(Customer, customer_id)
+        assert customer is not None
+        customer.golden_customer_id = golden_id
+        db.add(
+            SourceIdentityMapping(
+                source_customer_id=customer_code,
+                golden_customer_id=golden_id,
+                registry_version="test-registry-v1",
+                source_batch_id="test-batch",
+                assignment_type="EXACT",
+            )
+        )
 
 
 def test_auth_openapi_declares_runtime_email_domain_restriction():
@@ -233,6 +263,14 @@ def test_nba_evaluation_is_persisted_fail_closed_and_not_campaign_eligible(
     )
     assert registered.status_code == 201, registered.text
     customer_id = registered.json()["id"]
+
+    unmapped = client.post(
+        "/decisions/next-best-actions/evaluate",
+        headers=analyst_headers,
+        json={"customer_id": customer_id},
+    )
+    assert unmapped.status_code == 409
+    link_approved_golden_identity(customer_id, "NBA-REAL-001")
 
     boolean_id = client.post(
         "/decisions/next-best-actions/evaluate",
@@ -457,6 +495,20 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
         "X-Correlation-ID": correlation_id,
     }
     headers = {"Authorization": f"Bearer {token}"}
+    admin_headers = {
+        "Authorization": f"Bearer {token_for(client, 'admin@example.com')}"
+    }
+    unmapped_customer = client.post(
+        "/customers",
+        headers=admin_headers,
+        json={
+            "customer_code": "UNMAPPED-CAMPAIGN-001",
+            "full_name": "Unmapped Campaign Customer",
+            "email": "unmapped-campaign@example.com",
+            "segment": "Enterprise VIP",
+        },
+    )
+    assert unmapped_customer.status_code == 201
     monitoring = client.get("/monitoring/dashboard", headers=headers)
     assert monitoring.status_code == 200
     assert monitoring.json()["audit"] == []
@@ -504,7 +556,7 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
         assert job.payload["batch_job_id"] == job.id
         assert job.status == "queued"
         assert db.query(Campaign).count() == 1
-        assert db.query(Customer).count() == 0
+        assert db.query(Customer).count() == 1
     assert process_one(
         app.state.audit_session_factory,
         handler_executor=inline_executor,
@@ -514,6 +566,7 @@ def test_campaign_launch_enqueues_simulated_batch_job(client: TestClient, monkey
         assert job.status == "completed"
         assert job.result["delivery_mode"] == "simulated"
         assert job.result["external_delivery"] is False
+        assert job.result["identity_mapping_skipped_count"] == 1
         measurement = db.query(CampaignMeasurement).one()
         assert measurement.execution_job_id == job.id
         assert measurement.measurement_status == "AWAITING_OUTCOMES"
@@ -831,6 +884,7 @@ def test_governance_reconstruction_uses_persisted_decision_trace(client: TestCli
         },
     )
     assert customer.status_code == 201
+    link_approved_golden_identity(customer.json()["id"], "REAL-TRACE")
     created = client.post(
         "/decisions/next-best-actions/evaluate",
         headers=headers,

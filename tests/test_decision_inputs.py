@@ -8,8 +8,18 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
-from api.decision_inputs import load_serving_score_row
-from api.models import ModelPredictionRecord, ModelPredictionRun
+from api.decision_inputs import (
+    load_approved_customer_golden_refs,
+    load_serving_score_row,
+)
+from api.models import (
+    Customer,
+    GoldenCustomer,
+    ModelPredictionRecord,
+    ModelPredictionRun,
+    RegistryVersion,
+    SourceIdentityMapping,
+)
 from services.decision.nba.serving import (
     SCORE_CONTRACT_NOT_SERVING,
     SCORE_STATE_MISSING,
@@ -72,6 +82,93 @@ def add_prediction(
         )
     )
     db.flush()
+
+
+def test_only_exact_approved_golden_mapping_is_returned(db: Session):
+    db.add(RegistryVersion(version_tag="registry-v1", algorithm="exact"))
+    db.add(
+        GoldenCustomer(
+            golden_customer_id="golden-approved",
+            first_source_batch_id="batch-1",
+            anchor_source_id="source-001",
+            status="APPROVED",
+        )
+    )
+    db.add(
+        GoldenCustomer(
+            golden_customer_id="golden-pending",
+            first_source_batch_id="batch-1",
+            anchor_source_id="source-002",
+            status="PROVISIONAL",
+        )
+    )
+    db.add(
+        GoldenCustomer(
+            golden_customer_id="golden-mismatch",
+            first_source_batch_id="batch-1",
+            anchor_source_id="source-other",
+            status="APPROVED",
+        )
+    )
+    db.flush()
+    approved_customer = Customer(
+        customer_code="source-001",
+        full_name="Approved Customer",
+        email="approved@example.com",
+        segment="Test",
+        is_demo=False,
+        golden_customer_id="golden-approved",
+    )
+    pending_customer = Customer(
+        customer_code="source-002",
+        full_name="Pending Customer",
+        email="pending@example.com",
+        segment="Test",
+        is_demo=False,
+        golden_customer_id="golden-pending",
+    )
+    mismatched_customer = Customer(
+        customer_code="source-other",
+        full_name="Mismatched Customer",
+        email="mismatch@example.com",
+        segment="Test",
+        is_demo=False,
+        golden_customer_id="golden-mismatch",
+    )
+    db.add_all([approved_customer, pending_customer, mismatched_customer])
+    db.flush()
+    db.add_all(
+        [
+            SourceIdentityMapping(
+                source_customer_id="source-001",
+                golden_customer_id="golden-approved",
+                registry_version="registry-v1",
+                source_batch_id="batch-1",
+                assignment_type="EXACT",
+            ),
+            SourceIdentityMapping(
+                source_customer_id="source-002",
+                golden_customer_id="golden-pending",
+                registry_version="registry-v1",
+                source_batch_id="batch-1",
+                assignment_type="EXACT",
+            ),
+            SourceIdentityMapping(
+                source_customer_id="source-real",
+                golden_customer_id="golden-mismatch",
+                registry_version="registry-v1",
+                source_batch_id="batch-1",
+                assignment_type="EXACT",
+            ),
+        ]
+    )
+    db.flush()
+
+    refs = load_approved_customer_golden_refs(
+        db, [approved_customer, pending_customer, mismatched_customer]
+    )
+
+    assert refs == {approved_customer.id: "golden-approved"}
 
 
 def test_only_churn_predictions_are_considered(db: Session):

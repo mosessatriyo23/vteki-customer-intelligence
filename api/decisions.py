@@ -5,7 +5,11 @@ from starlette.requests import Request
 
 from api.audit import record_audit_event
 from api.database import get_db
-from api.decision_inputs import load_contact_history, load_serving_score_row
+from api.decision_inputs import (
+    load_approved_customer_golden_refs,
+    load_contact_history,
+    load_serving_score_row,
+)
 from api.models import Customer, DecisionTrace, NBADecision, User
 from api.security import require_roles
 from services.decision.nba.serving import evaluate_customer
@@ -76,7 +80,12 @@ def evaluate_customer_next_best_action(
     if customer is None:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    identity_ref = customer.golden_customer_id or customer.customer_code
+    identity_ref = load_approved_customer_golden_refs(db, [customer]).get(customer.id)
+    if identity_ref is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Customer requires an exact, approved Golden Customer mapping.",
+        )
     score_row = load_serving_score_row(db, identity_ref)
     output = evaluate_customer(
         customer_ref=identity_ref,
