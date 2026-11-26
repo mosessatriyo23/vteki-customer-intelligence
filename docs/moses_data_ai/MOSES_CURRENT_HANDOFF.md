@@ -1,5 +1,15 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Keputusan percepatan Moses (PM) — 26 November 2026
+
+Moses, mewakili tim, menyatakan **YA** atas usulan tertulis berikut agar penyelesaian didahulukan; tim boleh mengoreksi kemudian:
+
+- **D1:** izin pakai disimpan pada `ml.prediction_review_runs` (migrasi 0027): `usage_approved`, `usage_decided_by`, `usage_decided_at`, `usage_note`, `model_author`. Impor lama/baru tetap `NULL` (tidak ada backfill/persetujuan otomatis).
+- **D2:** izin hanya lewat `POST /model-predictions/runs/{id}/usage` oleh admin, dengan audit. Persetujuan wajib review selesai oleh orang yang berbeda dari pengunggah dan pembuat model. Pembuat model ditetapkan admin, bukan dibaca dari manifest. Cabut izin = `false` dan berlaku pada evaluasi berikutnya.
+- **D3 dan D5 versi usulan Christ:** cutoff terbaru, berlaku 30 hari dari cutoff, skor parsial/kontrak non-serving ditolak, alasan kurang dari 3 tidak menolak skor, dan tidak ada angka pengganti.
+
+Yang **tidak** dianggap terjadi: penunjukan nama reviewer, review model riil, persetujuan run riil, UAT, atau sumber consent/kelayakan. Loader kini membaca izin dari DB; NBA tetap menolak skor tanpa izin, kedaluwarsa, atau tidak lengkap.
+
 ## Penguatan impor mandiri — 26 November 2026
 
 Validator bersama API/worker kini menolak cutoff yang tidak dapat diurutkan (bukan timestamp ISO dengan waktu dan timezone), serta menolak dua baris pelanggan yang sama pada **instant** cutoff yang sama walau ditulis dengan offset berbeda. Ini mencegah data review rusak masuk DB dan tetap menjaga bukti cutoff asli tanpa mengubah status approval, `AIScores`, P1–P8, atau aturan NBA. Dokumen P1–P8 Christ masih draf; boundary WIB belum diterapkan tanpa konfirmasi final.

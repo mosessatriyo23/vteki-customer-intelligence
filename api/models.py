@@ -304,6 +304,13 @@ class ModelPredictionRun(Base):
         DateTime(timezone=True), nullable=True
     )
     review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    usage_approved: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    usage_decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    usage_decided_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    usage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    model_author: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class ModelPredictionRecord(Base):

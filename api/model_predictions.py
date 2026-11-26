@@ -2,10 +2,10 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Discriminator, Field, StrictInt, Tag
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -54,6 +54,40 @@ class PredictionReviewRequest(BaseModel):
     review_note: str = Field(min_length=5, max_length=2000, pattern=r"^[^\x00]*$")
 
 
+UsageNote = Annotated[str, Field(max_length=2000, pattern=r"^[^\x00]*\S[^\x00]*$")]
+
+
+class PredictionUsageApproval(BaseModel):
+    approved: Literal[True]
+    # Trusted author is assigned here by an admin, never read from the manifest.
+    model_author: StrictInt = Field(gt=0)
+    note: UsageNote
+
+
+class PredictionUsageRevocation(BaseModel):
+    approved: Literal[False]
+    # Revocation keeps any prior trusted author; it cannot assign a new one.
+    model_author: None = None
+    note: UsageNote
+
+
+def _usage_tag(value: Any) -> str | None:
+    # Identity checks keep 1/0 from matching the true/false JSON-schema consts.
+    approved = value.get("approved") if isinstance(value, dict) else None
+    if approved is True:
+        return "approve"
+    if approved is False:
+        return "revoke"
+    return None
+
+
+PredictionUsageRequest = Annotated[
+    Annotated[PredictionUsageApproval, Tag("approve")]
+    | Annotated[PredictionUsageRevocation, Tag("revoke")],
+    Discriminator(_usage_tag),
+]
+
+
 def _run_response(run: ModelPredictionRun) -> dict[str, Any]:
     return {
         "id": run.id,
@@ -70,7 +104,18 @@ def _run_response(run: ModelPredictionRun) -> dict[str, Any]:
         "reviewed_by": run.reviewed_by,
         "reviewed_at": run.reviewed_at,
         "review_note": run.review_note,
-        "serving_ready": False,
+        "usage_approved": run.usage_approved,
+        "usage_decided_by": run.usage_decided_by,
+        "usage_decided_at": (
+            run.usage_decided_at.replace(tzinfo=timezone.utc)
+            if run.usage_decided_at is not None and run.usage_decided_at.tzinfo is None
+            else run.usage_decided_at
+        ),
+        "usage_note": run.usage_note,
+        "model_author": run.model_author,
+        # A run-level permission is not a per-customer readiness evaluation.
+        "serving_ready": None if run.usage_approved is True else False,
+        "readiness_scope": "NOT_EVALUATED_PER_CUSTOMER",
         "manifest": run.manifest,
     }
 
@@ -334,7 +379,9 @@ def list_prediction_records(
     return {
         "run_id": run_id,
         "review_status": run.review_status,
-        "serving_ready": False,
+        "usage_approved": run.usage_approved,
+        "serving_ready": None if run.usage_approved is True else False,
+        "readiness_scope": "NOT_EVALUATED_PER_CUSTOMER",
         "total": run.record_count,
         "limit": limit,
         "offset": offset,
@@ -372,6 +419,71 @@ def list_prediction_records(
             for record in records
         ],
     }
+
+
+@router.post(
+    "/runs/{run_id}/usage",
+    responses={
+        404: {"description": "Prediction run or model author user not found"},
+        409: {"description": "Run lacks a completed independent review"},
+    },
+)
+def decide_prediction_usage(
+    run_id: DBId,
+    payload: PredictionUsageRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    actor: User = Depends(require_roles("admin")),
+) -> dict[str, Any]:
+    run = (
+        db.query(ModelPredictionRun)
+        .filter(ModelPredictionRun.id == run_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if run is None:
+        raise HTTPException(status_code=404, detail="Prediction review run not found")
+    if payload.approved:
+        if (
+            run.review_status != "reviewed"
+            or run.reviewed_by is None
+            or run.reviewed_at is None
+            or run.reviewed_by in (run.submitted_by, payload.model_author)
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="Approval requires completed independent review by a non-author",
+            )
+        if db.get(User, payload.model_author) is None:
+            raise HTTPException(status_code=404, detail="Model author user not found")
+        run.model_author = payload.model_author
+
+    run.usage_approved = payload.approved
+    run.usage_decided_by = actor.id
+    run.usage_decided_at = datetime.now(timezone.utc)
+    run.usage_note = payload.note
+    record_audit_event(
+        db,
+        correlation_id=request.state.correlation_id,
+        event_type=(
+            "model.prediction_run.usage_approved"
+            if payload.approved
+            else "model.prediction_run.usage_revoked"
+        ),
+        actor_id=actor.id,
+        entity_type="model_prediction_run",
+        entity_id=run.id,
+        details={
+            "approved": run.usage_approved,
+            "model_author": run.model_author,
+            "usage_note": run.usage_note,
+            "review_status": run.review_status,
+            "readiness_scope": "NOT_EVALUATED_PER_CUSTOMER",
+        },
+    )
+    db.commit()
+    db.refresh(run)
+    return _run_response(run)
 
 
 @router.post("/runs/{run_id}/review")

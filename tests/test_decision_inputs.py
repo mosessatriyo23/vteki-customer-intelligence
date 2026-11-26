@@ -156,6 +156,30 @@ def test_pending_review_import_is_present_but_never_usable(db: Session):
     assert lookup.usable is False
 
 
+def test_explicit_run_approval_and_revocation_reach_loader(db: Session):
+    add_prediction(db, "2026-11-01T00:00:00+00:00")
+    run = db.query(ModelPredictionRun).one()
+    run.model_author = 1
+    run.usage_approved = True
+    run.usage_decided_by = 3
+    run.usage_decided_at = datetime(2026, 11, 2, tzinfo=timezone.utc)
+    db.flush()
+
+    approved = load_serving_score_row(db, "customer-1")
+    assert approved["usage_approved"] is True
+    assert approved["model_author"] == 1
+    assert approved["usage_decided_by"] == 3
+    # This fixture has deliberately incomplete score components: approval alone
+    # must never manufacture the missing CLV/propensity/lifecycle inputs.
+    assert lookup_scores(approved, customer_id="customer-1").usable is False
+
+    run.usage_approved = False
+    db.flush()
+    revoked = load_serving_score_row(db, "customer-1")
+    assert revoked["usage_approved"] is False
+    assert lookup_scores(revoked, customer_id="customer-1").usable is False
+
+
 def test_reviewed_compliant_row_still_waits_for_usage_approval(db: Session):
     add_prediction(db, "2026-11-01T00:00:00+00:00")
 
