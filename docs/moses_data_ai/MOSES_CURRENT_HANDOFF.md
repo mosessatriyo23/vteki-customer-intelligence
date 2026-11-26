@@ -1,5 +1,9 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Penguatan impor mandiri — 26 November 2026
+
+Validator bersama API/worker kini menolak cutoff yang tidak dapat diurutkan (bukan timestamp ISO dengan waktu dan timezone), serta menolak dua baris pelanggan yang sama pada **instant** cutoff yang sama walau ditulis dengan offset berbeda. Ini mencegah data review rusak masuk DB dan tetap menjaga bukti cutoff asli tanpa mengubah status approval, `AIScores`, P1–P8, atau aturan NBA. Dokumen P1–P8 Christ masih draf; boundary WIB belum diterapkan tanpa konfirmasi final.
+
 ## Sinkronisasi dengan Christ / James Marvin — 26 November 2026
 
 - Loader NBA kini meneruskan baris CHURN terbaru beserta `contract_status` ke gerbang murni Christ. `SCHEMA_PARTIAL` / `INVALID_SCORE` tetap ditolak, tetapi UI/API dapat membedakan **skor ada namun belum boleh dipakai** dari **skor tidak ada**; baris lama tidak dipilih sebagai pengganti. Alur API dan worker diuji bersama.
