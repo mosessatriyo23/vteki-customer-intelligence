@@ -234,6 +234,20 @@ def test_nba_evaluation_is_persisted_fail_closed_and_not_campaign_eligible(
     assert registered.status_code == 201, registered.text
     customer_id = registered.json()["id"]
 
+    boolean_id = client.post(
+        "/decisions/next-best-actions/evaluate",
+        headers=analyst_headers,
+        json={"customer_id": True},
+    )
+    assert boolean_id.status_code == 422
+
+    integral_float_id = client.post(
+        "/decisions/next-best-actions/evaluate",
+        headers=analyst_headers,
+        json={"customer_id": float(customer_id)},
+    )
+    assert integral_float_id.status_code == 201, integral_float_id.text
+
     denied = client.post(
         "/decisions/next-best-actions/evaluate",
         headers=campaign_headers,
@@ -1033,6 +1047,12 @@ def test_measurement_integral_float_campaign_id(client):
         "properties"
     ]["campaign_id"]
     assert campaign_schema["type"] == "integer"
+    measurement_branches = schema["components"]["schemas"]["MeasurementCreate"]["oneOf"]
+    assert len(measurement_branches) == 4
+    assert {
+        branch["properties"]["measurement_status"]["const"]
+        for branch in measurement_branches
+    } == {"COMPUTED", "AWAITING_OUTCOMES", "CONTROL_GROUP_EMPTY"}
 
 
 def test_measurement_with_missing_values_is_recorded_as_awaiting_outcomes(client):

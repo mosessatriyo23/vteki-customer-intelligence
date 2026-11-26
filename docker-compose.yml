@@ -50,6 +50,12 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-vteki_intelligence}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       PIPELINE_INTERVAL_MINUTES: ${PIPELINE_INTERVAL_MINUTES:-15}
+      PREDICTION_IMPORT_ROOT: ${PREDICTION_IMPORT_ROOT:-/var/lib/vteki/prediction-import}
+    volumes:
+      - type: bind
+        source: ${PREDICTION_IMPORT_HOST_DIR:-./inbound/prediction-import}
+        target: ${PREDICTION_IMPORT_ROOT:-/var/lib/vteki/prediction-import}
+        read_only: true
     command: ["python", "-m", "worker"]
     restart: unless-stopped
     healthcheck:

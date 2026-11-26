@@ -2,7 +2,7 @@ import math
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -29,6 +29,42 @@ class DriftMetricCreate(BaseModel):
 
 
 class MeasurementCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "oneOf": [
+                {
+                    "properties": {
+                        "measurement_status": {"const": "COMPUTED"},
+                        "observed_value": {"type": "number"},
+                        "incremental_value": {"type": "number"},
+                    },
+                    "required": ["observed_value", "incremental_value"],
+                },
+                {
+                    "properties": {
+                        "measurement_status": {"const": "COMPUTED"},
+                        "observed_value": {"type": "null"},
+                        "incremental_value": {"type": "null"},
+                    }
+                },
+                {
+                    "properties": {
+                        "measurement_status": {"const": "AWAITING_OUTCOMES"},
+                        "observed_value": {"type": "null"},
+                        "incremental_value": {"type": "null"},
+                    },
+                },
+                {
+                    "properties": {
+                        "measurement_status": {"const": "CONTROL_GROUP_EMPTY"},
+                        "observed_value": {"type": "null"},
+                        "incremental_value": {"type": "null"},
+                    },
+                },
+            ]
+        }
+    )
+
     campaign_id: int = Field(ge=1, le=2_147_483_647, strict=True)
     metric_name: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00]*$")
     observed_value: float | None = Field(default=None, strict=True, allow_inf_nan=False)
