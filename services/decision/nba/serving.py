@@ -26,7 +26,7 @@ Prinsip fail-closed (data kosong = ditulis kosong, bukan diisi tebakan):
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional, Sequence
 
@@ -72,6 +72,53 @@ SCORE_SELF_REVIEWED = "MODEL_RUN_REVIEWED_BY_SUBMITTER"
 SCORE_USAGE_NOT_APPROVED = "MODEL_USAGE_NOT_APPROVED"
 SCORE_INCOMPLETE = "SCORE_FIELDS_INCOMPLETE"
 SCORE_INVALID = "SCORE_VALUES_INVALID"
+SCORE_CONTRACT_NOT_SERVING = "SCORE_CONTRACT_NOT_SERVING"
+SCORE_EXPIRED = "SCORE_EXPIRED"
+SCORE_CUSTOMER_MISMATCH = "SCORE_CUSTOMER_MISMATCH"
+
+NON_SERVING_CONTRACT_STATUSES = frozenset({"SCHEMA_PARTIAL", "INVALID_SCORE"})
+"""Status kontrak producer Moses (`prediction_contract.STATUSES`) yang eksplisit bukan untuk serving.
+
+Disalin (bukan diimpor) agar `services/decision` tidak bergantung pada api/ atau services/data.
+Dipakai bila loader mengirim kunci opsional `contract_status` pada baris skor."""
+
+# Tiga keadaan skor untuk UI (to-do PM 26 Nov: "belum ada" / "ada tapi belum disetujui" / "siap").
+SCORE_STATE_MISSING = "SCORE_MISSING"
+SCORE_STATE_PRESENT_NOT_APPROVED = "SCORE_PRESENT_NOT_APPROVED"
+SCORE_STATE_READY = "SCORE_READY"
+
+_SCORE_STATE_BY_REASON = {
+    SCORE_NO_ROW: SCORE_STATE_MISSING,
+    SCORE_NOT_REVIEWED: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_SELF_REVIEWED: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_USAGE_NOT_APPROVED: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_CONTRACT_NOT_SERVING: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_EXPIRED: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_CUSTOMER_MISMATCH: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_INCOMPLETE: SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_INVALID: SCORE_STATE_PRESENT_NOT_APPROVED,
+}
+
+
+def score_state_for(unavailable_reason: Optional[str], *, usable: bool) -> str:
+    """
+    Memetakan hasil pembacaan skor ke salah satu dari TIGA keadaan tampilan.
+
+    * `SCORE_READY`                 - skor lolos semua gerbang dan dipakai.
+    * `SCORE_MISSING`               - tidak ada baris skor sama sekali.
+    * `SCORE_PRESENT_NOT_APPROVED`  - baris skor ada, tetapi belum boleh/bisa dipakai
+      (belum direview, reviewer tidak sah, belum ada izin pakai, kontrak producer
+      belum lengkap, field kosong, atau nilai tidak valid).
+
+    Alasan yang tidak dikenal diperlakukan fail-closed sebagai "ada tapi belum dipakai",
+    BUKAN "siap" dan BUKAN "belum ada" (agar tidak menyamarkan masalah jadi kosong).
+    """
+    if usable:
+        return SCORE_STATE_READY
+    return _SCORE_STATE_BY_REASON.get(
+        unavailable_reason or "", SCORE_STATE_PRESENT_NOT_APPROVED
+    )
+
 
 DECISION_STATUS_PROPOSED = "proposed"
 DECISION_STATUS_ACCEPTED = "accepted"
@@ -95,6 +142,14 @@ _SCORE_NOTES = {
     ),
     SCORE_INCOMPLETE: "Skor prediksi pelanggan ini belum lengkap, jadi tidak dipakai.",
     SCORE_INVALID: "Skor prediksi pelanggan ini tidak valid, jadi tidak dipakai.",
+    SCORE_CONTRACT_NOT_SERVING: (
+        "Skor prediksi sudah tersimpan, tetapi formatnya belum lengkap menurut "
+        "kontrak, jadi belum dipakai."
+    ),
+    SCORE_EXPIRED: "Skor prediksi pelanggan ini sudah kedaluwarsa, jadi tidak dipakai.",
+    SCORE_CUSTOMER_MISMATCH: (
+        "Skor yang ditemukan tidak cocok dengan identitas pelanggan ini, jadi tidak dipakai."
+    ),
 }
 
 _PLAIN_SOURCE_NAMES = {
@@ -124,7 +179,14 @@ class ScoreLookup:
 
     @property
     def usable(self) -> bool:
-        return self.ai_scores is not None
+        # `ai_scores` tetap diisi untuk skor kedaluwarsa (engine yang menurunkannya ke
+        # default konservatif + degraded_input), tetapi skor itu TIDAK dianggap dipakai.
+        return self.ai_scores is not None and self.unavailable_reason is None
+
+    @property
+    def state(self) -> str:
+        """Salah satu dari tiga keadaan tampilan (lihat `score_state_for`)."""
+        return score_state_for(self.unavailable_reason, usable=self.usable)
 
 
 def _parse_dt(value: Any) -> Optional[datetime]:
@@ -162,9 +224,10 @@ def lookup_scores(row: Optional[Mapping[str, Any]], *, customer_id: str) -> Scor
         propensity_renew, clv_amount, clv_tier, lifecycle_stage,
         score_generated_at, reason_codes, model_version,
         review_status, reviewed_by, submitted_by, usage_approved
-    Opsional: model_author (pembuat/pelatih model; bila ada, reviewer tidak boleh sama).
+    Opsional: model_author (pembuat/pelatih model; bila ada, reviewer tidak boleh sama),
+    contract_status (bila `SCHEMA_PARTIAL`/`INVALID_SCORE` -> `SCORE_CONTRACT_NOT_SERVING`).
 
-    Ditolak bila: baris kosong, run belum `reviewed`, `reviewed_by` kosong atau sama
+    Ditolak bila: baris kosong, `customer_id` baris tidak sama dengan pelanggan yang dievaluasi, run belum `reviewed`, `reviewed_by` kosong atau sama
     dengan `submitted_by`/`model_author` (harus orang lain), `usage_approved` bukan
     `True` (review saja bukan izin pakai), ada field wajib yang kosong, atau ada nilai
     di luar rentang. Penolakan TIDAK diganti angka pengganti.
@@ -181,6 +244,15 @@ def lookup_scores(row: Optional[Mapping[str, Any]], *, customer_id: str) -> Scor
         "reviewed_by": reviewed_by,
     }
 
+    # Pertahanan berlapis: loader (api/) sudah memfilter per ID, tetapi skor milik pelanggan
+    # LAIN tidak boleh dipakai walau loader salah. ID kosong juga ditolak (tidak ada tebakan, D4).
+    if row.get("customer_id") != customer_id:
+        return ScoreLookup(None, unavailable_reason=SCORE_CUSTOMER_MISMATCH, **base)
+
+    # Baris ADA tetapi kontrak producer menandainya bukan untuk serving. Dibedakan dari
+    # "baris tidak ada" agar UI tidak menulis "belum ada skor" untuk skor yang sudah tersimpan.
+    if row.get("contract_status") in NON_SERVING_CONTRACT_STATUSES:
+        return ScoreLookup(None, unavailable_reason=SCORE_CONTRACT_NOT_SERVING, **base)
     if review_status != REVIEW_STATUS_APPROVED:
         return ScoreLookup(None, unavailable_reason=SCORE_NOT_REVIEWED, **base)
     if (
@@ -298,6 +370,7 @@ class DecisionOutput:
                 else None
             ),
             "score_unavailable_reason": self.score_lookup.unavailable_reason,
+            "score_state": self.score_lookup.state,
             "score_missing_fields": list(self.score_lookup.missing_fields),
             # Angka EV hanya ditulis bila skor nyata dipakai; selain itu null (kosong).
             "expected_value": (
@@ -385,6 +458,11 @@ class DecisionOutput:
             "serving_ready": payload["serving_ready"],
             "expected_value": payload["expected_value"],
             "unavailable_sources": payload["unavailable_sources"],
+            "score_state": payload["score_state"],
+            "score_unavailable_reason": payload["score_unavailable_reason"],
+            # Status review run model apa adanya (pending_review / rejected / reviewed / None):
+            # kode alasan MODEL_RUN_NOT_REVIEWED sama untuk "menunggu" dan "ditolak".
+            "model_review_status": payload["model_review_status"],
         }
 
 
@@ -426,7 +504,16 @@ def evaluate_customer(
     apa adanya ke alasan HANYA bila skor dipakai; tidak pernah ditulis ulang di sini.
     """
     when = evaluation_date or datetime.now(timezone.utc)
+    nba = engine or NBAEngine()
     lookup = lookup_scores(score_row, customer_id=customer_ref)
+    if (
+        lookup.ai_scores is not None
+        and lookup.unavailable_reason is None
+        and nba._is_score_expired(lookup.ai_scores, when)
+    ):
+        # Aturan kedaluwarsa SATU sumber (engine). Skor tetap diteruskan ke engine agar
+        # perilaku keputusan tidak berubah; yang berubah hanya label: bukan "siap dipakai".
+        lookup = replace(lookup, unavailable_reason=SCORE_EXPIRED)
 
     unavailable = tuple(
         name
@@ -457,7 +544,7 @@ def evaluate_customer(
     assert product_suitability is not None
 
     consent = CustomerConsent.from_k10(consent_doc, now=when)
-    record = (engine or NBAEngine()).decide(
+    record = nba.decide(
         customer_id=customer_ref,
         ai_scores=lookup.ai_scores,
         consent=consent,
