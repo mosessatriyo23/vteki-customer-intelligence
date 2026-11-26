@@ -676,9 +676,26 @@ jobs:
           ) as connection:
               connection.execute(
                   """
+                  INSERT INTO stg.ingestion_batches
+                      (batch_id, schema_version, as_of_date, manifest_payload,
+                       table_checksums, status, row_counts, loaded_at)
+                  VALUES (%s, %s, CURRENT_DATE, %s, %s, %s, %s, now())
+                  """,
+                  (
+                      source_batch,
+                      "e2e-v1",
+                      Jsonb({}),
+                      Jsonb({}),
+                      "PUBLISHED",
+                      Jsonb({}),
+                  ),
+              )
+              connection.execute(
+                  """
                   INSERT INTO identity.registry_versions
-                      (version_tag, algorithm, parameters, status, description)
-                  VALUES (%s, %s, %s, %s, %s)
+                      (version_tag, algorithm, parameters, status, description,
+                       created_at)
+                  VALUES (%s, %s, %s, %s, %s, now())
                   """,
                   (
                       registry_version,
@@ -692,8 +709,8 @@ jobs:
                   """
                   INSERT INTO identity.golden_customers
                       (golden_customer_id, first_source_batch_id,
-                       anchor_source_id, status)
-                  VALUES (%s, %s, %s, %s)
+                       anchor_source_id, status, created_at, updated_at)
+                  VALUES (%s, %s, %s, %s, now(), now())
                   """,
                   (golden_id, source_batch, customer["customer_code"], "APPROVED"),
               )
@@ -701,8 +718,8 @@ jobs:
                   """
                   INSERT INTO identity.source_identity_mapping
                       (source_customer_id, golden_customer_id, registry_version,
-                       source_batch_id, assignment_type)
-                  VALUES (%s, %s, %s, %s, %s)
+                       source_batch_id, assignment_type, assigned_at)
+                  VALUES (%s, %s, %s, %s, %s, now())
                   """,
                   (
                       customer["customer_code"],
