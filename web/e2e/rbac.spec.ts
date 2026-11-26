@@ -70,13 +70,28 @@ async function createCustomer(request: APIRequestContext) {
 
 async function createDecision(request: APIRequestContext) {
   const token = await getToken(request, accounts.admin)
-  const customer = await createCustomer(request)
+  const customerResponse = await request.get(
+    `${baseUrl}/api/customers?q=E2E-REAL-001`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  expect(customerResponse.status()).toBe(200)
+  const customers = (await customerResponse.json()) as Array<{
+    id: number
+    customer_code: string
+  }>
+  const customer = customers.find(
+    (candidate) => candidate.customer_code === 'E2E-REAL-001',
+  )
+  expect(
+    customer,
+    'approved Golden identity E2E fixture should exist',
+  ).toBeTruthy()
 
   const response = await request.post(
     `${baseUrl}/api/decisions/next-best-actions/evaluate`,
     {
       headers: { Authorization: `Bearer ${token}` },
-      data: { customer_id: customer.id },
+      data: { customer_id: customer!.id },
     },
   )
 

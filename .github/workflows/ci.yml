@@ -661,6 +661,85 @@ jobs:
               token,
           )
           print(f"Registered E2E customer: {customer['customer_code']}")
+
+          # NBA now requires an exact mapping to a reviewed Golden Customer.
+          # Seed that explicit test fixture so the RBAC scenario exercises the
+          # decision flow instead of failing at the identity safety gate.
+          import psycopg
+          from psycopg.types.json import Jsonb
+
+          golden_id = "00000000-0000-4000-8000-000000000001"
+          registry_version = "e2e-identity-v1"
+          source_batch = "e2e-fixture-batch"
+          with psycopg.connect(
+              "host=localhost dbname=vteki_e2e user=postgres password=postgres"
+          ) as connection:
+              connection.execute(
+                  """
+                  INSERT INTO identity.registry_versions
+                      (version_tag, algorithm, parameters, status, description)
+                  VALUES (%s, %s, %s, %s, %s)
+                  """,
+                  (
+                      registry_version,
+                      "exact",
+                      Jsonb({}),
+                      "ACTIVE",
+                      "CI E2E fixture",
+                  ),
+              )
+              connection.execute(
+                  """
+                  INSERT INTO identity.golden_customers
+                      (golden_customer_id, first_source_batch_id,
+                       anchor_source_id, status)
+                  VALUES (%s, %s, %s, %s)
+                  """,
+                  (golden_id, source_batch, customer["customer_code"], "APPROVED"),
+              )
+              connection.execute(
+                  """
+                  INSERT INTO identity.source_identity_mapping
+                      (source_customer_id, golden_customer_id, registry_version,
+                       source_batch_id, assignment_type)
+                  VALUES (%s, %s, %s, %s, %s)
+                  """,
+                  (
+                      customer["customer_code"],
+                      golden_id,
+                      registry_version,
+                      source_batch,
+                      "EXACT",
+                  ),
+              )
+              connection.execute(
+                  """
+                  UPDATE core.customers
+                  SET golden_customer_id = %s
+                  WHERE customer_code = %s
+                  """,
+                  (golden_id, customer["customer_code"]),
+              )
+              connection.execute(
+                  """
+                  INSERT INTO customer360.profile_snapshots
+                      (golden_customer_id, cutoff_at, generated_at,
+                       identity_registry_version, source_batch_id, rule_version,
+                       identity_status, source_identity_count, first_join_date,
+                       transaction_count, retained_revenue, visit_count,
+                       renewal_count)
+                  VALUES (%s, now(), now(), %s, %s, %s, %s, 1,
+                          CURRENT_DATE, 0, 0, 0, 0)
+                  """,
+                  (
+                      golden_id,
+                      registry_version,
+                      source_batch,
+                      "e2e-profile-v1",
+                      "APPROVED",
+                  ),
+              )
+          print("Linked E2E customer to an approved exact Golden identity")
           PY
 
       - name: Set Up Node
