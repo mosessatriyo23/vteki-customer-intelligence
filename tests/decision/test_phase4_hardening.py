@@ -7,9 +7,10 @@ Isi:
      zona waktu (mis. timestamptz PostgreSQL) tanpa TypeError.
   C. DEF-03 Skor AI tidak valid (di luar 0-1 / NaN / inf / CLV negatif) -> default konservatif,
      `degraded_input=True`, NO_ACTION; rekaman K-07 tetap JSON valid (tanpa NaN/Infinity).
-  D. RISIKO SISA (xfail strict): teknik penghindaran yang belum dideteksi blacklist regex.
-     Ditandai xfail agar terdokumentasi; bila kelak diperbaiki test akan XPASS (strict -> gagal)
-     sehingga penanda harus dihapus secara sadar.
+  D. Anti-penghindaran Safety Scanner (dahulu 3 xfail "risiko sisa"): homoglyph Kiril,
+     huruf berjarak, dan diskon ditulis dengan kata kini TERDETEKSI. Penanda xfail dihapus
+     secara sadar (strict XPASS memaksa langkah ini) + test false-positive agar teks wajar
+     tidak ikut terblokir.
   E. Penutup celah coverage pada modul Fase 2-3.
 
 Jalankan: python -m pytest tests/decision/test_phase4_hardening.py -v
@@ -377,26 +378,47 @@ class TestDef03InvalidScores:
 # D. RISIKO SISA — terdokumentasi (xfail strict)
 # ---------------------------------------------------------------------------
 
-RESIDUAL_REASON = (
-    "Risiko sisa terdokumentasi (Lampiran M): blacklist regex tidak menangkap teknik ini. "
-    "Mitigasi: variabel whitelist, panjang fakta <= 60, dan Human Approval wajib."
-)
 
-
-class TestResidualRisks:
-    @pytest.mark.xfail(strict=True, reason=RESIDUAL_REASON)
-    def test_cyrillic_homoglyph_is_not_detected(self):
+class TestEvasionTechniquesAreDetected:
+    def test_cyrillic_homoglyph_is_detected(self):
         assert not scan_message("p\u0430sti berhasil").is_safe  # 'а' Kiril
 
-    @pytest.mark.xfail(strict=True, reason=RESIDUAL_REASON)
-    def test_letter_spacing_is_not_detected(self):
+    def test_letter_spacing_is_detected(self):
         assert not scan_message("p a s t i berhasil").is_safe
 
-    @pytest.mark.xfail(strict=True, reason=RESIDUAL_REASON)
-    def test_discount_written_in_words_is_not_detected(self):
+    def test_letter_spacing_with_dots_is_detected(self):
+        assert not scan_message("m.e.d.i.s").is_safe
+
+    def test_discount_written_in_words_is_detected(self):
         assert not scan_message(
             "Diskon sembilan puluh persen", max_discount_percent=30
         ).is_safe
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Diskon tiga puluh lima persen",
+            "Potongan seratus persen",
+            "Diskon empat puluh persen",
+        ],
+    )
+    def test_discount_words_above_cap_blocked_and_escalated(self, text):
+        result = scan_message(text, max_discount_percent=30)
+        assert not result.is_safe
+        assert result.requires_escalation
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Diskon tiga puluh persen",  # tepat sama dengan pagu -> boleh
+            "Diskon dua puluh persen untuk Anda",
+            "Paket A B C tersedia",
+            "Pilih opsi a, b, atau c",
+            "Halo Budi, poin Anda 120 siap dipakai",
+        ],
+    )
+    def test_normal_text_is_not_blocked(self, text):
+        assert scan_message(text, max_discount_percent=30).is_safe
 
 
 # ---------------------------------------------------------------------------
