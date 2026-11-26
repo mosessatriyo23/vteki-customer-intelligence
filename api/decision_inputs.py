@@ -13,9 +13,6 @@ from api.models import (
 from services.decision.policy.fatigue import ContactRecord
 
 CHURN_PREDICTION_TYPE = "CHURN"
-# The producer (services.data.models.prediction_contract.STATUSES) emits only
-# these two statuses; both are explicitly non-serving.
-NON_SERVING_CONTRACT_STATUSES = frozenset({"SCHEMA_PARTIAL", "INVALID_SCORE"})
 
 
 def _aware_instant(value: object) -> datetime | None:
@@ -60,9 +57,9 @@ def load_serving_score_row(db: Session, customer_ref: str) -> dict[str, Any] | N
         return None
 
     _, record, run = max(keyed, key=lambda item: item[0])
-    # The newest record decides; an older clean run must not hide it.
-    if record.contract_status in NON_SERVING_CONTRACT_STATUSES:
-        return None
+    # The newest record decides; an older clean run must not hide it. A
+    # non-serving newest row is returned WITH its contract_status so the pure
+    # service rejects it as "present, not approved" instead of "missing".
     source = record.source_record if isinstance(record.source_record, dict) else {}
     raw_reasons = record.reason_codes if isinstance(record.reason_codes, list) else []
     reason_codes = [
@@ -81,6 +78,7 @@ def load_serving_score_row(db: Session, customer_ref: str) -> dict[str, Any] | N
         # from import time (which could incorrectly renew an old score).
         "score_generated_at": record.cutoff_at,
         "reason_codes": reason_codes,
+        "contract_status": record.contract_status,
         "model_version": run.model_version,
         "review_status": run.review_status,
         "reviewed_by": run.reviewed_by,

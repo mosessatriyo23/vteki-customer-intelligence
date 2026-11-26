@@ -27,6 +27,7 @@ from api.models import (
     User,
 )
 from api.security import hash_password
+from services.decision.nba.serving import lookup_scores
 from tests.data.test_prediction_review_roundtrip import (  # noqa: F401
     CUSTOMER_ID,
     artifact,
@@ -144,7 +145,11 @@ def test_worker_persists_scores_reasons_and_versions_for_review(env, artifact):
         ).one()
         assert audit.actor_id == stored_job.created_by
         assert audit.details["batch_job_id"] == job["id"]
-        assert load_serving_score_row(db, CUSTOMER_ID) is None
+        score_row = load_serving_score_row(db, CUSTOMER_ID)
+        assert score_row is not None
+        assert score_row["contract_status"] == "SCHEMA_PARTIAL"
+        assert score_row["usage_approved"] is None
+        assert lookup_scores(score_row, customer_id=CUSTOMER_ID).usable is False
 
 
 def test_reimport_is_idempotent_not_duplicated(env):

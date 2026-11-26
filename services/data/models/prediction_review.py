@@ -6,6 +6,7 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -28,6 +29,17 @@ def _finite_score(value: Any) -> bool:
         and math.isfinite(value)
         and 0 <= value <= 1
     )
+
+
+def _cutoff_instant(value: str) -> datetime:
+    """Parse an aware ISO cutoff, matching the producer and NBA loader parsers."""
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("cutoff_at is not a valid ISO timestamp") from error
+    if parsed.utcoffset() is None:
+        raise ValueError("cutoff_at must include a timezone offset")
+    return parsed
 
 
 def validate_prediction_import(
@@ -73,7 +85,7 @@ def validate_prediction_import(
         raise ValueError("producer_version is missing")
 
     canonical_lines: list[str] = []
-    seen: set[tuple[str, str]] = set()
+    seen: set[tuple[str, datetime]] = set()
     for row in records:
         if not isinstance(row, dict):
             raise ValueError("Every prediction record must be an object")
@@ -90,7 +102,8 @@ def validate_prediction_import(
             UUID(customer_id)
         except ValueError as error:
             raise ValueError("customer_id must be a Golden Customer UUID") from error
-        record_identity = (customer_id, cutoff_at)
+        # The NBA loader orders by parsed instant; keep that key unique here.
+        record_identity = (customer_id, _cutoff_instant(cutoff_at))
         if record_identity in seen:
             raise ValueError("Duplicate customer and cutoff in imported predictions")
         seen.add(record_identity)

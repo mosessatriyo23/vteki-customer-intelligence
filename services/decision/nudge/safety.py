@@ -23,6 +23,13 @@ PAGU DISKON & BLACKLIST (keputusan tim, BUKAN tertulis di Requirement_Capstone /
   medis, terapeutik, klinis, klaim obat). Pencocokan kata utuh, tidak peka huruf besar/kecil.
   PERHATIAN: "medis" juga mengenai "non-medis" (false positive yang diketahui).
 - Jika `MAX_DISCOUNT_PERCENT` diset `None`, scanner kembali ke mode FAIL-CLOSED (semua diskon persentase diblokir).
+
+Anti-penghindaran (Fase 4, penutupan 3 risiko sisa Lampiran M):
+- Homoglyph: huruf Kiril/Yunani yang mirip huruf Latin dilipat ke Latin ("pаsti" -> "pasti").
+- Huruf berjarak: "p a s t i" / "p.a.s.t.i" dirapatkan lalu dipindai ulang.
+- Diskon ditulis dengan kata: "sembilan puluh persen" dikonversi ke angka 90 lalu dipindai ulang.
+Varian teks hanya dipindai TAMBAHAN bila berbeda dari teks dasar, sehingga teks biasa
+berperilaku persis seperti sebelumnya.
 """
 
 from __future__ import annotations
@@ -172,7 +179,81 @@ def _normalize(text: str) -> str:
     """
     text = unicodedata.normalize("NFKC", text)  # fullwidth "１００％" -> "100%"
     text = _INVISIBLE_CHARS.sub("", text)
-    return re.sub(r"\s+", " ", text).strip().lower()
+    text = re.sub(r"\s+", " ", text).strip().lower()
+    return text.translate(_HOMOGLYPH_MAP)  # "pаsti" (а Kiril) -> "pasti"
+
+
+# Huruf Kiril/Yunani huruf kecil yang tampak identik dengan huruf Latin. Teks bahasa
+# Indonesia tidak memakai aksara ini, sehingga pelipatan aman (tanpa false positive).
+_HOMOGLYPH_MAP = str.maketrans(
+    {
+        "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "у": "y", "х": "x",
+        "к": "k", "і": "i", "ј": "j", "ѕ": "s", "һ": "h", "ԁ": "d",
+        "α": "a", "ο": "o", "ρ": "p", "ν": "v", "ι": "i", "κ": "k", "υ": "u",
+    }
+)  # fmt: skip
+
+_LETTER = r"[^\W\d_]"
+_SPACED_LETTERS = re.compile(
+    rf"(?<!{_LETTER})(?:{_LETTER}[ .\-_*]){{2,}}{_LETTER}(?!{_LETTER})"
+)
+"""Tiga huruf tunggal atau lebih yang dipisah satu pemisah ("p a s t i", "p.a.s.t.i")."""
+
+
+def _collapse_spaced_letters(text: str) -> str:
+    """Rapatkan huruf yang sengaja diberi jarak agar blacklist tetap cocok."""
+    return _SPACED_LETTERS.sub(lambda m: re.sub(r"[ .\-_*]", "", m.group(0)), text)
+
+
+_NUMBER_WORDS = {
+    "nol": 0, "satu": 1, "dua": 2, "tiga": 3, "empat": 4, "lima": 5,
+    "enam": 6, "tujuh": 7, "delapan": 8, "sembilan": 9,
+}  # fmt: skip
+_NUMBER_TOKEN = "|".join(
+    [*_NUMBER_WORDS, "sepuluh", "sebelas", "seratus", "belas", "puluh", "ratus"]
+)
+_NUMBER_PHRASE_PERCENT = re.compile(
+    rf"\b((?:(?:{_NUMBER_TOKEN})\s+)*(?:{_NUMBER_TOKEN}))\s+persen\b"
+)
+
+
+def _parse_indonesian_number(tokens: List[str]) -> Optional[int]:
+    """Konversi kata bilangan Indonesia (0-199) ke int. None bila tidak dikenali."""
+    total, i = 0, 0
+    while i < len(tokens):
+        tok = tokens[i]
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if tok == "seratus":
+            total += 100
+        elif tok == "sepuluh":
+            total += 10
+        elif tok == "sebelas":
+            total += 11
+        elif tok in _NUMBER_WORDS and nxt == "ratus":
+            total += _NUMBER_WORDS[tok] * 100
+            i += 1
+        elif tok in _NUMBER_WORDS and nxt == "puluh":
+            total += _NUMBER_WORDS[tok] * 10
+            i += 1
+        elif tok in _NUMBER_WORDS and nxt == "belas":
+            total += 10 + _NUMBER_WORDS[tok]
+            i += 1
+        elif tok in _NUMBER_WORDS:
+            total += _NUMBER_WORDS[tok]
+        else:
+            return None
+        i += 1
+    return total
+
+
+def _numberwords_to_digits(text: str) -> str:
+    """ "sembilan puluh persen" -> "90 persen" agar pola diskon angka dapat mencocokkan."""
+
+    def repl(match: "re.Match[str]") -> str:
+        value = _parse_indonesian_number(match.group(1).split())
+        return f"{value} persen" if value is not None else match.group(0)
+
+    return _NUMBER_PHRASE_PERCENT.sub(repl, text)
 
 
 def _to_percent(raw: str) -> Optional[float]:
@@ -210,13 +291,41 @@ def scan_message(
     if not isinstance(text, str):
         raise TypeError("text harus berupa str")
 
-    normalized = _normalize(text)
-    violations: List[SafetyViolation] = []
+    base = _normalize(text)
     cap = (
         max_discount_percent
         if max_discount_percent is not None
         else MAX_DISCOUNT_PERCENT
     )
+
+    # Teks dasar dipindai seperti biasa; varian (huruf dirapatkan / bilangan kata
+    # menjadi angka) dipindai TAMBAHAN hanya bila berbeda, lalu digabung tanpa duplikat.
+    variants = [base]
+    for variant in (
+        _collapse_spaced_letters(base),
+        _numberwords_to_digits(base),
+        _numberwords_to_digits(_collapse_spaced_letters(base)),
+    ):
+        if variant not in variants:
+            variants.append(variant)
+
+    violations: List[SafetyViolation] = []
+    seen: set = set()
+    for variant in variants:
+        for found in _scan_normalized(variant, cap):
+            key = (found.rule_id, found.matched_text)
+            if key not in seen:
+                seen.add(key)
+                violations.append(found)
+
+    if violations:
+        return SafetyScanResult(False, STATUS_BLOCKED, violations)
+    return SafetyScanResult(True, STATUS_SAFE, [])
+
+
+def _scan_normalized(normalized: str, cap: Optional[float]) -> List[SafetyViolation]:
+    """Pindai SATU teks yang sudah dinormalisasi; kembalikan daftar pelanggaran."""
+    violations: List[SafetyViolation] = []
 
     for rule_id, pattern, description in _BLACKLIST:
         for match in pattern.finditer(normalized):
@@ -254,6 +363,4 @@ def scan_message(
                     )
                 )
 
-    if violations:
-        return SafetyScanResult(False, STATUS_BLOCKED, violations)
-    return SafetyScanResult(True, STATUS_SAFE, [])
+    return violations
