@@ -27,6 +27,10 @@ from api.models import (
 from api.security import hash_password
 from services.data.models import prediction_contract as pc
 from services.data.models.score_explanations import EXPLANATION_VERSION, NOTICE
+from services.decision.nba.serving import (
+    SCORE_STATE_PRESENT_NOT_APPROVED,
+    lookup_scores,
+)
 
 CUSTOMER_ID = "6b3ddba4-0825-4e58-a392-d183b71023d0"
 CUTOFF = "2026-09-06T00:00:00+07:00"
@@ -185,6 +189,15 @@ def _headers(client, email):
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
+def assert_present_not_usable(row):
+    assert row is not None
+    assert row["usage_approved"] is None
+    lookup = lookup_scores(row, customer_id=CUSTOMER_ID)
+    assert lookup.usable is False
+    assert lookup.ai_scores is None
+    assert lookup.state == SCORE_STATE_PRESENT_NOT_APPROVED
+
+
 def _counts(factory):
     with factory() as db:
         return (
@@ -251,7 +264,7 @@ def test_producer_import_preserves_evidence_and_review_cannot_serve(
                 json.dumps(source, sort_keys=True, allow_nan=False).encode("utf-8")
             ).hexdigest()
         )
-        assert load_serving_score_row(db, CUSTOMER_ID) is None
+        assert_present_not_usable(load_serving_score_row(db, CUSTOMER_ID))
 
     before_duplicate = _counts(factory)
     duplicate = client.post(
@@ -271,7 +284,8 @@ def test_producer_import_preserves_evidence_and_review_cannot_serve(
     assert reviewed.json()["review_status"] == "reviewed"
     assert reviewed.json()["serving_ready"] is False
     with factory() as db:
-        assert load_serving_score_row(db, CUSTOMER_ID) is None
+        # A "reviewed" run is still not usage approval: present, never served.
+        assert_present_not_usable(load_serving_score_row(db, CUSTOMER_ID))
     assert _counts(factory) == (1, 1)
 
 

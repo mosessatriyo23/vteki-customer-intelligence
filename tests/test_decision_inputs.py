@@ -10,6 +10,13 @@ from sqlalchemy.pool import StaticPool
 from api.database import SQLITE_SCHEMA_TRANSLATE_MAP, Base
 from api.decision_inputs import load_serving_score_row
 from api.models import ModelPredictionRecord, ModelPredictionRun
+from services.decision.nba.serving import (
+    SCORE_CONTRACT_NOT_SERVING,
+    SCORE_STATE_MISSING,
+    SCORE_STATE_PRESENT_NOT_APPROVED,
+    SCORE_USAGE_NOT_APPROVED,
+    lookup_scores,
+)
 
 
 @pytest.fixture
@@ -102,17 +109,62 @@ def test_invalid_cutoff_fails_closed_instead_of_using_older_row(
 def test_newer_noncompliant_row_does_not_fall_back_to_older_reviewed_row(
     db: Session, status: str
 ):
-    add_prediction(db, "2026-11-01T00:00:00+00:00")
-    add_prediction(db, "2026-11-02T00:00:00+00:00", contract_status=status)
+    add_prediction(db, "2026-11-01T00:00:00+00:00", score=0.1)
+    add_prediction(db, "2026-11-02T00:00:00+00:00", contract_status=status, score=0.9)
 
-    assert load_serving_score_row(db, "customer-1") is None
+    row = load_serving_score_row(db, "customer-1")
+
+    # The newest row is surfaced (so the UI says "present, not approved"), but it
+    # carries its non-serving status; the older clean row is never used instead.
+    assert row is not None
+    assert row["contract_status"] == status
+    assert row["churn_score"] == 0.9
+    lookup = lookup_scores(row, customer_id="customer-1")
+    assert lookup.unavailable_reason == SCORE_CONTRACT_NOT_SERVING
+    assert lookup.state == SCORE_STATE_PRESENT_NOT_APPROVED
+    assert lookup.ai_scores is None
 
 
 def test_noncompliant_churn_does_not_select_other_prediction_type(db: Session):
     add_prediction(db, "2026-11-02T00:00:00+00:00", prediction_type="PROPENSITY")
     add_prediction(db, "2026-11-01T00:00:00+00:00", contract_status="SCHEMA_PARTIAL")
 
-    assert load_serving_score_row(db, "customer-1") is None
+    row = load_serving_score_row(db, "customer-1")
+
+    assert row is not None
+    assert row["contract_status"] == "SCHEMA_PARTIAL"
+    assert row["score_generated_at"] == "2026-11-01T00:00:00+00:00"
+
+
+def test_no_churn_row_is_still_missing(db: Session):
+    add_prediction(db, "2026-11-02T00:00:00+00:00", prediction_type="PROPENSITY")
+
+    row = load_serving_score_row(db, "customer-1")
+
+    assert row is None
+    assert lookup_scores(row, customer_id="customer-1").state == SCORE_STATE_MISSING
+
+
+def test_pending_review_import_is_present_but_never_usable(db: Session):
+    add_prediction(db, "2026-11-01T00:00:00+00:00", review_status="pending_review")
+
+    row = load_serving_score_row(db, "customer-1")
+    lookup = lookup_scores(row, customer_id="customer-1")
+
+    assert row["usage_approved"] is None
+    assert lookup.state == SCORE_STATE_PRESENT_NOT_APPROVED
+    assert lookup.usable is False
+
+
+def test_reviewed_compliant_row_still_waits_for_usage_approval(db: Session):
+    add_prediction(db, "2026-11-01T00:00:00+00:00")
+
+    lookup = lookup_scores(
+        load_serving_score_row(db, "customer-1"), customer_id="customer-1"
+    )
+
+    assert lookup.unavailable_reason == SCORE_USAGE_NOT_APPROVED
+    assert lookup.state == SCORE_STATE_PRESENT_NOT_APPROVED
 
 
 def test_equal_instant_tie_break_prefers_later_imported_at_over_higher_id(
