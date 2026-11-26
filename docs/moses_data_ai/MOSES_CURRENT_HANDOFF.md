@@ -1,5 +1,11 @@
 # Moses — titik masuk handoff data/AI terbaru
 
+## Sinkronisasi dengan Christ / James Marvin — 26 November 2026
+
+- Loader NBA kini meneruskan baris CHURN terbaru beserta `contract_status` ke gerbang murni Christ. `SCHEMA_PARTIAL` / `INVALID_SCORE` tetap ditolak, tetapi UI/API dapat membedakan **skor ada namun belum boleh dipakai** dari **skor tidak ada**; baris lama tidak dipilih sebagai pengganti. Alur API dan worker diuji bersama.
+- `score_generated_at` tetap dari **cutoff prediksi**, bukan `imported_at`, dan `usage_approved` tetap `None`. `AIScores` dan `score_contract.py` tidak diubah. Batas 30 hari untuk kedaluwarsa ada di gerbang Christ; nilainya masih usulan D3/mentor, bukan keputusan final.
+- `docs/christ_business/integration/JAWABAN_P1_P8_ISSUE70_CHRIST.md` masih **draf usulan**, meski issue #70 terlihat closed. P1 boundary, P6 half-up, P4 UNKNOWN, dan P7 kurang dari tiga alasan tidak dinaikkan menjadi aturan final tanpa konfirmasi Christ/mentor. Kerja berikutnya: D2 (otoritas izin pakai + reviewer independen), D3 (masa berlaku), D5/P7 (kebijakan). James Marvin tetap pemilik feed identitas/sumber dan deployment worker.
+
 ## Pembaruan 2026-11-26 — skor disimpan ke DB lewat worker (to-do mentor #1)
 
 - Job worker baru `prediction_import` (`worker/prediction_import.py`). Dipicu manual lewat `POST /model-predictions/runs/import-jobs` (`{"artifact_dir": "<nama folder>"}`, role admin/analyst). Worker membaca `contract_manifest.json` + `records.jsonl` dari folder di bawah `PREDICTION_IMPORT_ROOT`. Hasilnya: skor, kalimat alasan, dan versi model/producer tersimpan di `ml.prediction_review_*` dengan status `pending_review`, plus audit event.
