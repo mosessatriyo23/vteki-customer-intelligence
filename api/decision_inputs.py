@@ -83,16 +83,12 @@ def load_serving_score_row(db: Session, customer_ref: str) -> dict[str, Any] | N
         "review_status": run.review_status,
         "reviewed_by": run.reviewed_by,
         "submitted_by": run.submitted_by,
-        # The current import handoff is explicitly non-serving and has no separate
-        # usage approval field. Missing approval must remain unknown/fail-closed.
-        "usage_approved": None,
-        "model_author": (
-            run.manifest.get("model_author")
-            if isinstance(run.manifest, dict)
-            and isinstance(run.manifest.get("model_author"), int)
-            and not isinstance(run.manifest.get("model_author"), bool)
-            else None
-        ),
+        # Explicit admin decision, separate from review. Imports default to NULL;
+        # author identity comes from the trusted decision, never the manifest.
+        "usage_approved": run.usage_approved,
+        "usage_decided_by": run.usage_decided_by,
+        "usage_decided_at": run.usage_decided_at,
+        "model_author": run.model_author,
         "score_explanation": source.get("score_explanation"),
     }
 

@@ -118,7 +118,13 @@ export type ApiModelPredictionRun = {
   reviewed_by: number | null
   reviewed_at: string | null
   review_note: string | null
-  serving_ready: false
+  usage_approved: boolean | null
+  usage_decided_by: number | null
+  usage_decided_at: string | null
+  usage_note: string | null
+  model_author: number | null
+  serving_ready: boolean | null
+  readiness_scope: 'NOT_EVALUATED_PER_CUSTOMER'
   manifest: Record<string, unknown>
 }
 export type ApiModelPredictionRecord = {
