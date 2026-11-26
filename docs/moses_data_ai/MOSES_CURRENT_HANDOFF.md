@@ -5,7 +5,7 @@
 - Job worker baru `prediction_import` (`worker/prediction_import.py`). Dipicu manual lewat `POST /model-predictions/runs/import-jobs` (`{"artifact_dir": "<nama folder>"}`, role admin/analyst). Worker membaca `contract_manifest.json` + `records.jsonl` dari folder di bawah `PREDICTION_IMPORT_ROOT`. Hasilnya: skor, kalimat alasan, dan versi model/producer tersimpan di `ml.prediction_review_*` dengan status `pending_review`, plus audit event.
 - Endpoint impor HTTP dan worker memakai **satu fungsi** `persist_prediction_import`, jadi tidak ada kode simpan yang dobel. Tidak ada perubahan skema.
 - Impor ulang manifest yang sama tidak membuat baris ganda (`already_imported=true`). Job salinan lewat `POST /jobs` generik ditolak.
-- **Belum** dijadwalkan, **belum** dipakai NBA (`usage_approved` tetap `None`). Menunggu: lokasi `PREDICTION_IMPORT_ROOT` dan jadwal (James/Marvin), serta D2/D3/D5 (Christ/mentor). Pertanyaan dicatat sebagai GitHub issue.
+- Lokasi worker sekarang dikonfigurasi melalui `PREDICTION_IMPORT_ROOT` (default container `/var/lib/vteki/prediction-import`) dengan bind mount read-only dari `PREDICTION_IMPORT_HOST_DIR` (default `./inbound/prediction-import`). Impor tetap manual; jadwal/PIC operasi belum diputuskan. Skor **belum** dipakai NBA (`usage_approved` tetap `None`) sambil menunggu D2/D3/D5 (Christ/mentor).
 
 > **Status slice mandiri 2026-11-22:** baca [penutupan dan batas ML mandiri](INDEPENDENT_ML_CLOSURE_2026-11-22.md). Churn terkalibrasi kini mempunyai reload/scoring offline yang membuktikan parity terhadap eksperimen tersimpan, **bukan** bahwa kalibrasi ini layak produksi (hasil sebelumnya tidak tergeneralisasi). Pekerjaan lintas tim di dokumen itu tetap terbuka.
 

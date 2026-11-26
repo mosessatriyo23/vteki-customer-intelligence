@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -14,7 +14,16 @@ router = APIRouter(prefix="/decisions", tags=["next best action"])
 
 
 class DecisionEvaluationRequest(BaseModel):
-    customer_id: int = Field(ge=1, le=2_147_483_647)
+    customer_id: int = Field(ge=1, le=2_147_483_647, strict=True)
+
+    @field_validator("customer_id", mode="before")
+    @classmethod
+    def reject_boolean_customer_id(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("customer_id must be an integer, not a boolean")
+        if isinstance(value, float) and value.is_integer():
+            return int(value)
+        return value
 
 
 @router.get("/next-best-actions")

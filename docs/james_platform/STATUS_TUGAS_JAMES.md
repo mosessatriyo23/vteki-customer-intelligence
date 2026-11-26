@@ -1,5 +1,25 @@
 # Status penyelesaian tugas James — Orang 3
 
+## Update 26 November 2026 — Moses prediction import dan status feed
+
+### Folder artefak prediction import
+
+- Folder di dalam worker container: `/var/lib/vteki/prediction-import`.
+- Folder host yang dipasang read-only: `./inbound/prediction-import` secara default; dapat diganti dengan `PREDICTION_IMPORT_HOST_DIR`.
+- `PREDICTION_IMPORT_ROOT` di `.env`/Compose menentukan target container. Taruh tiap artefak pada subfolder aman di folder host tersebut; worker hanya menerima nama subfolder dan membaca `contract_manifest.json` serta `records.jsonl`.
+- Job tetap dipicu manual melalui API. Tidak ada jadwal atau PIC operasi otomatis yang disepakati; tidak ada scheduler baru ditambahkan.
+
+### Feed historis dan estimasi ketersediaan
+
+| Data | Status yang tersedia di repository | Estimasi feed dari sumber |
+|---|---|---|
+| `known_at` historis | Event ledger memberi `available_at` saat platform menerima event. Untuk backfill lama, ini hanya waktu pertama kali dicatat ledger, bukan bukti kapan sistem sumber mengetahuinya. | **BELUM ADA** |
+| Refund/status/cancellation historis | Projection dan event API ada, tetapi feed/connector sumber refund/status tidak tersedia. Nilai kosong tetap `MISSING`, bukan nol. | **BELUM ADA** |
+| Identity as-of | Reader as-of tersedia sejak coverage yang tercatat; perubahan identity sebelum baseline migration tidak direkonstruksi. Belum ada feed/backfill historis untuk melengkapi coverage lama. | **BELUM ADA** |
+| Booking | Tidak ada event/source booking di repository; definisi saat ini menyatakan target `BOOKING` tidak diaktifkan. | **BELUM ADA** |
+
+Tidak ada tanggal estimasi yang bisa diberikan tanpa sumber, owner feed, dan kontrak pengiriman yang terkonfirmasi. API/ledger yang ada dapat menerima event dengan provenance nyata, tetapi tidak membuat histori sumber yang belum tersedia.
+
 Tanggal audit: 24 Oktober 2026. Basis kode yang diperiksa: branch `71230971-James-Marvin-3` terhadap `main` di repository VTEKI Customer Intelligence.
 
 ## Ringkasan

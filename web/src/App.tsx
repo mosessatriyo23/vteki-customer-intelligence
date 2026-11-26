@@ -236,6 +236,20 @@ function scoreAvailabilityLabel(code: string | null): string | null {
   return labels[code] ?? 'Skor belum dapat digunakan.'
 }
 
+function scoreServingStatus(
+  decision: Pick<Decision, 'servingReady' | 'modelReviewStatus' | 'scoreUnavailableReason'>,
+): string {
+  if (decision.servingReady === true) return 'Skor siap dipakai NBA'
+  if (decision.scoreUnavailableReason === 'SCORE_ROW_MISSING') return 'Skor belum tersedia'
+  if (decision.modelReviewStatus === 'pending_review') return 'Skor tersedia, menunggu pemeriksaan reviewer'
+  if (decision.modelReviewStatus === 'rejected') return 'Skor ditolak saat review'
+  if (decision.scoreUnavailableReason === 'MODEL_RUN_REVIEWED_BY_SUBMITTER') return 'Review tidak sah; reviewer harus orang berbeda'
+  if (decision.scoreUnavailableReason === 'MODEL_USAGE_NOT_APPROVED') return 'Sudah direview, belum disetujui untuk NBA'
+  if (decision.scoreUnavailableReason) return scoreAvailabilityLabel(decision.scoreUnavailableReason) ?? 'Skor belum dapat digunakan'
+  if (decision.modelReviewStatus === 'reviewed') return 'Skor disetujui; sumber NBA lain belum lengkap'
+  return 'Status skor belum tersedia'
+}
+
 function formatMeasurementValue(value: unknown, status?: unknown): string {
   if (String(status ?? '').toUpperCase() === 'AWAITING_OUTCOMES' || value === null || value === undefined) return 'Kosong'
   return typeof value === 'number' && Number.isFinite(value) ? value.toLocaleString('id-ID') : String(value)
@@ -1060,8 +1074,9 @@ function DecisionPage({ decisions, onOverride, customers: customerRows, onEvalua
               <small>Golden Customer ID: {d.goldenCustomerId ?? 'Belum dipetakan'}</small>
               <small><b>Alasan:</b> {d.rationale}</small>
               <small>Nilai harapan: {d.expectedValue === null ? 'Kosong / belum tersedia' : d.expectedValue.toLocaleString('id-ID')}</small>
-              <small>Model: {d.modelVersion ?? 'Belum tersedia'} · serving {d.servingReady === true ? 'disetujui' : d.servingReady === false ? 'belum disetujui' : 'belum diketahui'}</small>
-              <small>Review model: {d.modelReviewStatus === 'reviewed' ? 'Sudah diperiksa' : d.modelReviewStatus === 'rejected' ? 'Ditolak' : d.modelReviewStatus === 'pending_review' ? 'Menunggu pemeriksaan' : 'Belum tersedia'}{scoreAvailabilityLabel(d.scoreUnavailableReason) ? ` · ${scoreAvailabilityLabel(d.scoreUnavailableReason)}` : ''}</small>
+              <small>Status skor: {scoreServingStatus(d)}</small>
+              <small>Versi model: {d.modelVersion ?? 'Belum tersedia'} · review {d.modelReviewStatus === 'reviewed' ? 'sudah diperiksa' : d.modelReviewStatus === 'rejected' ? 'ditolak' : d.modelReviewStatus === 'pending_review' ? 'menunggu pemeriksaan' : 'belum tersedia'}</small>
+              {d.scoreUnavailableReason && <small>{scoreAvailabilityLabel(d.scoreUnavailableReason)}</small>}
               {d.unavailableSources.length > 0 && <small>Sumber belum tersedia: {d.unavailableSources.join(', ')}</small>}
               {d.engineVersion && <small>Engine {d.engineVersion}{d.status === 'Evaluated' ? ' · NO_ACTION tidak dapat dipakai untuk kampanye.' : ''}</small>}
             </div>
