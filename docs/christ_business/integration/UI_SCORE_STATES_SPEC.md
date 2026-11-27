@@ -1,7 +1,7 @@
 # Rancangan UI: tiga keadaan skor
 
 **Dari:** Christ (Orang 2) · **Untuk:** Marvin (`web/`), James dan Moses (loader skor) · **Tanggal:** 26 November 2026
-**Status:** rancangan. Tidak ada persetujuan mentor. Christ tidak mengubah `web/` maupun `api/`; dokumen ini hanya spesifikasi.
+**Status:** rancangan; diperbarui 26 November 2026 setelah update terbaru James/Marvin/Moses. Christ tidak mengubah `web/` maupun `api/`; dokumen ini spesifikasi, hasil uji, dan usulan.
 **Menjawab:** to-do PM "Rancang tampilan UI untuk tiga kondisi: skor belum ada / skor ada tapi belum disetujui / skor siap dipakai. Sekarang ketiganya sama-sama tampil `SCORE_ROW_MISSING`."
 
 ---
@@ -10,11 +10,11 @@
 
 | # | Penyebab | Pemilik | Status |
 |---|---|---|---|
-| 1 | `load_serving_score_row` (`api/decision_inputs.py`) mengembalikan `None` bila record terbaru berstatus kontrak `SCHEMA_PARTIAL` atau `INVALID_SCORE`. `None` dibaca engine sebagai "baris tidak ada" (`SCORE_ROW_MISSING`). Padahal producer Moses saat ini **hanya** menghasilkan dua status itu, jadi semua skor yang sudah tersimpan tampil "belum tersedia". | James/Moses | **Belum diperbaiki.** Lihat §5 |
+| 1 | `load_serving_score_row` (`api/decision_inputs.py`) mengembalikan `None` bila record terbaru berstatus kontrak `SCHEMA_PARTIAL` atau `INVALID_SCORE`. `None` dibaca engine sebagai "baris tidak ada" (`SCORE_ROW_MISSING`). Padahal producer Moses saat ini **hanya** menghasilkan dua status itu, jadi semua skor yang sudah tersimpan tampil "belum tersedia". | James/Moses | **Selesai (zip 26 Nov):** loader kini mengirim `contract_status` dan field izin pakai dari DB; fallback `customer_code` dihapus (D4) |
 | 2 | `lookup_scores` tidak punya alasan khusus untuk "ada, tetapi kontrak belum lengkap". | Christ | **Selesai** (alasan baru `SCORE_CONTRACT_NOT_SERVING`) |
 | 3 | Respons tidak memuat satu field yang langsung menyatakan keadaan skor. | Christ | **Selesai** (`score_state`) |
 | 4 | Kode `MODEL_RUN_NOT_REVIEWED` sama untuk run "menunggu" dan "ditolak". | Christ | **Selesai** (respons memuat `model_review_status`) |
-| 5 | `scoreAvailabilityLabel` di `web/src/App.tsx` belum mengenal kode baru dan belum memakai `score_state`. | Marvin | Belum |
+| 5 | `scoreServingStatus` di `web/src/App.tsx` (zip 26 Nov) sudah membedakan kosong / menunggu / ditolak / belum diizinkan / siap, tetapi **belum** membedakan kedaluwarsa, kontrak belum lengkap, dan ID tidak cocok. Hasil uji: §8 | Marvin | **Belum** (7 dari 11 kondisi sesuai) |
 
 Bukti sisi Christ: `tests/decision/test_score_states.py` (43 test). Dua temuan tambahan ikut diperbaiki: (a) skor berumur > 30 hari dulu tampil `serving_ready = true`, kini `SCORE_EXPIRED` + `serving_ready = false`; (b) skor milik pelanggan lain dulu bisa dipakai bila loader salah mengirim, kini ditolak dengan `SCORE_CUSTOMER_MISMATCH`.
 
@@ -82,23 +82,9 @@ Aturan tegas:
 3. `expected_value == null` berarti `Kosong`, bukan `Rp 0`. Nol adalah nilai sah (`BELOW_MIN_EV`), null adalah tidak ada.
 4. Selalu tampilkan `model_version` bila ada, dan `serving_ready`.
 
-## 5. Permintaan perbaikan loader (James/Moses, bukan dikerjakan Christ)
+## 5. Perbaikan loader (James/Moses): sudah dikerjakan
 
-`api/decision_inputs.py::load_serving_score_row` sekarang:
-
-```python
-if record.contract_status in NON_SERVING_CONTRACT_STATUSES:
-    return None
-```
-
-Usulan: jangan kembalikan `None`; sertakan statusnya di dict agar engine bisa membedakan:
-
-```python
-# di dalam dict yang dikembalikan (kunci baru, opsional)
-"contract_status": record.contract_status,
-```
-
-dan hapus `return None` untuk status non-serving. Sisi engine sudah siap: baris dengan `contract_status` bernilai `SCHEMA_PARTIAL`/`INVALID_SCORE` ditolak dengan alasan `SCORE_CONTRACT_NOT_SERVING` (tetap fail-closed; tidak ada skor yang dipakai). Dampak ke keadaan: skor Moses yang sudah tersimpan akan tampil keadaan 2 ("ada, belum dipakai"), bukan keadaan 1. Pastikan test James yang saat ini mengharapkan `None` untuk status itu diperbarui oleh James. Perubahan ini milik James/Moses; jangan dilakukan Christ.
+Permintaan di versi 26 Nov pagi (kembalikan baris dengan `contract_status`, bukan `None`) sudah diterapkan di `api/decision_inputs.py` pada zip 26 Nov malam, berikut field izin pakai dari DB. Alurnya diuji Moses (impor → review → izin → NBA memakai skor → izin dicabut → skor diblokir) dan diulang di `docs/christ_business/demo/uat_dry_run.py` (UAT-03 sampai UAT-09: PASS). Tidak ada tindakan lanjutan untuk bagian ini.
 
 ## 6. Sketsa tampilan (satu kartu keputusan)
 
@@ -135,3 +121,68 @@ Tiga tangkapan layar dari data nyata di aplikasi yang berjalan dari repo:
 3. Skor siap → keadaan 3 **hanya setelah** D2/D3/D5 diputuskan dan `usage_approved = True` datang dari sumber yang disepakati. Jangan memaksa keadaan 3 dengan data buatan.
 
 Jangan pernah mengisi `usage_approved = True`, band, atau angka bisnis demi memunculkan keadaan 3.
+
+## 8. Hasil uji UI Marvin (zip 26 Nov) dan usulan perbaikan
+
+**Cara uji:** fungsi `scoreServingStatus` dan `scoreAvailabilityLabel` diambil apa adanya dari `web/src/App.tsx` (tanpa mengubah file), lalu dijalankan dengan kondisi yang benar-benar dihasilkan backend (dari `uat_dry_run.py`). Skrip: `docs/christ_business/demo/ui_score_status_check.mjs` (Node 22.13 ke atas; `node docs/christ_business/demo/ui_score_status_check.mjs`).
+
+| # | Kondisi (dari backend) | Teks UI saat ini | Sesuai? |
+|---|---|---|---|
+| 1 | Skor belum ada | Skor belum tersedia | Ya |
+| 2 | Run menunggu review | Skor tersedia, menunggu pemeriksaan reviewer | Ya |
+| 3 | Run ditolak | Skor ditolak saat review | Ya |
+| 4 | Sudah direview, belum diizinkan | Sudah direview, belum disetujui untuk NBA | Ya |
+| 5 | Kontrak belum lengkap + `pending_review` (**kondisi nyata hari ini**) | Skor tersedia, menunggu pemeriksaan reviewer | **Tidak**: menyesatkan, review pun tidak membuat skor bisa dipakai |
+| 6 | Kontrak belum lengkap + reviewed | Skor belum dapat digunakan. | **Tidak**: teks umum |
+| 7 | **Skor kedaluwarsa** | Skor belum dapat digunakan. | **Tidak**: tidak dibedakan |
+| 8 | Skor milik ID lain | Skor belum dapat digunakan. | **Tidak**: teks umum |
+| 9 | Field skor tidak lengkap | Data skor belum lengkap; skor tidak digunakan. | Ya |
+| 10 | Skor siap, sumber lain belum lengkap | Skor disetujui; sumber NBA lain belum lengkap | Ya |
+| 11 | Skor siap dan keputusan siap | Skor siap dipakai NBA | Ya |
+
+**Penyebab:** `scoreServingStatus` memeriksa `modelReviewStatus` **sebelum** alasan skor, sedangkan engine memprioritaskan alasan yang tidak bisa diperbaiki review (ID tidak cocok, kontrak belum lengkap, kedaluwarsa); `scoreAvailabilityLabel` belum memuat tiga kode itu.
+
+**Usulan perbaikan untuk Marvin** (diuji pada salinan sementara: 11 dari 11 sesuai; `web/` tidak diubah). Ganti kedua fungsi dengan:
+
+```ts
+function scoreAvailabilityLabel(code: string | null): string | null {
+  if (!code) return null
+  const labels: Record<string, string> = {
+    SCORE_ROW_MISSING: 'Skor prediksi belum tersedia.',
+    MODEL_RUN_NOT_REVIEWED: 'Skor menunggu pemeriksaan reviewer.',
+    MODEL_RUN_REVIEWED_BY_SUBMITTER: 'Reviewer harus berbeda dari pengirim model.',
+    MODEL_USAGE_NOT_APPROVED: 'Skor belum disetujui untuk digunakan.',
+    SCORE_CONTRACT_NOT_SERVING: 'Skor sudah tersimpan, tetapi formatnya belum lengkap menurut kontrak, jadi belum dipakai.',
+    SCORE_EXPIRED: 'Skor sudah kedaluwarsa (lebih dari 30 hari sejak cutoff), jadi tidak dipakai.',
+    SCORE_CUSTOMER_MISMATCH: 'Skor yang ditemukan tidak cocok dengan identitas pelanggan ini, jadi tidak dipakai.',
+    SCORE_FIELDS_INCOMPLETE: 'Data skor belum lengkap; skor tidak digunakan.',
+    SCORE_VALUES_INVALID: 'Nilai skor tidak valid; skor tidak digunakan.',
+  }
+  return labels[code] ?? 'Skor belum dapat digunakan.'
+}
+
+function scoreServingStatus(
+  decision: Pick<Decision, 'servingReady' | 'modelReviewStatus' | 'scoreUnavailableReason'>,
+): string {
+  if (decision.servingReady === true) return 'Skor siap dipakai NBA'
+  const reason = decision.scoreUnavailableReason
+  // Urutan mengikuti prioritas engine: alasan yang tidak bisa diperbaiki review didahulukan.
+  if (reason === 'SCORE_ROW_MISSING') return 'Skor belum tersedia'
+  if (reason === 'SCORE_CUSTOMER_MISMATCH') return 'Skor tidak cocok dengan pelanggan ini; tidak dipakai'
+  if (reason === 'SCORE_CONTRACT_NOT_SERVING') return 'Skor ada, tetapi formatnya belum lengkap; belum dipakai'
+  if (reason === 'SCORE_EXPIRED') return 'Skor kedaluwarsa; tidak dipakai'
+  if (decision.modelReviewStatus === 'pending_review') return 'Skor tersedia, menunggu pemeriksaan reviewer'
+  if (decision.modelReviewStatus === 'rejected') return 'Skor ditolak saat review'
+  if (reason === 'MODEL_RUN_REVIEWED_BY_SUBMITTER') return 'Review tidak sah; reviewer harus orang berbeda'
+  if (reason === 'MODEL_USAGE_NOT_APPROVED') return 'Sudah direview, belum disetujui untuk NBA'
+  if (reason) return scoreAvailabilityLabel(reason) ?? 'Skor belum dapat digunakan'
+  if (decision.modelReviewStatus === 'reviewed') return 'Skor disetujui; sumber NBA lain belum lengkap'
+  return 'Status skor belum tersedia'
+}
+```
+
+Catatan untuk Marvin:
+1. Setelah menerapkan, jalankan `node docs/christ_business/demo/ui_score_status_check.mjs`; harus 11/11. Bila nama field di `App.tsx` berbeda dari yang dipakai skrip, sesuaikan skrip atau fungsinya, jangan mengubah hasil yang diharapkan.
+2. Skor, band, CLV, dan EV tetap `Kosong` pada keadaan 1 dan 2; `expected_value == null` berarti Kosong, bukan Rp 0.
+3. Tangkapan layar nyata tiap keadaan (§7) tetap dibutuhkan untuk UAT; skrip ini hanya menguji teks, bukan tampilan.
+4. Baris keputusan lama yang tersimpan sebelum perbaikan serving bisa masih `serving_ready = true` untuk skor yang kini dianggap kedaluwarsa; evaluasi ulang menghasilkan nilai yang benar.

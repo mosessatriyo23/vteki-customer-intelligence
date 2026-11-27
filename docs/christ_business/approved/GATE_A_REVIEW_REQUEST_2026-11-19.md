@@ -1,4 +1,6 @@
 # Permintaan Review Gate A — `target_definitions.md` v1.4
+> **Pembaruan 2026-11-26:** dokumen yang direview kini `target_definitions.md` **v1.5 (draf)** (riwayat revisi di akhir dokumen) dan `reason_taxonomy.md`. Selain D1–D4 di bawah, mohon jawaban tertulis untuk **butir baru**: (a) alasan churn **kurang dari 3 tetap tampil tanpa alasan palsu** (menyimpang dari "wajib minimal 3 Reason Codes", `target_definitions.md` §1.3 dan `reason_taxonomy.md` §6); (b) pembulatan CLV half-up `Decimal` (§2.4); (c) aksi lintas segmen untuk CHURNED/REACTIVATED/NEVER_TRANSACTED tidak dikalahkan NO_ACTION (§3.2.A); (d) RFM di luar MVP (§3.3). Belum ada persetujuan; approver/tanggal tetap `PENDING`.
+
 **Dari:** Christ · **Tanggal:** 2026-11-19 · **Status:** MENUNGGU REVIEW. Belum ada persetujuan. Kolom approver/tanggal di `target_definitions.md` tetap `PENDING`.
 
 ## 1. Untuk Dosen Pembimbing / Mentor V-TEKI (persetujuan formal)

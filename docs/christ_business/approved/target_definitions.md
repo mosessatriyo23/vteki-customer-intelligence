@@ -1,11 +1,11 @@
 # Kontrak Definisi Bisnis: Target & Standar Sistem
 **Dokumen:** `target_definitions.md`
-**Status:** v1.4 — REVISI / PENDING APPROVAL. **Belum APPROVED.** (v1.0 pernah berstatus APPROVED; sudah digantikan.)
+**Status:** v1.5 (draf) — REVISI / PENDING APPROVAL. **Belum APPROVED.** (v1.0 pernah berstatus APPROVED; sudah digantikan.)
 **Penyusun:** Christ (Decisioning, Activation & Measurement Engineer)
 **Disetujui oleh:** [PENDING — diisi hanya setelah Dosen Pembimbing / Mentor V-TEKI benar-benar menyetujui; tidak boleh diisi sendiri]
 **Tanggal persetujuan:** [PENDING]
-**Versi:** v1.4
-**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07; v1.2 = 2026-11-09; v1.3 = 2026-11-18 (draf); v1.4 = 2026-11-19
+**Versi:** v1.5 (draf)
+**Tanggal:** v1.0 = 2026-10-28; v1.1 = 2026-11-07; v1.2 = 2026-11-09; v1.3 = 2026-11-18 (draf); v1.4 = 2026-11-19; v1.5 = 2026-11-26 (draf)
 **Klasifikasi:** 100% Data Sintetis — Hanya untuk keperluan akademik Capstone Project UKDW
 
 ---
@@ -79,9 +79,13 @@ Kasus tambahan dari pertanyaan C2 tim (`TEAM_FOLLOW_UP_ACTIONS` C2): pelanggan t
 | **Masa Berlaku Skor (`valid_until`)** | 30 hari sejak skor diterbitkan |
 | **Risk Band Cut-offs** | LOW (< 0.30) / MEDIUM (0.30–0.60) / HIGH (0.60–0.80) / VERY_HIGH (≥ 0.80) |
 
-### 1.3 Persyaratan Reason Codes
+### 1.3 Persyaratan Reason Codes — USULAN (direvisi v1.5)
 
-Setiap prediksi churn **wajib** minimal **3 Reason Codes** berbahasa bisnis: `RECENCY_LONG`, `SPEND_DECLINE`, `FREQUENCY_DROP`, `MEMBERSHIP_EXPIRING` (≤ 30 hari), `UNRESOLVED_COMPLAINT`, `NO_CROSS_CATEGORY`.
+Taxonomy, pemetaan fitur, penggabungan konsep, dan teks Indonesia ditetapkan di [`reason_taxonomy.md`](reason_taxonomy.md) (versi `christ-reason-taxonomy-1.5-draft`). Ringkasan:
+
+- Konsep aktif hanya **empat** (`RECENCY`, `FREQUENCY`, `SPEND`, `TENURE`), karena hanya itu yang punya fitur model. `MEMBERSHIP_EXPIRING`, `UNRESOLVED_COMPLAINT`, `NO_CROSS_CATEGORY` (daftar v1.4) **tidak aktif** dan dilarang dikeluarkan sampai ada fitur pendukung dan provenance.
+- Satu konsep = satu alasan: tiga jendela frekuensi (60/90/365 hari) adalah **satu** alasan.
+- Target tetap tiga alasan risiko dari konsep berbeda, **tetapi bila kurang dari tiga, alasan yang ada tetap tampil tanpa alasan palsu dan skor tetap dipakai** (alasan bukan syarat penolakan skor). Ini **menyimpang dari** teks sebelumnya ("wajib minimal 3"): **penyimpangan ini menunggu penerimaan mentor tertulis**; sebelum itu tidak boleh diklaim "tiga alasan terpenuhi".
 
 ---
 
@@ -141,6 +145,8 @@ CLV adalah **pendapatan (revenue) yang diterima bisnis, bukan profit/margin** (R
 | Sedang | 200.000 ≤ CLV < 500.000 | `SILVER` | Penawaran standar |
 | Rendah / Riwayat Tidak Cukup | CLV < 200.000 atau transaksi < 2 | `INSUFFICIENT_HISTORY` | Dikecualikan dari filter tier |
 
+> **Pembulatan (v1.5, USULAN):** CLV dibulatkan **half-up ke rupiah terdekat** (x,5 naik) dengan aritmetika `Decimal` (`ROUND_HALF_UP`), bukan `round()` bawaan Python pada float. Pembulatan hanya di **akhir** perhitungan; **tier ditentukan setelah pembulatan**; aturan minimal 2 transaksi tetap. Contoh: 199.999,4 → 199.999 → `INSUFFICIENT_HISTORY`; 199.999,5 → 200.000 → `SILVER`; 200.000,5 → 200.001 → `SILVER`; 499.999,5 → 500.000 → `GOLD`; 999.999,5 → 1.000.000 → `PLATINUM`. (Pada batas tier, half-up dan half-even memberi tier sama; perbedaan hanya pada nilai tersimpan, mis. 200.000,5.)
+
 > Requirement Bab 2.2 menulis nama tier ganda ("Platinum / Gold", "Gold / Silver", "Silver / Bronze"); pemetaan satu-label di atas adalah pembacaan penyusun dan ikut diminta konfirmasi dosen.
 
 ### 2.5 Peran nilai CLV
@@ -191,6 +197,7 @@ Sumber: Requirement Bab 4 + keputusan v1.4. Tabel ini **dibaca langsung oleh `te
 **A. `RELATIONSHIP_MANAGER_CONTACT` — pembatasan lifecycle.**
 v1.3 dan teks katalog menulis "lifecycle AT_RISK/DORMANT" dan menyebut itu perilaku kode. **Salah**: `evaluator.py` tidak pernah memeriksa lifecycle untuk aksi ini. Requirement Bab 4 juga tidak membatasi lifecycle.
 **Keputusan:** perilaku kode **disetujui** (tanpa batas lifecycle: PLATINUM + Churn Risk HIGH/VERY_HIGH). Alasan: pelanggan PLATINUM dengan risiko tinggi layak ditangani apa pun segmennya (mis. ACTIVE yang frekuensinya anjlok). Teks katalog diperbaiki. Pemicu "keluhan aktif" dari Requirement diwujudkan lewat `COMPLAINT_RESOLUTION` (kanal `task_rm`/`branch`, jalur suppression) — penyimpangan dari Bab 4 yang dicatat dan diminta konfirmasi dosen.
+**Konfirmasi v1.5 (aksi lintas segmen, "Opsi A", USULAN):** untuk `CHURNED`, `REACTIVATED`, dan `NEVER_TRANSACTED`, tiga aksi lintas segmen (`RELATIONSHIP_MANAGER_CONTACT`, `RENEWAL_REMINDER`, `COMPLAINT_RESOLUTION`) **tidak** dikalahkan oleh `NO_ACTION` atau cool-off; aksi promosi lain tetap `NO_ACTION`. Prioritas: global opt-out dan suppression mutlak → `COMPLAINT_RESOLUTION` → aksi lintas segmen lain → aksi berbasis segmen. Dikunci di `tests/decision/test_cross_segment_matrix.py`. Praktisnya hanya `REACTIVATED` yang nyata terdampak (CHURNED/NEVER_TRANSACTED hampir pasti tanpa CLV dan membership aktif).
 *Contoh:* positif — PLATINUM, VERY_HIGH, lifecycle ACTIVE → eligible. Negatif — GOLD, VERY_HIGH → tidak eligible (bukan PLATINUM). Boundary — PLATINUM, MEDIUM (skor 0,59) → tidak eligible.
 
 **B. `OCCASIONAL` dan `NEVER_TRANSACTED`.**
@@ -218,6 +225,10 @@ Bab 1: Dormant = 181–365; Bab 4: WIN_BACK "91–180 hari". **Keputusan:** Bab 
 2. **NEW:** kode hanya memeriksa tenure ≤ 30 hari; Requirement juga mensyaratkan total transaksi ≤ 2. Tenure 20 hari dengan 4 transaksi → `ACTIVE` (bukan NEW).
 3. **REACTIVATED:** kode = 1 pembelian dalam 30 hari terakhir setelah jeda > 180 hari antar-pembelian (hanya transaksi); Requirement = ≥ 2 belanja ATAU renewal setelah Dormant/Churned. **Keputusan:** definisi Requirement berlaku; selisih ini harus diselaraskan Moses atau diterima tertulis oleh dosen.
 4. **Prioritas klasifikasi (USULAN):** `REACTIVATED` > `LOYAL` > `NEW` > `NEVER_TRANSACTED` > `CHURNED` > `DORMANT` > `AT_RISK` > `ACTIVE` > `OCCASIONAL`.
+
+### 3.3 Di luar cakupan MVP — RFM (v1.5, USULAN)
+
+Segmentasi RFM (kuintil) **tidak termasuk MVP**. Requirement hanya menyebutnya sebagai penjelasan segmen dan tidak mendefinisikan populasi, jendela, field monetary, maupun pemetaan nama; engine NBA dan campaign tidak memakainya. Tidak ada nama segmen RFM (mis. "Champions") yang boleh dibuat atau disamakan dengan lifecycle. Bila kelak dipakai, definisi lengkap dan versi baru dokumen ini diperlukan.
 
 ---
 
@@ -430,7 +441,7 @@ Karena holdout 10% kecil, CI lebar; angka di atas menunjukkan alasan ambang mini
 ## 8. Status Gate A, penerimaan, dan routing
 
 **Belum dapat ditutup.** Syarat yang masih menggantung:
-- Konfirmasi dosen: 180 vs 90 hari (§1.1); penyimpangan dari Bab 4 (§3.2.A, C, D, F); pemetaan nama tier (§2.4).
+- Konfirmasi dosen: 180 vs 90 hari (§1.1); penyimpangan dari Bab 4 (§3.2.A, C, D, F); pemetaan nama tier (§2.4); **penyimpangan v1.5: alasan kurang dari 3 tetap tampil tanpa alasan palsu (§1.3)**.
 - Persetujuan formal dokumen ini: **Disetujui oleh [PENDING] · Tanggal [PENDING]**.
 - Review Moses (cohort, tabel retensi, konformansi `snapshot.py` §3.2.G, data replenishment) dan James (makna bisnis refund/koreksi/ketersediaan).
 Rincian permintaan: `GATE_A_REVIEW_REQUEST_2026-11-19.md`.
@@ -446,3 +457,4 @@ Rincian permintaan: `GATE_A_REVIEW_REQUEST_2026-11-19.md`.
 | v1.2 | 2026-11-09 | Keputusan tim: `min_ev_threshold` Rp 1.000; pagu diskon 30% + per band; kata terlarang; aturan SERVICE_REMINDER; K-08 holdout. |
 | v1.3 | 2026-11-18 | **Draf, tidak punya baris changelog saat ditemukan; dicatat di sini.** Menambah Item 1–7 dan §7 KPI dengan tag "DISETUJUI v1.3" (self-declared). Ditemukan v1.4: beberapa klaim tidak sesuai kode (cohort, RM_CONTACT lifecycle, propensity, OCCASIONAL/NEVER_TRANSACTED/REACTIVATED) dan 5 tes `test_lifecycle_matrix` gagal. |
 | v1.4 | 2026-11-19 | (1) Tag "DISETUJUI" dicabut → USULAN/PROVISIONAL/PENDING; approver/tanggal tetap PENDING. (2) §1.1 cohort 3 event (berubah dari `labels.py`), contoh boundary, WIB, 180 vs 90 tetap PENDING dosen. (3) §2 pemetaan `actual_revenue`, Retention Factor = retensi empiris 12 bulan per segmen (bukan 90 hari), contoh. (4) §3 matriks lengkap tanpa "belum ditetapkan"; OCCASIONAL→EDUCATION; NEVER_TRANSACTED/CHURNED/REACTIVATED→NO_ACTION; RM_CONTACT tanpa batas lifecycle; ambang propensity 0,6 ditegakkan; temuan `snapshot.py` ke Moses. (5) §4.3 consent channel-level + global; `RELATIONSHIP_MANAGER_CONTACT` wajib consent `phone`. (6) §5 parameter EV = PROVISIONAL + keterbatasan. (7) §6 batas bawah −14 hari. (8) §7 ambang KPI v1.3 ditarik; aturan CI; pengecualian holdout. Kode: `evaluator.py`, `catalogue.py`, `engine.py`; tes diperbarui. Overflow `scores_are_valid()` sudah diperbaiki sebelumnya (diverifikasi). |
+| v1.5 (draf) | 2026-11-26 | Menyamakan dengan keputusan percepatan tim (Moses, #70/#71), **belum disetujui mentor**: (1) §1.3 taxonomy alasan dipindah ke `reason_taxonomy.md`; empat konsep aktif, tiga tidak aktif; alasan < 3 tetap tampil tanpa alasan palsu (menyimpang dari "wajib minimal 3", menunggu mentor). (2) §2.4 pembulatan CLV half-up `Decimal`, tier setelah pembulatan. (3) §3.2.A aksi lintas segmen "Opsi A" ditegaskan dan dikunci test. (4) §3.3 RFM di luar MVP. (5) §8 daftar konfirmasi mentor ditambah. Tidak ada perubahan pada §1.1, §2.1-2.3, §3.1, §4-§7. Approver/tanggal tetap PENDING. |
