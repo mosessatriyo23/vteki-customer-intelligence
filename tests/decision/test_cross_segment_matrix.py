@@ -5,11 +5,11 @@ Pertanyaan P2: untuk segmen CHURNED / REACTIVATED / NEVER_TRANSACTED, apakah aks
 (RELATIONSHIP_MANAGER_CONTACT, RENEWAL_REMINDER, COMPLAINT_RESOLUTION) tetap boleh, atau
 NO_ACTION/cool-off mengalahkannya?
 
-Test ini MENCATAT perilaku engine SAAT INI ("Opsi A": aksi lintas segmen tidak dibatasi
-lifecycle, sesuai target_definitions.md v1.4 §3.1 baris "Lintas segmen" dan §3.2.A).
-Ini BUKAN keputusan final: jawaban P2 masih USULAN sampai Christ + mentor menetapkan.
-Bila diputuskan "Opsi B" (NO_ACTION/cool-off menang untuk RM/renewal), ubah evaluator.py,
-terbitkan versi baru target_definitions.md, lalu ubah test ini secara sadar.
+Keputusan P2 (26 Nov 2026, sisi Christ): **Opsi A** (aksi lintas segmen tidak dibatasi lifecycle,
+sesuai target_definitions.md v1.5 §3.1 baris "Lintas segmen" dan §3.2.A). Test ini mengunci
+keputusan itu. Persetujuan mentor atas dokumen tetap PENDING (Gate A).
+Bila mentor memilih "Opsi B" (NO_ACTION/cool-off menang untuk RM/renewal di REACTIVATED),
+ubah evaluator.py, terbitkan versi baru target_definitions.md, lalu ubah test ini secara sadar.
 
 Yang TIDAK boleh berubah pada opsi mana pun: global opt-out dan suppression mutlak.
 

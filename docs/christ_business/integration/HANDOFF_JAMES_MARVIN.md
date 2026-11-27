@@ -14,12 +14,14 @@ Sesuai arahan mentor: kode di `services/` adalah fungsi murni. **Yang memanggil 
 
 ## 2. `api/decisions.py` — endpoint `POST /next-best-actions/evaluate`
 
-Kode sekarang membangun consent UNKNOWN, `ai_scores=None`, lalu memanggil `NBAEngine().decide(...)` langsung dan menyusun baris `NBADecision` sendiri. Gantikan dengan:
+> **Status 26 Nov 2026: bagian ini sudah dikerjakan.** `api/decisions.py` dan `worker/tasks.py` memanggil `evaluate_customer`, `api/decision_inputs.py::load_serving_score_row` membaca skor, status review, dan izin pakai dari DB serta mengirim `contract_status`, dan fallback `customer_code` sudah dihapus (D4: hanya `golden_customer_id` terpetakan pasti). Yang **belum** tersambung: consent, komplain, kelayakan, dan kesesuaian produk (masih `None` di `api/decisions.py` dan `worker/tasks.py`; consent pada job campaign ditulis `UNKNOWN` yang tidak pernah memberi izin kirim; jadi NBA menjawab "belum ada keputusan" dan campaign tidak mengirim apa pun). Contoh di bawah dipertahankan sebagai referensi bentuk pemanggilan; **jangan** memakai `or customer.customer_code`.
+
+Bentuk pemanggilan:
 
 ```python
 from services.decision.nba.serving import evaluate_customer
 
-identity_ref = customer.golden_customer_id or customer.customer_code
+identity_ref = customer.golden_customer_id  # hanya Golden ID yang terpetakan pasti (D4); tanpa fallback customer_code
 
 output = evaluate_customer(
     customer_ref=identity_ref,

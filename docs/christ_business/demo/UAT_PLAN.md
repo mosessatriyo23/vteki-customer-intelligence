@@ -1,6 +1,8 @@
 # Rencana UAT — Decisioning (NBA + Campaign)
 
-**Versi:** 26 November 2026 (menggantikan versi 21 November). **Pemilik:** Christ. **Status:** rencana. Semua kolom **Hasil aktual** sengaja `BELUM DIJALANKAN`. Isi hanya setelah benar-benar diuji, dengan bukti (screenshot, ID keputusan, atau `correlation_id`). Penguji bukan pembuat kode. Tidak ada persetujuan mentor atas dokumen ini.
+**Versi:** 26 November 2026, diperbarui setelah pesan Moses "sisa pekerjaan sebelum pengumpulan" (menggantikan versi 21 November). **Pemilik:** Christ. **Status:** rencana. Semua kolom **Hasil aktual** sengaja `BELUM DIJALANKAN`. Isi hanya setelah benar-benar diuji, dengan bukti (screenshot, ID keputusan, atau `correlation_id`). Penguji bukan pembuat kode. Tidak ada persetujuan mentor atas dokumen ini.
+
+**Hasil uji coba di sandbox (bukan UAT resmi):** `UAT_HASIL_DRY_RUN.md`, dihasilkan oleh `uat_dry_run.py` (dapat diulang): 11 PASS, 3 TERHALANG (UAT-01, UAT-10, UAT-13: feed consent/komplain/kelayakan belum tersambung), 0 FAIL. Kolom "Hasil aktual" di bawah tetap `BELUM DIJALANKAN` untuk UAT resmi di lingkungan bersama; dry run tidak menggantikannya. UAT resmi tetap butuh penguji yang bukan pembuat kode, UI, dan lingkungan bersama.
 
 UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urutan C di update Moses). Dokumen ini menulis 14 skenario beserta **hasil yang diharapkan** sekarang, tanpa menunggu skor asli.
 
@@ -31,9 +33,9 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 
 | ID | Skenario | Bisa dijalankan sekarang? | Dijaga test otomatis |
 |---|---|---|---|
-| UAT-01 | Hasil valid | Menunggu D2/D3/D5 + loader (butuh `usage_approved` sah) | `test_nba_serving.py` |
+| UAT-01 | Hasil valid | Terhalang: feed consent, komplain, kelayakan, produk belum tersambung (dry run 26 Nov) | `test_nba_serving.py` |
 | UAT-02 | Belum ada skor (keadaan 1) | Ya, setelah UI memakai `score_state` | `test_score_states.py` |
-| UAT-03 | Run `pending_review` (keadaan 2) | Ya (impor Moses menghasilkan status ini) | `test_score_states.py` |
+| UAT-03 | Run `pending_review` (keadaan 2) | Ya (loader kini mengirim `contract_status`; UI belum membedakan kontrak belum lengkap, lihat `UI_SCORE_STATES_SPEC.md` §8) | `test_score_states.py` |
 | UAT-04 | Run `rejected` (keadaan 2) | Ya, bila ada run yang ditolak | `test_score_states.py` |
 | UAT-05 | Review oleh pengunggah / pembuat model | Ya | `test_nba_serving.py` |
 | UAT-06 | Sudah direview tetapi belum ada izin pakai | Ya (`usage_approved` memang belum ada) | `test_score_states.py`, `test_nba_serving.py` |
@@ -73,8 +75,8 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 - **Hasil aktual:** BELUM DIJALANKAN
 
 ### UAT-05 · Review oleh pengunggah atau pembuat model
-- **Prasyarat:** run `reviewed` dengan `reviewed_by` = `submitted_by` (atau = `model_author` bila diketahui).
-- **Hasil yang diharapkan:** skor ditolak, alasan `MODEL_RUN_REVIEWED_BY_SUBMITTER`, teks "reviewer harus berbeda dari pengirim model"; tidak ada angka; `NO_ACTION`.
+- **Prasyarat:** pengunggah mencoba mereview run sendiri; admin memberi izin pakai dengan pembuat model = reviewer.
+- **Hasil yang diharapkan:** review oleh pengunggah ditolak API (409 "A different reviewer must inspect this run"); izin pakai ditolak (409) bila reviewer = pembuat model; skor tetap tidak dipakai (`MODEL_USAGE_NOT_APPROVED`). Kode `MODEL_RUN_REVIEWED_BY_SUBMITTER` di gerbang skor hanya pertahanan berlapis bila data DB rusak; tidak muncul lewat alur API normal.
 - **Hasil aktual:** BELUM DIJALANKAN
 
 ### UAT-06 · Sudah direview, belum ada izin pakai (keadaan 2)
@@ -99,7 +101,7 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 
 ### UAT-10 · `NO_ACTION` karena kebijakan (skor tinggi tidak melangkahi aturan)
 - **Prasyarat:** pelanggan dengan skor siap dan risiko tinggi, dalam tiga kondisi: (a) global opt-out; (b) sudah menerima 2 pesan komersial dalam 14 hari; (c) komplain berat terbuka.
-- **Hasil yang diharapkan:** (a) `NO_ACTION`, alasan `OPT_OUT_SUPPRESSED` (juga mengalahkan `COMPLAINT_RESOLUTION`). (b) `NO_ACTION`, alasan menyebut batas 2 pesan / 14 hari (`FREQ_CAP_SUPPRESSED`); `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` tidak dihitung. (c) `COMPLAINT_RESOLUTION`, tidak ada promosi (`EXCL_OPEN_SEVERE_COMPLAINT`). Untuk segmen CHURNED/REACTIVATED/NEVER_TRANSACTED: perilaku sesuai jawaban P2 (saat ini Opsi A: RM_CONTACT/RENEWAL_REMINDER/COMPLAINT_RESOLUTION lintas segmen tetap berlaku).
+- **Hasil yang diharapkan:** (a) `NO_ACTION`, alasan `OPT_OUT_SUPPRESSED` (juga mengalahkan `COMPLAINT_RESOLUTION`). (b) `NO_ACTION`, alasan menyebut batas 2 pesan / 14 hari (`FREQ_CAP_SUPPRESSED`); `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` tidak dihitung. (c) `COMPLAINT_RESOLUTION`, tidak ada promosi (`EXCL_OPEN_SEVERE_COMPLAINT`). Untuk segmen CHURNED/REACTIVATED/NEVER_TRANSACTED: **P2 Opsi A (final, sisi Christ)**: RM_CONTACT/RENEWAL_REMINDER/COMPLAINT_RESOLUTION lintas segmen tetap berlaku.
 - **Hasil aktual:** BELUM DIJALANKAN
 
 ### UAT-11 · Worker gagal / retry impor skor
@@ -126,11 +128,12 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 ## Penandatangan dan keputusan yang masih terbuka
 - **Penandatangan UAT:** [ISI] (D7, diputuskan di meeting). Penguji bukan pembuat kode.
 - **Arti "campaign jalan beneran":** usulan Christ = simulator ber-label cukup untuk demo MVP, tanpa pengiriman nyata; butuh konfirmasi mentor (D7).
-- **Skenario yang bergantung keputusan:** UAT-01 (D2/D3/D5), UAT-08 (D4), UAT-10 untuk segmen CHURNED/REACTIVATED/NEVER_TRANSACTED (P2).
+- **Skenario yang bergantung keputusan:** UAT-01 (penunjukan reviewer/pemberi izin nyata, D2), UAT-08 (D4 di lingkungan bersama), UAT-10 dan UAT-13 (feed consent/komplain/kelayakan tersambung).
 
 ## Bukti pra-UAT otomatis (bukan pengganti UAT)
 ```
 python -m pytest tests/decision -q
+PYTHONPATH=. python docs/christ_business/demo/uat_dry_run.py   # dry run API/worker di sandbox, menulis UAT_HASIL_DRY_RUN.md
 PYTHONPATH=. python docs/christ_business/demo/run_demo.py   # data sintetis, berlabel
 ```
 Perilaku inti tiap skenario sudah dijaga test pada level fungsi (kolom "Dijaga test otomatis"). UAT-13 dan UAT-14 baru bisa diuji setelah `api/` dan `worker/` menyimpan hasilnya.
