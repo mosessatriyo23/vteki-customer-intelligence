@@ -53,7 +53,7 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 ### UAT-01 · Hasil valid
 - **Prasyarat:** run model `reviewed` oleh orang berbeda dari pengunggah dan pembuat model; izin pakai sah; skor lengkap (churn, band, propensity, CLV, tier, lifecycle); consent, komplain, riwayat kontak, kelayakan, produk tersambung; skor ≤ 30 hari dari cutoff.
 - **Langkah:** evaluasi satu pelanggan melalui `POST /decisions/next-best-actions/evaluate`.
-- **Hasil yang diharapkan:** `score_state = SCORE_READY`, `serving_ready = true`; aksi sesuai matriks `target_definitions.md` §3.1 untuk segmen itu; `expected_value` berupa angka dari sistem (Rp format titik); `reason` kalimat Indonesia sederhana; `model_version` tercatat; baris `dec.nba_decisions` dan `gov.decision_traces` tersimpan.
+- **Hasil yang diharapkan:** `score_state = SCORE_READY`, `serving_ready = true`; aksi sesuai matriks `target_definitions.md` §3.1 untuk segmen itu; `expected_value` berupa angka dari sistem (Rp format titik); `reason` kalimat Indonesia sederhana; `model_version` tercatat; baris `dec.nba_decisions` dan `gov.decision_traces` tersimpan. `context_factors` hanya berisi faktor yang benar-benar berlaku (kosong bila feed kelayakan/komplain belum tersambung).
 - **Hasil aktual:** BELUM DIJALANKAN
 
 ### UAT-02 · Belum ada skor (keadaan 1)
@@ -101,7 +101,7 @@ UAT dijalankan **setelah** gate izin pakai, loader skor, dan UI tersambung (urut
 
 ### UAT-10 · `NO_ACTION` karena kebijakan (skor tinggi tidak melangkahi aturan)
 - **Prasyarat:** pelanggan dengan skor siap dan risiko tinggi, dalam tiga kondisi: (a) global opt-out; (b) sudah menerima 2 pesan komersial dalam 14 hari; (c) komplain berat terbuka.
-- **Hasil yang diharapkan:** (a) `NO_ACTION`, alasan `OPT_OUT_SUPPRESSED` (juga mengalahkan `COMPLAINT_RESOLUTION`). (b) `NO_ACTION`, alasan menyebut batas 2 pesan / 14 hari (`FREQ_CAP_SUPPRESSED`); `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` tidak dihitung. (c) `COMPLAINT_RESOLUTION`, tidak ada promosi (`EXCL_OPEN_SEVERE_COMPLAINT`). Untuk segmen CHURNED/REACTIVATED/NEVER_TRANSACTED: **P2 Opsi A (final, sisi Christ)**: RM_CONTACT/RENEWAL_REMINDER/COMPLAINT_RESOLUTION lintas segmen tetap berlaku.
+- **Hasil yang diharapkan:** (a) `NO_ACTION`, alasan `OPT_OUT_SUPPRESSED` (juga mengalahkan `COMPLAINT_RESOLUTION`). (b) `NO_ACTION`, alasan menyebut batas 2 pesan / 14 hari (`FREQ_CAP_SUPPRESSED`); `COMPLAINT_RESOLUTION` dan `SERVICE_REMINDER` tidak dihitung. (c) `COMPLAINT_RESOLUTION`, tidak ada promosi (`EXCL_OPEN_SEVERE_COMPLAINT`), dan `context_factors` memuat `UNRESOLVED_COMPLAINT`. Untuk segmen CHURNED/REACTIVATED/NEVER_TRANSACTED: **P2 Opsi A (final, sisi Christ)**: RM_CONTACT/RENEWAL_REMINDER/COMPLAINT_RESOLUTION lintas segmen tetap berlaku.
 - **Hasil aktual:** BELUM DIJALANKAN
 
 ### UAT-11 · Worker gagal / retry impor skor

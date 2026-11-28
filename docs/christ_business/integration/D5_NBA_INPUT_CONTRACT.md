@@ -56,6 +56,7 @@ apa pun, karena semua aksi juga butuh `clv_amount`, dan sebagian butuh `clv_tier
   `MODEL_RUN_REVIEWED_BY_SUBMITTER`, `MODEL_USAGE_NOT_APPROVED`, `SCORE_FIELDS_INCOMPLETE`,
   `SCORE_VALUES_INVALID`, dan, sejak 26 Nov 2026, `SCORE_CONTRACT_NOT_SERVING` (baris ada tetapi kontrak producer `SCHEMA_PARTIAL`/`INVALID_SCORE`), `SCORE_EXPIRED` (lebih dari 30 hari sejak cutoff; `serving_ready=false`), dan `SCORE_CUSTOMER_MISMATCH` (skor milik ID lain). Setiap alasan dipetakan ke tiga keadaan tampilan `SCORE_MISSING` / `SCORE_PRESENT_NOT_APPROVED` / `SCORE_READY` (`UI_SCORE_STATES_SPEC.md`).
 - Alasan churn kurang dari 3 **bukan** alasan menolak skor (P7, final dari sisi Christ; taxonomy: `approved/reason_taxonomy.md`).
+- Respons dan `rationale` memuat `context_factors` (faktor konteks bisnis: `MEMBERSHIP_EXPIRING`, `UNRESOLVED_COMPLAINT`), dihitung dari sumber yang tersambung dan **tidak memengaruhi aksi**; sumber `None` tidak menghasilkan faktor.
 - **"Mode terbatas per aksi"** (mis. tetap jalankan RETENTION walau propensity kosong) secara teknis
   mungkin, tetapi `AIScores` saat ini mewajibkan semua field float sehingga butuh perubahan engine
   (field opsional + tabel syarat per aksi di §2). **Usulan: tunda ke tahap 2**, setelah CLV dan

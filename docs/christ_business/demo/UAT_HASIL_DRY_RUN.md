@@ -1,6 +1,6 @@
 # Hasil uji coba UAT (dry run) — sandbox lokal
 
-**Dijalankan:** 2026-11-27 06:30 oleh `uat_dry_run.py` (dapat diulang).
+**Dijalankan:** 2026-11-28 17:23 oleh `uat_dry_run.py` (dapat diulang).
 **Data:** SINTETIS (fixture uji), bukan data atau model riil. Tidak ada model riil yang direview atau diberi izin pakai.
 
 > **Ini BUKAN UAT resmi.** Dijalankan di DB sqlite memori, lewat API/worker, tanpa UI, tanpa lingkungan bersama, dan tanpa penguji independen. Gunakan sebagai pemeriksaan awal; UAT resmi tetap harus dijalankan dan dicatat di `UAT_PLAN.md` setelah alur impor→review→izin→NBA→simulator→audit berjalan di lingkungan bersama.
@@ -34,6 +34,7 @@ Level: API sandbox + service murni
 - ✅ skor: SCORE_READY (alur impor→review→izin sah)
 - ✅ service murni (sumber sintetis lengkap): serving_ready=true
 - ✅ service murni: aksi dipilih dan EV berupa angka dari sistem
+- ✅ service murni: context_factors kosong (membership 20 hari, tanpa keluhan): hanya faktor yang benar-benar berlaku
 - Catatan: API: score_state=SCORE_READY, serving_ready=False, selected_action=NO_ACTION, expected_value=None, unavailable_sources=['consent', 'complaint_history', 'eligibility', 'product_suitability']
 - Catatan: service murni: aksi=RETENTION_OUTREACH, EV=2158000.0 (SINTETIS (fixture uji), bukan data atau model riil)
 - ⛔ TERHALANG: Keputusan valid belum bisa dihasilkan lewat API: sumber ['consent', 'complaint_history', 'eligibility', 'product_suitability'] belum tersambung (loader mengirim None). Hasil diharapkan (serving_ready=true, aksi + EV angka) tidak tercapai.
@@ -130,6 +131,8 @@ Level: service murni (sumber sintetis); API terhalang
 - ✅ (a) global opt-out → NO_ACTION / OPT_OUT_SUPPRESSED
 - ✅ (b) 2 pesan komersial dalam 14 hari → NO_ACTION
 - ✅ (c) komplain berat terbuka → COMPLAINT_RESOLUTION
+- ✅ (c) context_factors memuat UNRESOLVED_COMPLAINT (bertanda BUSINESS_RULE)
+- ✅ (a) tanpa keluhan dan membership 20 hari: context_factors kosong
 - Catatan: (b) alasan = FREQ_CAP_SUPPRESSED
 - Catatan: data: SINTETIS (fixture uji), bukan data atau model riil
 - ⛔ TERHALANG: Lewat API/UI: consent, komplain, dan kelayakan belum tersambung sehingga skenario kebijakan tidak dapat dipicu dengan data nyata. Diuji di level service dengan sumber sintetis berlabel.
@@ -143,7 +146,7 @@ Level: API sandbox + test worker Moses
 - ✅ artefak yang isinya berubah (checksum tidak cocok) ditolak (400)
 - ✅ hanya 1 run tersimpan setelah retry + artefak rusak (tidak ada hasil parsial)
 - ✅ validasi folder worker: ground_truth, path keluar root, dan folder tak ada ditolak; folder sah diterima
-- ✅ test worker impor milik Moses: 21 passed, 1 warning in 24.19s
+- ✅ test worker impor milik Moses: 21 passed, 1 warning in 21.85s
 - Catatan: detail impor ulang: This Moses manifest is already imported as run 1
 - Catatan: validasi folder worker: {'ground_truth_dev': 'ditolak (artifact_dir is not an allowed directory name)', '../etc': 'ditolak (artifact_dir is not an allowed directory name)', 'tidak_ada': 'ditolak (artifact_dir does not resolve to an allowed folder)', 'churn_ok_20261126': 'DITERIMA'}
 - ⏸ Tidak diperiksa di sandbox: Retry di LINGKUNGAN BERSAMA (PREDICTION_IMPORT_ROOT nyata, PostgreSQL) belum diuji.
@@ -165,7 +168,7 @@ Level: API sandbox + worker + test service
 - ✅ kampanye yang disetujui manusia dapat di-launch (200)
 - ✅ tanpa pengiriman eksternal (simulator)
 - ✅ paparan kelompok holdout = 0 (belum bermakna: tidak ada pelanggan yang ditarget)
-- ✅ test pipeline campaign + pengukuran (service murni): 47 passed in 1.86s
+- ✅ test pipeline campaign + pengukuran (service murni): 47 passed in 1.71s
 - Catatan: hasil job worker: targetable_count=0, sent_count=0, skipped_count=2, control_exposure_count=0, external_delivery=False, identity_mapping_skipped_count=1
 - ⛔ TERHALANG: Tidak ada pelanggan yang layak ditarget (targetable = 0) karena consent/komplain/kelayakan belum tersambung: 'campaign berjalan beneran' belum tercapai; tidak ada pesan simulasi terkirim.
 - ⏸ Tidak diperiksa di sandbox: Pengukuran setelah hasil konversi nyata (Observed vs Incremental di UI) belum bisa diuji: belum ada hasil.

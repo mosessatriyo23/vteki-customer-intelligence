@@ -186,3 +186,18 @@ Catatan untuk Marvin:
 2. Skor, band, CLV, dan EV tetap `Kosong` pada keadaan 1 dan 2; `expected_value == null` berarti Kosong, bukan Rp 0.
 3. Tangkapan layar nyata tiap keadaan (§7) tetap dibutuhkan untuk UAT; skrip ini hanya menguji teks, bukan tampilan.
 4. Baris keputusan lama yang tersimpan sebelum perbaikan serving bisa masih `serving_ready = true` untuk skor yang kini dianggap kedaluwarsa; evaluasi ulang menghasilkan nilai yang benar.
+
+## 9. Faktor konteks (alasan churn tambahan) di UI
+
+Respons evaluate dan `rationale` kini memuat `context_factors`: daftar `{code, text, source}` (`source` selalu `BUSINESS_RULE`). Ini **bukan kontribusi model**.
+
+| Aturan tampilan | Isi |
+|---|---|
+| Judul daftar | **Faktor konteks (aturan bisnis, bukan hasil model)**, terpisah dari alasan model |
+| Teks | Tampilkan `text` apa adanya; jangan menulis ulang |
+| Kosong | Bila `context_factors` kosong, **jangan menampilkan apa pun** (jangan "tidak ada faktor"; kosong berarti tidak ada atau sumber belum tersambung) |
+| Keadaan skor | Faktor konteks tidak bergantung pada skor: tetap tampil pada keadaan 1, 2, dan 3 karena itu fakta tentang pelanggan |
+| Jumlah | Bila gabungan alasan model + faktor konteks < 3, tampilkan apa adanya (tanpa alasan palsu) dan teks "Hanya {n} alasan yang dapat dijelaskan dari data yang tersedia." |
+| Hari ini | Daftar masih kosong karena feed kelayakan dan komplain belum tersambung (`unavailable_sources`); itu benar, bukan bug |
+
+Kode yang mungkin muncul: `MEMBERSHIP_EXPIRING` ("Masa keanggotaan akan berakhir dalam 15 hari atau kurang.") dan `UNRESOLVED_COMPLAINT` ("Ada keluhan pelanggan yang belum selesai ditangani."). `NO_CROSS_CATEGORY` tidak pernah muncul.
