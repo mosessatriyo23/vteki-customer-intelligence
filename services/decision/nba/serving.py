@@ -30,6 +30,10 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+from services.decision.nba.context_factors import (
+    ContextFactor,
+    compute_context_factors,
+)
 from services.decision.nba.engine import (
     ENGINE_VERSION,
     AIScores,
@@ -328,6 +332,8 @@ class DecisionOutput:
     unavailable_sources: tuple[str, ...] = ()
     evaluated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     score_explanation: Optional[Mapping[str, Any]] = None
+    # Faktor konteks bisnis (aturan deterministik, BUKAN kontribusi model). Tidak memengaruhi aksi.
+    context_factors: tuple[ContextFactor, ...] = ()
 
     @property
     def selected_action_id(self) -> str:
@@ -372,6 +378,7 @@ class DecisionOutput:
             "score_unavailable_reason": self.score_lookup.unavailable_reason,
             "score_state": self.score_lookup.state,
             "score_missing_fields": list(self.score_lookup.missing_fields),
+            "context_factors": [factor.as_dict() for factor in self.context_factors],
             # Angka EV hanya ditulis bila skor nyata dipakai; selain itu null (kosong).
             "expected_value": (
                 record.expected_value
@@ -463,6 +470,7 @@ class DecisionOutput:
             # Status review run model apa adanya (pending_review / rejected / reviewed / None):
             # kode alasan MODEL_RUN_NOT_REVIEWED sama untuk "menunggu" dan "ditolak".
             "model_review_status": payload["model_review_status"],
+            "context_factors": payload["context_factors"],
         }
 
 
@@ -515,6 +523,13 @@ def evaluate_customer(
         # perilaku keputusan tidak berubah; yang berubah hanya label: bukan "siap dipakai".
         lookup = replace(lookup, unavailable_reason=SCORE_EXPIRED)
 
+    # Fakta konteks dihitung dari sumber yang tersambung (None -> dilewati); tidak memengaruhi aksi.
+    factors = compute_context_factors(
+        customer_ref=customer_ref,
+        eligibility=eligibility,
+        complaint_tickets=complaint_tickets,
+    )
+
     unavailable = tuple(
         name
         for name, value in (
@@ -535,6 +550,7 @@ def evaluate_customer(
             score_lookup=lookup,
             unavailable_sources=unavailable,
             evaluated_at=when,
+            context_factors=factors,
         )
 
     assert consent_doc is not None  # dipersempit oleh pemeriksaan di atas
@@ -567,4 +583,5 @@ def evaluate_customer(
         score_lookup=lookup,
         evaluated_at=when,
         score_explanation=score_explanation,
+        context_factors=factors,
     )

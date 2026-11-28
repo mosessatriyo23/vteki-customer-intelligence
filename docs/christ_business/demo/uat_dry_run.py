@@ -375,6 +375,11 @@ def uat_01() -> Scenario:
         and isinstance(resp2["expected_value"], float),
         "service murni: aksi dipilih dan EV berupa angka dari sistem",
     )
+    s.check(
+        resp2["context_factors"] == [],
+        "service murni: context_factors kosong (membership 20 hari, tanpa keluhan): "
+        "hanya faktor yang benar-benar berlaku",
+    )
     s.note(
         f"service murni: aksi={resp2['selected_action']}, EV={resp2['expected_value']} ({DATA_LABEL})"
     )
@@ -745,6 +750,14 @@ def uat_10() -> Scenario:
     s.check(
         complaint["selected_action"] == "COMPLAINT_RESOLUTION",
         "(c) komplain berat terbuka → COMPLAINT_RESOLUTION",
+    )
+    s.check(
+        [f["code"] for f in complaint["context_factors"]] == ["UNRESOLVED_COMPLAINT"],
+        "(c) context_factors memuat UNRESOLVED_COMPLAINT (bertanda BUSINESS_RULE)",
+    )
+    s.check(
+        optout["context_factors"] == [],
+        "(a) tanpa keluhan dan membership 20 hari: context_factors kosong",
     )
     s.note(f"data: {DATA_LABEL}")
     return s

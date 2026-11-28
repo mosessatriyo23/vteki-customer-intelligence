@@ -1,6 +1,6 @@
 # Jawaban Christ untuk issue #70 (P1–P8 dan status D1–D7)
 
-**Tanggal:** 26 November 2026 (diperbarui 26 November 2026, setelah pesan Moses "sisa pekerjaan sebelum pengumpulan")
+**Tanggal:** 26 November 2026 (diperbarui 28 November 2026: P6 dikoreksi agar sesuai kode, P7 ditambah faktor konteks)
 **Menjawab:** `docs/moses_data_ai/CHRIST_V14_RECONCILIATION_MESSAGE_2026-11-20.md` (P1–P8) dan update Moses 26 Nov (to-do Christ #1)
 **Status per poin diperbarui (lihat tabel di bawah).** P2, P6, P7, dan P8 **final dari sisi Christ** (ditetapkan 26 Nov atas instruksi Christ, mengikuti keputusan percepatan Moses di #70/#71). P1, P3, P4, P5 tetap **USULAN** sampai Christ menyatakan final. **Tidak ada persetujuan mentor atas satu pun poin**; poin yang menyimpang dari Requirement/FRD ditandai ⚠️. Tidak ada angka bisnis yang dikarang.
 
@@ -19,11 +19,11 @@ Moses menutup #70 dan meminta pernyataan per poin agar penutupan issue tidak dis
 | P3 REACTIVATED | USULAN | Butuh konfirmasi "cool-off tidak di-reset" dan coverage as-of dari James |
 | P4 ACTIVE / membership | USULAN | Butuh James (penanda kelengkapan feed) dan revisi §3.2.G.1 |
 | P5 retensi 365 hari | USULAN | Teknik pooling milik Moses; semantik di bawah |
-| P6 pembulatan IDR | **FINAL: half-up `Decimal`** | `target_definitions.md` §2.4; Moses menambah boundary test |
-| P7 reason codes | **FINAL: kurang dari 3 tetap tampil tanpa alasan palsu**, ⚠️ menunggu mentor | Taxonomy dan teks di `reason_taxonomy.md`; menyimpang dari FRD "minimal 3" |
+| P6 pembulatan IDR | **FINAL (direvisi 28 Nov): tier dari nilai tepat; half-up `Decimal` hanya untuk simpan/tampil** | `target_definitions.md` §2.4; selaras kode `business_clv.py` (tanpa perubahan kode); Moses menambah boundary test |
+| P7 reason codes | **FINAL (direvisi 28 Nov): ditambah 2 faktor konteks; bila tetap < 3 tetap tampil tanpa alasan palsu**, ⚠️ menunggu mentor | `reason_taxonomy.md` §3, §7; implementasi `context_factors.py`; menyimpang dari FRD "minimal 3" |
 | P8 RFM | **FINAL: di luar MVP** | `target_definitions.md` §3.3 |
 
-Teks yang disarankan untuk issue #70: "Status per poin: P2 final (Opsi A), P6 final (half-up Decimal), P7 final dari sisi Christ (alasan < 3 tetap tampil tanpa alasan palsu; **menunggu penerimaan mentor** karena menyimpang dari FRD), P8 final (RFM di luar MVP). P1/P3/P4/P5 masih usulan. Tidak ada poin yang disetujui mentor. Dokumen: `docs/christ_business/integration/JAWABAN_P1_P8_ISSUE70_CHRIST.md`, `docs/christ_business/approved/reason_taxonomy.md`, `target_definitions.md` v1.5 (draf)."
+Teks yang disarankan untuk issue #70: "Status per poin: P2 final (Opsi A), P6 final (tier dari nilai tepat sesuai kode; half-up Decimal hanya untuk simpan/tampil), P7 final dari sisi Christ (ditambah faktor konteks MEMBERSHIP_EXPIRING dan UNRESOLVED_COMPLAINT; bila tetap < 3 tampil apa adanya tanpa alasan palsu; **menunggu penerimaan mentor** karena menyimpang dari FRD), P8 final (RFM di luar MVP). P1/P3/P4/P5 masih usulan. Tidak ada poin yang disetujui mentor. Dokumen: `docs/christ_business/integration/JAWABAN_P1_P8_ISSUE70_CHRIST.md`, `docs/christ_business/approved/reason_taxonomy.md`, `target_definitions.md` v1.5 (draf)."
 
 ---
 
@@ -106,23 +106,30 @@ Moses dapat menulis boundary tests dari tabel ini setelah Christ menyatakan "fin
 - **Ambang ≥ 30:** diukur pada **pelanggan unik** dengan outcome lengkap per segmen. Bila beberapa cutoff dipooling, cutoff harus berjarak ≥ 365 hari agar jendela outcome tidak tumpang tindih; satu pelanggan dihitung sekali untuk ambang. Sel < 30 → "tidak cukup data", **CLV = null** (tanpa default, tanpa `1−churn_score`, tanpa 0,7, tanpa diagnostik 90 hari).
 - **PENDING:** teknik pooling/varians diserahkan ke Moses; yang diminta hanya laporan versi, tanggal, denominator, dan coverage.
 
-### P6 — pembulatan IDR — **FINAL: half-up dengan `Decimal`** (contoh yang diminta tidak membedakan aturan)
-- **Aturan:** **half-up** ke rupiah terdekat (x,5 naik) dengan aritmetika `Decimal` (`ROUND_HALF_UP`), bukan `round()` bawaan Python yang half-even pada float. Pembulatan hanya di **akhir**; **tier ditentukan setelah pembulatan**; aturan minimal 2 transaksi tetap.
-- **Catatan penting:** tiga contoh yang diminta (`199999,5`, `499999,5`, `999999,5`) menghasilkan nilai sama di half-up dan half-even (200.000 / 500.000 / 1.000.000, karena tetangga atasnya genap), jadi tidak membedakan aturan dan tier tidak pernah berbeda di batas tier. Aturan baru berpengaruh pada nilai tersimpan. Contoh pembeda yang disarankan:
+### P6 — pembulatan IDR — **FINAL (direvisi 28 Nov): tier dari nilai tepat; half-up `Decimal` hanya untuk simpan/tampil**
 
-| Nilai sebelum pembulatan | Half-up | Half-even | Tier (≥ 2 transaksi) |
-|---|---|---|---|
-| 199.999,5 | 200.000 | 200.000 | `SILVER` |
-| 199.999,4 | 199.999 | 199.999 | `INSUFFICIENT_HISTORY` |
-| 200.000,5 | 200.001 | 200.000 | `SILVER` |
-| 499.999,5 | 500.000 | 500.000 | `GOLD` |
-| 999.999,5 | 1.000.000 | 1.000.000 | `PLATINUM` |
-| 1.000.000,5 | 1.000.001 | 1.000.000 | `PLATINUM` |
+**Koreksi:** jawaban 26 Nov ("bulatkan dulu, lalu tentukan tier") **tidak sesuai kode**. `services/data/models/business_clv.py` tidak membulatkan sama sekali; tier ditentukan dari nilai yang belum dibulatkan dengan `>=` ke 200.000 / 500.000 / 1.000.000 (diverifikasi: 199.999,5 → `INSUFFICIENT_HISTORY`, 499.999,5 → `SILVER`, 999.999,5 → `GOLD`).
+
+- **Aturan:** (1) tier dari nilai CLV **tepat** (aturan minimal 2 transaksi tetap); (2) pembulatan **hanya untuk simpan/tampil**: half-up ke rupiah utuh dengan `Decimal(str(nilai))` dan `ROUND_HALF_UP`, paling akhir, **tidak dipakai ulang untuk keputusan**.
+- **Mengapa:** tidak ada kenaikan tier karena selisih setengah rupiah; CLV memuat proyeksi (retention = probabilitas) sehingga presisi sampai rupiah tidak bermakna; **tidak perlu mengubah kode Moses**.
+- **Konsekuensi yang diterima:** nilai tampil 200.000 bisa berstatus `INSUFFICIENT_HISTORY` bila nilai tepat 199.999,5; tampilan harus menyebut "dibulatkan untuk tampilan".
+
+| Nilai tepat | Tampil (half-up) | Tier (≥ 2 transaksi) |
+|---|---|---|
+| 199.999,4 | 199.999 | `INSUFFICIENT_HISTORY` |
+| 199.999,5 | 200.000 | `INSUFFICIENT_HISTORY` |
+| 200.000,0 | 200.000 | `SILVER` |
+| 499.999,5 | 500.000 | `SILVER` |
+| 999.999,5 | 1.000.000 | `GOLD` |
+| 1.000.000,0 | 1.000.000 | `PLATINUM` |
+
+Untuk Moses: boundary test cukup memastikan kode yang ada tetap menghasilkan kolom "Tier" di atas dan fungsi tampil mengikuti kolom "Tampil". EV tetap `round(ev, 2)` seperti sekarang (bukan bagian keputusan ini).
 
 ### P7 — reason codes dan versi — **FINAL dari sisi Christ** ⚠️ (penyimpangan "minimal 3" menunggu mentor)
 - **Satu konsep = satu alasan:** tiga jendela waktu dari konsep yang sama (frekuensi 365/90/60 hari) dihitung **satu** alasan (`FREQUENCY_DROP`). "Tiga alasan bisnis berbeda" berarti tiga konsep berbeda dari taxonomy v1.4 §1.3: `RECENCY_LONG`, `SPEND_DECLINE`, `FREQUENCY_DROP`, `MEMBERSHIP_EXPIRING`, `UNRESOLVED_COMPLAINT`, `NO_CROSS_CATEGORY`.
-- **Bila dukungan faithful < 3 konsep:** tampilkan yang ada (1 atau 2), **jangan tambah alasan palsu**, dan tandai bahwa alasan di bawah minimum FRD. NBA **tidak menolak skor** karena ini (D5): reason code tidak dipakai logika. ⚠️ Ini menyimpang dari FRD "wajib minimal 3"; butuh penerimaan mentor tertulis.
-- **Taxonomy dan teks (final dari sisi Christ):** `docs/christ_business/approved/reason_taxonomy.md`: empat konsep aktif (`RECENCY`, `FREQUENCY`, `SPEND`, `TENURE`), tiga konsep v1.4 tidak aktif karena tidak ada fitur, penggabungan konsep dengan menjumlahkan kontribusi log-odds, teks netral per arah. Penggabungan belum diimplementasi di producer (pekerjaan Moses).
+- **Alasan tambahan (28 Nov):** dua faktor konteks bisnis, `MEMBERSHIP_EXPIRING` (sisa membership ≤ 15 hari, jendela sama dengan `RENEWAL_REMINDER`) dan `UNRESOLVED_COMPLAINT` (tiket keluhan belum selesai), dihitung dari data yang sudah menjadi masukan engine, **bukan kontribusi model** dan selalu ditandai sumbernya. `NO_CROSS_CATEGORY` tetap tidak aktif (tidak ada data kepemilikan kategori). Diimplementasikan di `services/decision/nba/context_factors.py` (26 test). Hari ini daftar ini kosong sampai feed kelayakan dan komplain tersambung.
+- **Bila dukungan faithful < 3 (setelah ditambah faktor konteks):** tampilkan yang ada, **jangan tambah alasan palsu**, dan tandai bahwa alasan di bawah minimum FRD. NBA **tidak menolak skor** karena ini (D5): reason code tidak dipakai logika. ⚠️ Ini menyimpang dari FRD "wajib minimal 3"; butuh penerimaan mentor tertulis.
+- **Taxonomy dan teks (final dari sisi Christ):** `docs/christ_business/approved/reason_taxonomy.md`: empat alasan model (`RECENCY`, `FREQUENCY`, `SPEND`, `TENURE`) + dua faktor konteks bisnis (`MEMBERSHIP_EXPIRING`, `UNRESOLVED_COMPLAINT`); hanya `NO_CROSS_CATEGORY` tidak aktif karena tidak ada data; penggabungan konsep model dengan menjumlahkan kontribusi log-odds; teks netral per arah. Penggabungan konsep model belum diimplementasi di producer (pekerjaan Moses); faktor konteks sudah di engine Christ.
 - **Versi terpisah (usulan penamaan):** `reason_taxonomy_version`, `label_version`, `lifecycle_rule_version`, `revenue_definition_version` (dan `target_definitions` v1.x sebagai dokumen payung). Setiap perubahan semantik menaikkan versi terkait; tidak ada penimpaan diam-diam. Hubungan dengan kontrak dan approval: kontrak mengutip versi-versi itu; persetujuan (D2) melekat pada kombinasi versi model + versi definisi.
 
 ### P8 — RFM — **FINAL: di luar MVP**
